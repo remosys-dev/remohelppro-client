@@ -9,6 +9,11 @@ on:
     tags:
       - 'android-build-*'
 
+# Release 公開ステップ（softprops/action-gh-release）が private repo で
+# GITHUB_TOKEN の権限不足(403)にならないよう、呼び出し元で書き込み権限を付与。
+permissions:
+  contents: write
+
 jobs:
   android:
     uses: ./.github/workflows/flutter-build.yml
