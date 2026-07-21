@@ -1,0 +1,56 @@
+<!--
+REMOHELP PRO インストーラ 日本語ローカライズ（英語版 Package.en-us.wxl の対訳）。
+-->
+<WixLocalization Culture="ja-jp" Codepage="932"
+	xmlns="http://wixtoolset.org/schemas/v4/wxl">
+
+	<String Id="SummaryCodepage" Value="932" />
+	<String Id="ProductLanguage" Value="1041" />
+
+	<!-- General strings -->
+	<String Id="DowngradeError" Value="より新しいバージョンの [ProductName] が既にインストールされています。" />
+
+	<String Id="AR_Comment" Value="REMOHELP PRO" />
+
+	<String Id="F_App" Value="REMOHELP PRO" />
+	<String Id="F_App_Desc" Value="REMOHELP PRO - 本体プログラムのインストール。" />
+
+	<String Id="SC_Uninstall" Value="REMOHELP PRO のアンインストール" />
+	<String Id="SC_Uninstall_Desc" Value="REMOHELP PRO またはその一部をコンピューターから削除します" />
+
+	<!-- Client related strings -->
+	<String Id="F_Client" Value="クライアント" />
+	<String Id="F_Client_Desc" Value="ユーザーインターフェイス。" />
+	<String Id="F_Client_Plugins" Value="プラグイン" />
+	<String Id="F_Client_Plugins_Desc" Value="クライアント用のプラグイン。" />
+	<String Id="F_LAVFilters" Value="LAV Filters" />
+	<String Id="F_LAVFilters_Desc" Value="音声・映像の再生に推奨される DirectShow フィルターです。" />
+
+	<String Id="SC_Client" Value="REMOHELP PRO" />
+	<String Id="SC_Client_Desc" Value="REMOHELP PRO を起動します。" />
+
+	<String Id="SC_Client_Tray" Value="REMOHELP PRO トレイ" />
+	<String Id="SC_Client_Tray_Desc" Value="REMOHELP PRO のトレイを起動します。" />
+
+	<!-- Server related strings -->
+	<String Id="F_Server" Value="サーバー" />
+	<String Id="F_Server_Desc" Value="REMOHELP PRO のサーバー部分。各種サービスを提供します。" />
+	<String Id="F_Server_Plugins" Value="プラグイン" />
+	<String Id="F_Server_Plugins_Desc" Value="サーバー用のプラグイン。" />
+
+	<String Id="Service_DisplayName" Value="REMOHELP PRO サービス" />
+	<String Id="Service_Description" Value="REMOHELP PRO サーバーを実行するサービスです。" />
+
+	<!-- Launch Conditions -->
+	<String Id="LC_OS" Value="[ProductName] の動作には Windows 7 / 2008 R2 以降のOSが必要です。" />
+	<String Id="LC_ADMIN" Value="[ProductName] をインストールするには管理者権限が必要です。" />
+
+	<!-- User Interfaces -->
+	<String Id="AnotherAppDialogTitle" Value="インストールを中止します。"/>
+	<String Id="AnotherAppDialogDescription" Value="このアプリは自己インストール方式で導入されています。先にアンインストールしてください。"/>
+
+	<String Id="MyInstallDirDlgDesktopShortcuts" Value="デスクトップにアイコンを作成する" />
+	<String Id="MyInstallDirDlgStartMenuShortcuts" Value="スタートメニューにショートカットを作成する" />
+	<String Id="MyInstallDirDlgPrinter" Value="REMOHELP PRO プリンターをインストールする" />
+
+</WixLocalization>

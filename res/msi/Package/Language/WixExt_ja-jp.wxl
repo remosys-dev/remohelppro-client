@@ -1,0 +1,21 @@
+<!--
+WiX 拡張（Firewall/Util）メッセージの日本語ローカライズ（WixExt_en-us.wxl の対訳）。
+-->
+<WixLocalization Culture="ja-jp"
+	xmlns="http://wixtoolset.org/schemas/v4/wxl">
+
+	<!-- Firewall Extension -->
+	<String Id="msierrFirewallCannotConnect" Overridable="yes" Value="Windows ファイアウォールに接続できません。([2]   [3]   [4]   [5])" />
+
+	<String Id="WixSchedFirewallExceptionsInstall" Overridable="yes" Value="Windows ファイアウォールを構成しています" />
+	<String Id="WixSchedFirewallExceptionsUninstall" Overridable="yes" Value="Windows ファイアウォールを構成しています" />
+	<String Id="WixRollbackFirewallExceptionsInstall" Overridable="yes" Value="Windows ファイアウォールの構成をロールバックしています" />
+	<String Id="WixExecFirewallExceptionsInstall" Overridable="yes" Value="Windows ファイアウォールの構成をインストールしています" />
+	<String Id="WixRollbackFirewallExceptionsUninstall" Overridable="yes" Value="Windows ファイアウォールの構成をロールバックしています" />
+	<String Id="WixExecFirewallExceptionsUninstall" Overridable="yes" Value="Windows ファイアウォールの構成をアンインストールしています" />
+
+	<!-- Util Extension -->
+	<String Id="msierrSecureObjectsFailedCreateSD" Overridable="yes" Value="セキュリティ記述子 [3]\[4] を作成できませんでした。エラー: [2]" />
+	<String Id="msierrSecureObjectsFailedSet" Overridable="yes" Value="オブジェクトのセキュリティ記述子 [3] を適用できませんでした。エラー: [2]" />
+	<String Id="msierrSecureObjectsUnknownType" Overridable="yes" Value="不明なオブジェクト型 [3]。エラー: [2]" />
+</WixLocalization>

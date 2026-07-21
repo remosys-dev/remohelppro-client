@@ -1,0 +1,19 @@
+name: OneTime Portable (support)
+
+# 2026-06-23: Windows ワンタイム・サポート用ポータブル版を手動ビルドする。
+#   flutter-build.yml を support_show_window=true で呼び出す → 起動で窓+自分のID+一時PWを表示する
+#   remohelppro ポータブル(Windows)を生成。署名は別途(EVトークン保持者)。フリート版には影響しない。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'onetime-build-*'   # このタグを push すると自動ビルド(git/SSHだけで起動可)
+
+jobs:
+  build-onetime-portable:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "onetime-portable"
+      support_show_window: true

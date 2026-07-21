@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- REMOHELP PRO ロゴ案 L1 v3 (Draft, 未採用) -->
+<!-- 角丸 + 接続ドット付き (ネットワーク感の表現) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="brand3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#1e40af"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="58" ry="58" fill="url(#brand3)"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="
+    M 70 56
+    L 70 192
+    L 102 192
+    L 102 144
+    L 134 144
+    L 165 192
+    L 200 192
+    L 162 140
+    Q 188 128 188 96
+    Q 188 56 135 56
+    Z
+    M 102 86
+    L 132 86
+    Q 158 86 158 100
+    Q 158 116 132 116
+    L 102 116
+    Z
+  "/>
+  <!-- 接続ドット (右下に 3 点リーダー風) -->
+  <circle cx="210" cy="220" r="6" fill="#ffffff" fill-opacity="0.9"/>
+  <circle cx="195" cy="220" r="4" fill="#ffffff" fill-opacity="0.6"/>
+  <circle cx="183" cy="220" r="3" fill="#ffffff" fill-opacity="0.4"/>
+</svg>

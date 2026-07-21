@@ -1,0 +1,26 @@
+name: Flutter Tag Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-[0-9]+'
+
+permissions:
+  contents: write   # 2026-05-15: Publish Release が「Too many retries」で失敗していた根本対策。
+                    # fork のデフォルト permissions では Releases への write 不可
+  actions: read
+
+jobs:
+  run-flutter-tag-build:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    permissions:
+      contents: write   # 子 workflow にも明示的に渡す
+      actions: read
+    with:
+      upload-artifact: true
+      upload-tag: ${{ github.ref_name }}

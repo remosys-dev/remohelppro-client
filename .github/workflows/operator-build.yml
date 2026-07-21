@@ -1,0 +1,20 @@
+name: remohelppro Operator (Windows desktop)
+
+# remohelppro 相談員(操作)用の通常デスクトップ版(Windows等)をビルドする。
+#   flutter-build.yml を support_show_window=false（通常＝操作もできるデスクトップ）で呼ぶ。
+#   onetime-portable.yml（被操作サポートポータブル）とは別。署名は別途(EVトークン保持者)。
+#   `operator-build-*` タグを push すると自動ビルド（git/SSHだけで起動可）。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'operator-build-*'
+
+jobs:
+  build-operator-desktop:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "operator"
+      support_show_window: false

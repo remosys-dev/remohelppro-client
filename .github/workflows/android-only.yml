@@ -1,0 +1,19 @@
+name: Android APK (only)
+
+# REMOHELP PRO: Android APK だけをビルドする（分数節約）。
+#   手動実行(workflow_dispatch) か、android-build-* タグ push で起動。
+#   flutter-build.yml を android_only=true で呼び、Windows/iOS/macOS/Linux/appimage/flatpak を skip。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'android-build-*'
+
+jobs:
+  android:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "android"
+      android_only: true
