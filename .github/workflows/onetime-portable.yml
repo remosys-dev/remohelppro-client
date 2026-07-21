@@ -9,6 +9,9 @@ on:
     tags:
       - 'onetime-build-*'   # このタグを push すると自動ビルド(git/SSHだけで起動可)
 
+permissions:
+  contents: write
+
 jobs:
   build-onetime-portable:
     uses: ./.github/workflows/flutter-build.yml
@@ -17,3 +20,4 @@ jobs:
       upload-artifact: true
       upload-tag: "onetime-portable"
       support_show_window: true
+      windows_only: true

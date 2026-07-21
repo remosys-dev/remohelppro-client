@@ -17,6 +17,10 @@ on:
         # REMOHELP PRO: true のとき Android APK だけをビルド（Windows/iOS/macOS/Linux/appimage/flatpak を skip・分数節約）
         type: boolean
         default: false
+      windows_only:
+        # REMOHELP PRO: true のとき Windows だけをビルド（Android/iOS/macOS/Linux/appimage/flatpak を skip・分数節約）
+        type: boolean
+        default: false
 
 # NOTE: F-Droid builder script 'flutter/build_fdroid.sh' reads environment
 # variables from this workflow!
@@ -353,7 +357,7 @@ jobs:
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
-    if: ${{ !inputs.android_only }}
+    if: ${{ !inputs.android_only && !inputs.windows_only }}
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
     # Temporarily disable this action due to additional test is needed.
@@ -504,7 +508,7 @@ jobs:
             ./SignOutput/rustdesk-*.exe
 
   build-rustdesk-ios:
-    if: ${{ inputs.upload-artifact && !inputs.android_only }}
+    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only }}
     name: build rustdesk ios ipa
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
@@ -624,7 +628,7 @@ jobs:
 
 
   build-for-macOS:
-    if: ${{ !inputs.android_only }}
+    if: ${{ !inputs.android_only && !inputs.windows_only }}
     name: ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
@@ -898,6 +902,7 @@ jobs:
           files: remohelppro-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
+    if: ${{ !inputs.windows_only }}
     needs: [generate-bridge]
     name: build rustdesk android apk ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
@@ -1419,7 +1424,7 @@ jobs:
             signed-apk/remohelppro-${{ env.VERSION }}-universal${{ env.suffix }}.apk
 
   build-rustdesk-linux:
-    if: ${{ !inputs.android_only }}
+    if: ${{ !inputs.android_only && !inputs.windows_only }}
     needs: [generate-bridge]
     name: build rustdesk linux ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.on }}
@@ -1757,7 +1762,7 @@ jobs:
             res/remohelppro-${{ env.VERSION }}*.zst
 
   build-rustdesk-linux-sciter:
-    if: ${{ inputs.upload-artifact && !inputs.android_only }}
+    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only }}
     runs-on: ${{ matrix.job.on }}
     name: build-rustdesk-linux-sciter ${{ matrix.job.target }}
     strategy:

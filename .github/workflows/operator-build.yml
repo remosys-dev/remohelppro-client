@@ -10,6 +10,9 @@ on:
     tags:
       - 'operator-build-*'
 
+permissions:
+  contents: write
+
 jobs:
   build-operator-desktop:
     uses: ./.github/workflows/flutter-build.yml
@@ -18,3 +21,4 @@ jobs:
       upload-artifact: true
       upload-tag: "operator"
       support_show_window: false
+      windows_only: true
