@@ -196,8 +196,13 @@ void runMainApp(bool startService) async {
     // 2026-06-23: サポート版(ワンタイム)は分岐に関係なく最後に必ず表示する(取りこぼし防止)
     if (kRlSupportShowWindow) {
       await windowManager.setSkipTaskbar(false);
+      // 2026-07-23: 顧客が認証コード画面に気づけるよう確実に最前面へ。
+      //   Windows は focus() 単体だとタスクバー点滅で終わり前面化しないことがあるため、
+      //   一時的に always-on-top で最前面に出してから解除する。
+      await windowManager.setAlwaysOnTop(true);
       await windowManager.show();
       await windowManager.focus();
+      await windowManager.setAlwaysOnTop(false);
     }
   });
 }

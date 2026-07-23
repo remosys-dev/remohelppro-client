@@ -407,9 +407,11 @@ pub fn core_main() -> Option<Vec<String>> {
             crate::platform::install_service();
             return None;
         } else if args[0] == "--enroll" {
-            // REMOHELP PRO 常駐: 会社の登録トークンを保存（次回サービス起動時に自己登録）
+            // REMOHELP PRO 常駐: 会社の登録トークンを保存する。
+            //   --password と同様に IPC でサービスへ渡す（稼働中サービスのメモリ内configを
+            //   即時更新＋永続化）。サービス未起動時はローカル(ディスク)に書く。→ 再起動不要。
             if args.len() == 2 {
-                config::Config::set_option("enroll-token".to_owned(), args[1].to_owned());
+                crate::ipc::set_option("enroll-token", &args[1]);
                 println!("Enroll token stored.");
             } else {
                 println!("Usage: --enroll <token>");
