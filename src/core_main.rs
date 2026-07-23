@@ -406,6 +406,15 @@ pub fn core_main() -> Option<Vec<String>> {
             log::info!("start --install-service");
             crate::platform::install_service();
             return None;
+        } else if args[0] == "--enroll" {
+            // REMOHELP PRO 常駐: 会社の登録トークンを保存（次回サービス起動時に自己登録）
+            if args.len() == 2 {
+                config::Config::set_option("enroll-token".to_owned(), args[1].to_owned());
+                println!("Enroll token stored.");
+            } else {
+                println!("Usage: --enroll <token>");
+            }
+            return None;
         } else if args[0] == "--uninstall-service" {
             log::info!("start --uninstall-service");
             crate::platform::uninstall_service(false, true);

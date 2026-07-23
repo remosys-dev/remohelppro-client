@@ -21,6 +21,11 @@ on:
         # REMOHELP PRO: true のとき Windows だけをビルド（Android/iOS/macOS/Linux/appimage/flatpak を skip・分数節約）
         type: boolean
         default: false
+      resident:
+        # REMOHELP PRO: true のとき「常駐版」（無人アクセス＋電源エージェント）をビルド。
+        #   config.rs の IS_RESIDENT_BUILD を sed で true 化する（APP_NAME 焼込と同流儀）。
+        type: boolean
+        default: false
 
 # NOTE: F-Droid builder script 'flutter/build_fdroid.sh' reads environment
 # variables from this workflow!
@@ -205,6 +210,14 @@ jobs:
         run: |
           sed -i 's/const bool kRlSupportShowWindow = false;/const bool kRlSupportShowWindow = true;/' flutter/lib/rl_support.dart
           echo "--- rl_support.dart after sed ---"; cat flutter/lib/rl_support.dart
+
+      # REMOHELP PRO: 常駐版は sed で IS_RESIDENT_BUILD を true 化（無人アクセス＋電源エージェント有効）
+      - name: Resident build flag (sed)
+        if: ${{ inputs.resident }}
+        shell: bash
+        run: |
+          sed -i 's/pub const IS_RESIDENT_BUILD: bool = false;/pub const IS_RESIDENT_BUILD: bool = true;/' libs/hbb_common/src/config.rs
+          echo "--- config.rs resident flag ---"; grep -n 'IS_RESIDENT_BUILD' libs/hbb_common/src/config.rs
 
       - name: Build rustdesk
         run: |

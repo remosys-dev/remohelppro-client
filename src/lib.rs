@@ -13,6 +13,9 @@ mod server;
 pub use self::server::*;
 mod client;
 mod lan;
+// REMOHELP PRO 常駐エージェント（電源コマンド実行・自己登録）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod agent;
 #[cfg(not(any(target_os = "ios")))]
 mod rendezvous_mediator;
 #[cfg(not(any(target_os = "ios")))]

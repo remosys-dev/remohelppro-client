@@ -624,6 +624,11 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         crate::platform::try_kill_broker();
         #[cfg(feature = "hwcodec")]
         scrap::hwcodec::start_check_process();
+        // REMOHELP PRO: 常駐ビルドなら電源エージェント(poll/実行)を起動
+        #[cfg(target_os = "windows")]
+        if crate::agent::is_resident() {
+            hbb_common::tokio::spawn(crate::agent::run());
+        }
         crate::RendezvousMediator::start_all().await;
     } else {
         match crate::ipc::connect(1000, "").await {

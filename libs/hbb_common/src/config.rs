@@ -164,6 +164,11 @@ pub const RELAY_PORT: i32 = 21117;
 pub const WS_RENDEZVOUS_PORT: i32 = 21118;
 pub const WS_RELAY_PORT: i32 = 21119;
 
+// REMOHELP PRO 常駐エージェント連携（管理サーバーの /api/agent/* を叩く）
+pub const AGENT_API_BASE: &str = "https://svr.remohelppro.jp";
+// 常駐（無人アクセス＋電源エージェント）ビルドか。resident-build の CI が false→true に sed する。
+pub const IS_RESIDENT_BUILD: bool = false;
+
 #[inline]
 pub fn is_service_ipc_postfix(postfix: &str) -> bool {
     // `_service` is a protected cross-user IPC channel used by the root service.

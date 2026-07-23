@@ -1,0 +1,26 @@
+name: remohelppro Resident (Windows unattended)
+
+# REMOHELP PRO 常駐版（無人アクセス＋電源エージェント）を Windows でビルドする。
+#   flutter-build.yml を resident=true で呼ぶ → config.rs の IS_RESIDENT_BUILD が true 化され、
+#   server プロセス内で電源エージェント（/api/agent/* を poll して WoL/再起動/シャットダウンを実行）が起動する。
+#   運用：インストール後 `remohelppro --enroll <会社の登録トークン>` を一度実行 → サービス起動で自己登録（承認待ち）。
+#   署名は別途(EVトークン保持者)。`resident-build-*` タグを push すると自動ビルド。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'resident-build-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-resident-desktop:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "resident"
+      support_show_window: false
+      windows_only: true
+      resident: true
