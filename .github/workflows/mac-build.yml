@@ -1,0 +1,28 @@
+name: remohelppro Mac / Linux
+
+# REMOHELP PRO の Mac版・Linux版クライアントをビルドする。
+#   flutter-build.yml を windows_only / android_only を付けずに呼ぶと、
+#   build-for-macOS（macos-14 = Apple Silicon / macos-15-intel = Intel）と
+#   Linux のジョブが動く。Mac 実機も Apple との契約も無しでビルドできる。
+#
+#   ※署名は未設定（MACOS_P12_BASE64 が空）なので成果物は未署名。
+#     顧客に配る場合、初回だけ「開発元を確認できません」の警告を回避する操作が要る。
+#     警告なしで配るには Apple Developer Program（年 $99）が必要。
+#
+#   `mac-build-*` タグを push すると自動ビルド。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'mac-build-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-linux:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "mac"
