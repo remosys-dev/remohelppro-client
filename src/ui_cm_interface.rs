@@ -147,6 +147,8 @@ pub struct Client {
     pub from_switch: bool,
     pub in_voice_call: bool,
     pub incoming_voice_call: bool,
+    /// 相談員が画面に印をつけている最中か（画面注釈＝お絵かき）
+    pub remote_drawing: bool,
     #[serde(skip)]
     #[cfg(not(any(target_os = "ios")))]
     tx: UnboundedSender<Data>,
@@ -259,6 +261,7 @@ impl<T: InvokeUiCM> ConnectionManager<T> {
             tx,
             in_voice_call: false,
             incoming_voice_call: false,
+            remote_drawing: false,
         };
         CLIENTS
             .write()
@@ -401,6 +404,18 @@ pub fn set_customer_draw_mode(id: i32, on: bool) {
     let clients = CLIENTS.read().unwrap();
     if let Some(client) = clients.get(&id) {
         allow_err!(client.tx.send(Data::CustomerDrawMode { on }));
+    }
+}
+
+/// 顧客が告知帯の「やめてもらう」を押した。
+///
+/// 実際の後始末（オーバーレイの解除・線の消去・相談員への通知）は通信側で行う。
+/// CM 側の表示は、通信側から返ってくる RemoteDrawing{on:false} で戻る。
+#[inline]
+pub fn stop_remote_drawing(id: i32) {
+    let clients = CLIENTS.read().unwrap();
+    if let Some(client) = clients.get(&id) {
+        allow_err!(client.tx.send(Data::StopRemoteDrawing));
     }
 }
 
@@ -584,6 +599,20 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                 }
                                 Data::ChatMessage { text } => {
                                     self.cm.new_message(self.conn_id, text);
+                                }
+                                Data::RemoteDrawing { on } => {
+                                    // 相談員が画面に印をつけ始めた／やめた。
+                                    // 顧客に黙って線が出ることがないよう、告知帯を出すために伝える。
+                                    let client = {
+                                        let mut clients = CLIENTS.write().unwrap();
+                                        clients.get_mut(&self.conn_id).map(|c| {
+                                            c.remote_drawing = on;
+                                            c.clone()
+                                        })
+                                    };
+                                    if let Some(client) = client {
+                                        self.cm.ui_handler.add_connection(&client);
+                                    }
                                 }
                                 Data::SwitchPermission { name, enabled } => {
                                     // Keep this branch scoped to privacy mode rollback.

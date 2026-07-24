@@ -649,6 +649,30 @@ impl Connection {
                             conn.chat_unanswered = false;
                         }
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        ipc::Data::StopRemoteDrawing => {
+                            // 顧客が「やめてもらう」を押した。後始末はここで全部やる。
+                            let key = crate::whiteboard::get_key_cursor(conn.inner.id);
+                            crate::whiteboard::update_whiteboard(
+                                key.clone(),
+                                crate::whiteboard::CustomEvent::SetDrawMode(false),
+                            );
+                            crate::whiteboard::update_whiteboard(
+                                key.clone(),
+                                crate::whiteboard::CustomEvent::Clear,
+                            );
+                            crate::whiteboard::unregister_whiteboard(key);
+                            // 相談員に「顧客が中止した」と伝える
+                            let mut action = DrawAction::new();
+                            action.set_enable(false);
+                            let mut misc = Misc::new();
+                            misc.set_draw(action);
+                            let mut msg_out = Message::new();
+                            msg_out.set_misc(misc);
+                            conn.send(msg_out).await;
+                            // CM の告知帯を消す
+                            conn.send_to_cm(ipc::Data::RemoteDrawing { on: false });
+                        }
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         ipc::Data::CustomerDrawMode{on} => {
                             // 顧客が自分でも描けるようにする。true の間だけ
                             // オーバーレイがクリックを受け取る（＝画面が操作できなくなる）。
@@ -4196,6 +4220,8 @@ impl Connection {
                         whiteboard::unregister_whiteboard(key);
                     }
                 }
+                // 顧客に黙って線が出ることがないよう、必ず告知帯を出す。
+                self.send_to_cm(ipc::Data::RemoteDrawing { on: enable });
             }
             None => {}
         }

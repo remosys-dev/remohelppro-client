@@ -296,6 +296,13 @@ pub enum Data {
     CustomerDrawMode {
         on: bool,
     },
+    /// 相談員が画面に印をつけ始めた／やめた。通信側から CM 画面へ。
+    /// 顧客に黙って線が出ることがないよう、告知帯を出すために伝える。
+    RemoteDrawing {
+        on: bool,
+    },
+    /// 顧客が告知帯の「やめてもらう」を押した。CM 画面から通信側へ。
+    StopRemoteDrawing,
     SwitchPermission {
         name: String,
         enabled: bool,

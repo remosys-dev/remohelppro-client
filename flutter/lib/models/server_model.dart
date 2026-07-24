@@ -887,6 +887,9 @@ class Client {
   bool fromSwitch = false;
   bool inVoiceCall = false;
   bool incomingVoiceCall = false;
+  /// 相談員が画面に印をつけている最中か（画面注釈＝お絵かき）。
+  /// これが true の間だけ、顧客側に告知帯と「自分も描く」を出す。
+  bool remoteDrawing = false;
 
   RxInt unreadChatMessageCount = 0.obs;
 
@@ -916,6 +919,8 @@ class Client {
     fromSwitch = json['from_switch'];
     inVoiceCall = json['in_voice_call'];
     incomingVoiceCall = json['incoming_voice_call'];
+    // 旧バージョンの相手には無い項目なので、欠けていても落ちないようにする。
+    remoteDrawing = json['remote_drawing'] ?? false;
   }
 
   Map<String, dynamic> toJson() {

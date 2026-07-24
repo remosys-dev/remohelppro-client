@@ -353,6 +353,9 @@ Widget buildConnectionCard(Client client) {
       key: ValueKey(client.id),
       children: [
         _CmHeader(client: client),
+        // 相談員が画面に印をつけているときは必ず知らせる。黙って線が出ることはない。
+        if (client.remoteDrawing && !client.disconnected)
+          _RemoteDrawingNotice(client: client),
         // v1.4.6-13: Phase 4 P3 - リスト長の縦溢れ対策に Flexible で包む
         client.type_() == ClientType.file ||
                 client.type_() == ClientType.portForward ||
@@ -862,6 +865,111 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
 
 const double buttonBottomMargin = 8;
 
+/// 相談員が画面に印をつけている間の告知帯。
+///
+/// 顧客が「知らないうちに画面に線が出た」と感じないための表示。
+/// 「やめてもらう」でいつでも打ち切れる。
+class _RemoteDrawingNotice extends StatelessWidget {
+  final Client client;
+  const _RemoteDrawingNotice({Key? key, required this.client}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.symmetric(vertical: 4.0),
+      padding: EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+      decoration: BoxDecoration(
+        color: Color(0xFF123A57),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: Color(0xFFE03131),
+              shape: BoxShape.circle,
+            ),
+          ),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '相談員が画面に印をつけています',
+              style: TextStyle(color: Colors.white, fontSize: 12.5),
+            ),
+          ),
+          InkWell(
+            onTap: () => bind.cmSetRemoteDrawingOff(connId: client.id),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Text(
+                'やめてもらう',
+                style: TextStyle(
+                  color: Color(0xFF7FC7EE),
+                  fontSize: 12,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 顧客側の「自分も描く」。
+///
+/// 押している間だけ画面全体のオーバーレイがタップを受け取るので、その間は
+/// 顧客が自分のPCを操作できなくなる。**押している間だけ**にしているのはそのため。
+/// 離し忘れても、オーバーレイ側に 10 秒で自動的に戻す安全弁がある。
+class _CustomerDrawButton extends StatefulWidget {
+  final Client client;
+  const _CustomerDrawButton({Key? key, required this.client}) : super(key: key);
+
+  @override
+  State<_CustomerDrawButton> createState() => _CustomerDrawButtonState();
+}
+
+class _CustomerDrawButtonState extends State<_CustomerDrawButton> {
+  bool _drawing = false;
+
+  void _set(bool on) {
+    if (_drawing == on) return;
+    _drawing = on;
+    bind.cmSetCustomerDraw(connId: widget.client.id, on: on);
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    // 画面が閉じても描画モードが残らないようにする。
+    if (_drawing) {
+      bind.cmSetCustomerDraw(connId: widget.client.id, on: false);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: buildButton(
+        context,
+        color: _drawing ? Colors.blue.shade700 : MyTheme.accent,
+        onClick: () {},
+        icon: Icon(Icons.draw_outlined, color: Colors.white, size: 14),
+        text: _drawing ? '指を離すと終わります' : '自分も描く（押している間）',
+        textColor: Colors.white,
+      ),
+    );
+  }
+}
+
 class _CmControlPanel extends StatelessWidget {
   final Client client;
 
@@ -1003,6 +1111,11 @@ class _CmControlPanel extends StatelessWidget {
               )
             ],
           ),
+        ),
+        // 相談員が画面に印をつけているときだけ出す。
+        Offstage(
+          offstage: !client.remoteDrawing || client.type_() != ClientType.remote,
+          child: _CustomerDrawButton(client: client),
         ),
         Offstage(
           offstage: !client.fromSwitch,

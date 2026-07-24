@@ -135,9 +135,15 @@ class AnnotationModel with ChangeNotifier {
         notifyListeners();
         break;
       case 'enable':
-        // 相手がお絵かきを終えたら、相手の線は残さない。
         if (m['enable'] != true) {
+          // 顧客が「やめてもらう」を押した場合もここに来る。
+          // 相手の線を消すだけでなく、こちらの描画も止める（拒否を尊重する）。
           _remote.clear();
+          _local.clear();
+          if (_enabled) {
+            _enabled = false;
+            _endStroke();
+          }
           notifyListeners();
         }
         break;

@@ -2214,6 +2214,16 @@ pub fn cm_set_customer_draw(conn_id: i32, on: bool) {
     }
 }
 
+/// 顧客が告知帯の「やめてもらう」を押した。相談員の注釈を打ち切る。
+pub fn cm_set_remote_drawing_off(conn_id: i32) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    crate::ui_cm_interface::stop_remote_drawing(conn_id);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = conn_id;
+    }
+}
+
 pub fn cm_login_res(conn_id: i32, res: bool) {
     #[cfg(not(any(target_os = "ios")))]
     if res {
