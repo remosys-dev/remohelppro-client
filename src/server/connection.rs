@@ -648,6 +648,15 @@ impl Connection {
                             conn.send(msg_out).await;
                             conn.chat_unanswered = false;
                         }
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        ipc::Data::CustomerDrawMode{on} => {
+                            // 顧客が自分でも描けるようにする。true の間だけ
+                            // オーバーレイがクリックを受け取る（＝画面が操作できなくなる）。
+                            crate::whiteboard::update_whiteboard(
+                                crate::whiteboard::get_key_cursor(conn.inner.id),
+                                crate::whiteboard::CustomEvent::SetDrawMode(on),
+                            );
+                        }
                         ipc::Data::DrawAction{data} => {
                             // 顧客が描いた線を相談員へ返す。壊れた JSON は捨てる。
                             if let Some(action) = crate::draw_annotation::from_json(&data) {

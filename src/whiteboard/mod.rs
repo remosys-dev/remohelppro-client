@@ -29,6 +29,10 @@ pub enum CustomEvent {
     /// 画面注釈（お絵かき）のひと筆。カーソル表示と同じオーバーレイに重ねて描く。
     /// 描画側の `tiny_skia::Stroke` と紛らわしくないよう InkStroke と名付けている。
     Ink(InkStroke),
+    /// 顧客が自分でも描けるようにする／やめる。
+    /// true の間だけオーバーレイがクリックを受け取る（＝画面が操作できなくなる）ので、
+    /// 呼ぶ側は必ず false に戻すこと。オーバーレイ側にも自動で戻す安全弁がある。
+    SetDrawMode(bool),
     Clear,
     Exit,
 }

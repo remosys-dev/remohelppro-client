@@ -20,6 +20,17 @@ use winit::event_loop::EventLoopProxy;
 lazy_static! {
     pub(super) static ref EVENT_PROXY: RwLock<Option<EventLoopProxy<(String, CustomEvent)>>> =
         RwLock::new(None);
+    /// オーバーレイ → メインプロセス の戻り口（顧客が描いた線を返すため）。
+    /// IPC 接続が生きている間だけ Some になる。
+    pub(super) static ref TX_OUT: RwLock<Option<tokio::sync::mpsc::UnboundedSender<Data>>> =
+        RwLock::new(None);
+}
+
+/// 顧客が描いたひと筆をメインプロセスへ返す。接続が無ければ黙って捨てる。
+pub(super) fn send_back(key: String, data: String) {
+    if let Some(tx) = TX_OUT.read().unwrap().as_ref() {
+        let _ = tx.send(Data::WhiteboardDraw { key, data });
+    }
 }
 
 const RIPPLE_DURATION: Duration = Duration::from_millis(500);
@@ -76,8 +87,28 @@ pub(super) async fn start_ipc(mut rx_exit: UnboundedReceiver<()>) {
 }
 
 async fn handle_new_stream(mut conn: Connection) {
+    // 顧客が描いた線をメインプロセスへ返すための戻り口。接続ごとに張り直す。
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::unbounded_channel::<Data>();
+    TX_OUT.write().unwrap().replace(tx_out);
+    let _drop_tx = crate::common::SimpleCallOnReturn {
+        b: true,
+        f: Box::new(move || {
+            let _ = TX_OUT.write().unwrap().take();
+        }),
+    };
     loop {
         tokio::select! {
+            out = rx_out.recv() => {
+                match out {
+                    Some(data) => {
+                        if conn.send(&data).await.is_err() {
+                            log::info!("whiteboard ipc send back failed");
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
             res = conn.next() => {
                 match res {
                     Err(err) => {

@@ -2204,6 +2204,16 @@ pub fn cm_send_chat(conn_id: i32, msg: String) {
     crate::ui_cm_interface::send_chat(conn_id, msg);
 }
 
+/// 顧客側の「自分も描く」。on の間だけ画面全体のオーバーレイがクリックを受け取る。
+pub fn cm_set_customer_draw(conn_id: i32, on: bool) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    crate::ui_cm_interface::set_customer_draw_mode(conn_id, on);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (conn_id, on);
+    }
+}
+
 pub fn cm_login_res(conn_id: i32, res: bool) {
     #[cfg(not(any(target_os = "ios")))]
     if res {

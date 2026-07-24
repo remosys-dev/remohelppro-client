@@ -39,6 +39,24 @@ pub fn get_key_cursor(conn_id: i32) -> String {
     format!("{}-cursor", conn_id)
 }
 
+/// 顧客が描いた線を、その線が属する接続（相談員）へ送る。
+///
+/// オーバーレイは別プロセスなので、ここで接続の送信口（AUTHED_CONNS）を引いて
+/// 渡す。該当する接続が既に切れていれば黙って捨てる。
+fn route_customer_draw(key: String, data: String) {
+    let Some(conn_id) = key.split('-').next().and_then(|s| s.parse::<i32>().ok()) else {
+        return;
+    };
+    crate::server::AUTHED_CONNS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|c| c.conn_id == conn_id)
+        .map(|c| {
+            c.sender.send(Data::DrawAction { data }).ok();
+        });
+}
+
 pub fn register_whiteboard(k: String) {
     std::thread::spawn(|| {
         allow_err!(start_whiteboard_());
@@ -233,6 +251,23 @@ async fn start_whiteboard_() -> ResultType<()> {
                     }
                     None => {
                         bail!("expected");
+                    }
+                }
+            },
+            res = stream.next() => {
+                // オーバーレイから「顧客が描いた線」が返ってくる経路。
+                match res {
+                    Ok(Some(Data::WhiteboardDraw{key, data})) => {
+                        route_customer_draw(key, data);
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        log::info!("whiteboard ipc closed by overlay");
+                        break;
+                    }
+                    Err(err) => {
+                        log::info!("whiteboard ipc error: {}", err);
+                        break;
                     }
                 }
             },

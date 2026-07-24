@@ -34,6 +34,60 @@ struct InkLine {
 const INK_HOLD: std::time::Duration = std::time::Duration::from_secs(7);
 const INK_FADE: std::time::Duration = std::time::Duration::from_millis(800);
 
+/// 顧客の「自分も描く」を自動的に解除するまでの無操作時間。
+/// クリック透過を切ったまま放置すると顧客が自分のPCを操作できなくなるための安全弁。
+const PEN_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// 顧客が描いた点をメインプロセスへ返し、自分の画面にも即座に描く。
+fn flush_pen(pen: &mut Vec<(f32, f32)>, key: Option<&str>, end: bool, inks: &mut Vec<InkLine>) {
+    let Some(key) = key else {
+        pen.clear();
+        return;
+    };
+    if pen.is_empty() && !end {
+        return;
+    }
+    let xs: Vec<f32> = pen.iter().map(|p| p.0).collect();
+    let ys: Vec<f32> = pen.iter().map(|p| p.1).collect();
+
+    // 自分の画面にもすぐ出す（相手を経由すると遅れて手書き感が損なわれる）。
+    if !xs.is_empty() {
+        match inks.last_mut() {
+            Some(last) if !last.done && last.key == key => {
+                last.xs.extend_from_slice(&xs);
+                last.ys.extend_from_slice(&ys);
+                last.done = end;
+                last.born = Instant::now();
+            }
+            _ => inks.push(InkLine {
+                key: key.to_string(),
+                xs: xs.clone(),
+                ys: ys.clone(),
+                argb: CUSTOMER_INK_ARGB,
+                width: 4.0,
+                done: end,
+                born: Instant::now(),
+            }),
+        }
+    }
+
+    let data = serde_json::json!({
+        "kind": "stroke",
+        "xs": xs.iter().map(|v| *v as i32).collect::<Vec<i32>>(),
+        "ys": ys.iter().map(|v| *v as i32).collect::<Vec<i32>>(),
+        "color": CUSTOMER_INK_ARGB,
+        "width": 4,
+        "display": 0,
+        "end": end,
+    })
+    .to_string();
+    super::server::send_back(key.to_string(), data);
+    pen.clear();
+}
+
+/// 顧客が描く線の色（青）。相談員＝赤と区別できるようにする。
+const CUSTOMER_INK_ARGB: u32 = 0xFF1971C2;
+
 impl InkLine {
     /// 経過時間から不透明度（0.0-1.0）を返す。0.0 なら消してよい。
     fn opacity(&self) -> f32 {
@@ -61,7 +115,7 @@ pub(super) fn create_event_loop() -> ResultType<()> {
 
     let event_loop = EventLoopBuilder::<(String, CustomEvent)>::with_user_event().build();
     let mut window_builder = WindowBuilder::new()
-        .with_title("RustDesk whiteboard")
+        .with_title("annotation overlay")
         .with_transparent(true)
         .with_always_on_top(true)
         .with_skip_taskbar(true)
@@ -109,6 +163,13 @@ pub(super) fn create_event_loop() -> ResultType<()> {
     let mut inks: Vec<InkLine> = Vec::new();
     let mut resized = final_size.is_none();
 
+    // 顧客が自分で描くモード。Some(key) の間だけクリック透過を切っている。
+    let mut draw_mode: Option<String> = None;
+    let mut pen: Vec<(f32, f32)> = Vec::new();
+    let mut pen_down = false;
+    let mut last_pen_activity = Instant::now();
+    let mut last_pen_send = Instant::now();
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -116,6 +177,31 @@ pub(super) fn create_event_loop() -> ResultType<()> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                // 顧客が自分で描くモードのときだけマウスを拾う。
+                // 普段はクリック透過なのでここには来ない。
+                WindowEvent::CursorMoved { position, .. } if draw_mode.is_some() => {
+                    if pen_down {
+                        pen.push((position.x as f32, position.y as f32));
+                        last_pen_activity = Instant::now();
+                    }
+                }
+                WindowEvent::MouseInput { state, button, .. }
+                    if draw_mode.is_some() && button == tao::event::MouseButton::Left =>
+                {
+                    match state {
+                        tao::event::ElementState::Pressed => {
+                            pen_down = true;
+                            pen.clear();
+                            last_pen_activity = Instant::now();
+                        }
+                        tao::event::ElementState::Released => {
+                            pen_down = false;
+                            flush_pen(&mut pen, draw_mode.as_deref(), true, &mut inks);
+                            last_pen_activity = Instant::now();
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             },
@@ -268,6 +354,24 @@ pub(super) fn create_event_loop() -> ResultType<()> {
                 }
             }
             Event::MainEventsCleared => {
+                if draw_mode.is_some() {
+                    // 描いている途中の点を 16ms ごとに送る（毎秒60回が上限）。
+                    if pen_down
+                        && !pen.is_empty()
+                        && last_pen_send.elapsed() >= std::time::Duration::from_millis(16)
+                    {
+                        flush_pen(&mut pen, draw_mode.as_deref(), false, &mut inks);
+                        last_pen_send = Instant::now();
+                    }
+                    // 安全弁：一定時間なにも描かれなければ強制的にクリック透過へ戻す。
+                    // ここを落とすと顧客のPCが操作不能のままになる。
+                    if !pen_down && last_pen_activity.elapsed() >= PEN_IDLE_TIMEOUT {
+                        draw_mode = None;
+                        pen.clear();
+                        let _ = window.set_ignore_cursor_events(true);
+                        log::info!("annotation: draw mode auto-released");
+                    }
+                }
                 window.request_redraw();
             }
             Event::UserEvent((k, evt)) => match evt {
@@ -300,6 +404,20 @@ pub(super) fn create_event_loop() -> ResultType<()> {
                             done: ink.end,
                             born: Instant::now(),
                         }),
+                    }
+                }
+                CustomEvent::SetDrawMode(on) => {
+                    // クリック透過を切ると顧客は画面を操作できなくなる。
+                    // 戻し損ねが致命的なので、下の MainEventsCleared に自動復帰を置いている。
+                    if on {
+                        draw_mode = Some(k);
+                        last_pen_activity = Instant::now();
+                        let _ = window.set_ignore_cursor_events(false);
+                    } else {
+                        draw_mode = None;
+                        pen_down = false;
+                        pen.clear();
+                        let _ = window.set_ignore_cursor_events(true);
                     }
                 }
                 CustomEvent::Clear => {

@@ -392,6 +392,18 @@ pub fn send_chat(id: i32, text: String) {
     }
 }
 
+/// 顧客が「自分も描く」を押した／離した。
+///
+/// on の間だけ画面全体のオーバーレイがクリックを受け取るため、顧客は自分のPCを
+/// 操作できなくなる。必ず false を送り返すこと（オーバーレイ側にも 10 秒の安全弁がある）。
+#[inline]
+pub fn set_customer_draw_mode(id: i32, on: bool) {
+    let clients = CLIENTS.read().unwrap();
+    if let Some(client) = clients.get(&id) {
+        allow_err!(client.tx.send(Data::CustomerDrawMode { on }));
+    }
+}
+
 #[inline]
 #[cfg(not(any(target_os = "ios")))]
 pub fn switch_permission(id: i32, name: String, enabled: bool) {

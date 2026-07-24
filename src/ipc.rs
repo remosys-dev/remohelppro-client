@@ -282,9 +282,19 @@ pub enum Data {
     ChatMessage {
         text: String,
     },
-    /// 顧客側が描いた画面注釈を CM プロセスから通信側へ渡す（JSON）。
+    /// 顧客側が描いた画面注釈を通信側へ渡す（JSON）。
     DrawAction {
         data: String,
+    },
+    /// オーバーレイ（別プロセス）から「顧客が描いた線」を返す。
+    /// key は whiteboard::get_key_cursor() と同じ形式で、どの接続宛かを表す。
+    WhiteboardDraw {
+        key: String,
+        data: String,
+    },
+    /// 顧客が「自分も描く」を押した／離した。CM 画面から通信側へ。
+    CustomerDrawMode {
+        on: bool,
     },
     SwitchPermission {
         name: String,
