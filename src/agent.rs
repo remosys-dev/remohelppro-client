@@ -91,12 +91,46 @@ mod imp {
         }
     }
 
+    /// 実行ファイル名に埋め込まれた登録トークンを取り出す。
+    ///
+    /// 配布サーバーが `remohelppro-resident-setup__t-<token>.exe` という名前で配る。
+    /// 顧客がコマンドを打たずに済むようにするための経路（ファイル名なので署名は壊れない）。
+    /// ブラウザが重複ダウンロードで付ける ` (1)` などの余計な文字は捨てる。
+    fn enroll_token_from_filename() -> String {
+        let Ok(exe) = std::env::current_exe() else {
+            return String::new();
+        };
+        let Some(stem) = exe.file_stem().and_then(|s| s.to_str()) else {
+            return String::new();
+        };
+        let Some(pos) = stem.find("__t-") else {
+            return String::new();
+        };
+        let token: String = stem[pos + 4..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if token.len() >= 8 && token.len() <= 64 {
+            token
+        } else {
+            String::new()
+        }
+    }
+
     /// 初回のみ：永続PWを生成→ローカル設定→無人アクセス有効化→サーバー登録→端末トークン保存。
     async fn ensure_enrolled() {
         if agent_token().is_some() {
             return;
         }
-        let enroll = Config::get_option("enroll-token");
+        let mut enroll = Config::get_option("enroll-token");
+        if enroll.is_empty() {
+            // `--enroll` で渡されていなければ、実行ファイル名から拾う
+            enroll = enroll_token_from_filename();
+            if !enroll.is_empty() {
+                log::info!("REMOHELP PRO agent: enroll token from filename");
+                Config::set_option("enroll-token".to_owned(), enroll.clone());
+            }
+        }
         if enroll.is_empty() {
             return; // 会社の登録トークン未設定なら何もしない
         }
