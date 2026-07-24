@@ -15,6 +15,41 @@ use tao::{
 };
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Stroke, Transform};
 
+/// 描画中／描画済みのひと筆。
+struct InkLine {
+    /// どの接続が描いたか（相談員が複数いる場合に線を混ぜないため）
+    key: String,
+    xs: Vec<f32>,
+    ys: Vec<f32>,
+    argb: u32,
+    width: f32,
+    /// ひと筆が終わったか
+    done: bool,
+    /// 最後に点が足された時刻（自動フェード用）
+    born: Instant,
+}
+
+/// 線が消え始めるまでの時間と、消えきるまでの時間。
+/// 指し示すための道具なので、消し忘れた線が残り続けないように既定で薄れて消える。
+const INK_HOLD: std::time::Duration = std::time::Duration::from_secs(7);
+const INK_FADE: std::time::Duration = std::time::Duration::from_millis(800);
+
+impl InkLine {
+    /// 経過時間から不透明度（0.0-1.0）を返す。0.0 なら消してよい。
+    fn opacity(&self) -> f32 {
+        let elapsed = self.born.elapsed();
+        if elapsed <= INK_HOLD {
+            return 1.0;
+        }
+        let fading = elapsed - INK_HOLD;
+        if fading >= INK_FADE {
+            0.0
+        } else {
+            1.0 - fading.as_secs_f32() / INK_FADE.as_secs_f32()
+        }
+    }
+}
+
 pub(super) fn create_event_loop() -> ResultType<()> {
     let face = match create_font_face() {
         Ok(face) => Some(face),
@@ -71,6 +106,7 @@ pub(super) fn create_event_loop() -> ResultType<()> {
 
     let mut ripples: Vec<Ripple> = Vec::new();
     let mut last_cursors: HashMap<String, Cursor> = HashMap::new();
+    let mut inks: Vec<InkLine> = Vec::new();
     let mut resized = final_size.is_none();
 
     event_loop.run(move |event, _, control_flow| {
@@ -142,6 +178,32 @@ pub(super) fn create_event_loop() -> ResultType<()> {
                             Transform::identity(),
                             None,
                         );
+                    }
+                }
+
+                // 画面注釈（お絵かき）。カーソルより先に描いて、カーソルを前面に残す。
+                inks.retain(|ink| ink.opacity() > 0.0);
+                for ink in inks.iter() {
+                    if ink.xs.len() < 2 {
+                        continue;
+                    }
+                    let mut pb = PathBuilder::new();
+                    pb.move_to(ink.xs[0], ink.ys[0]);
+                    for i in 1..ink.xs.len() {
+                        pb.line_to(ink.xs[i], ink.ys[i]);
+                    }
+                    if let Some(path) = pb.finish() {
+                        let rgba = super::argb_to_rgba(ink.argb);
+                        let alpha = (rgba.3 as f32 * ink.opacity()) as u8;
+                        let mut paint = Paint::default();
+                        // Note: The real color is bgra here.
+                        paint.set_color_rgba8(rgba.2, rgba.1, rgba.0, alpha);
+                        paint.anti_alias = true;
+                        let mut stroke = Stroke::default();
+                        stroke.width = ink.width;
+                        stroke.line_cap = tiny_skia::LineCap::Round;
+                        stroke.line_join = tiny_skia::LineJoin::Round;
+                        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
                     }
                 }
 
@@ -219,10 +281,33 @@ pub(super) fn create_event_loop() -> ResultType<()> {
                     }
                     last_cursors.insert(k, cursor);
                 }
+                CustomEvent::Ink(ink) => {
+                    // ひと筆の途中は直前の線に繋げ、end で確定させる。
+                    // 送信側が間引いているので、ここでは受け取った点をそのまま積む。
+                    match inks.last_mut() {
+                        Some(last) if !last.done && last.key == k => {
+                            last.xs.extend_from_slice(&ink.xs);
+                            last.ys.extend_from_slice(&ink.ys);
+                            last.done = ink.end;
+                            last.born = Instant::now();
+                        }
+                        _ => inks.push(InkLine {
+                            key: k,
+                            xs: ink.xs,
+                            ys: ink.ys,
+                            argb: ink.argb,
+                            width: ink.width.max(1.0),
+                            done: ink.end,
+                            born: Instant::now(),
+                        }),
+                    }
+                }
+                CustomEvent::Clear => {
+                    inks.clear();
+                }
                 CustomEvent::Exit => {
                     *control_flow = ControlFlow::Exit;
                 }
-                _ => {}
             },
             _ => (),
         }

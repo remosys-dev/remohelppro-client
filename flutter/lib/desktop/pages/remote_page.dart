@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_hbb/models/annotation_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 
 import '../../consts.dart';
@@ -627,6 +628,12 @@ class _RemotePageState extends State<RemotePage>
         child: _buildRawTouchAndPointerRegion(
             QualityMonitor(_ffi.qualityMonitorModel), null, null),
       ),
+    );
+    // 画面注釈（お絵かき）。映像の上・品質表示より下に重ねる。
+    // お絵かき OFF のときは IgnorePointer なので、通常の遠隔操作の邪魔をしない。
+    paints.insert(
+      paints.length - 1,
+      Positioned.fill(child: AnnotationOverlay(ffi: _ffi)),
     );
     return Stack(
       children: paints,

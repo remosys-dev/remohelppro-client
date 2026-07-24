@@ -450,6 +450,10 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
+    // 画面注釈（お絵かき）。カメラ配信のときは映像に重ねる意味が薄いので出さない。
+    if (widget.ffi.connType == ConnType.defaultConn) {
+      toolbarItems.add(_AnnotationMenu(ffi: widget.ffi));
+    }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
@@ -587,6 +591,65 @@ class _PinMenu extends StatelessWidget {
             : _ToolbarTheme.hoverInactiveColor,
       ),
     );
+  }
+}
+
+/// 画面注釈（お絵かき）の切替。
+///
+/// 押している間だけ、映像の上に線を引ける。**操作は一切しない** ので、
+/// 遠隔操作の許可が下りていない画面共有だけの場面でも使える。
+class _AnnotationMenu extends StatefulWidget {
+  final FFI ffi;
+  const _AnnotationMenu({Key? key, required this.ffi}) : super(key: key);
+
+  @override
+  State<_AnnotationMenu> createState() => _AnnotationMenuState();
+}
+
+class _AnnotationMenuState extends State<_AnnotationMenu> {
+  @override
+  Widget build(BuildContext context) {
+    final model = widget.ffi.annotationModel;
+    final on = model.enabled;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      _IconMenuButton(
+        icon: Icon(Icons.draw_outlined, size: 18),
+        tooltip: on ? '画面に描くのをやめる' : '画面に描いて指し示す',
+        onPressed: () {
+          model.setEnabled(!on);
+          setState(() {});
+        },
+        color: on ? _ToolbarTheme.blueColor : _ToolbarTheme.inactiveColor,
+        hoverColor:
+            on ? _ToolbarTheme.hoverBlueColor : _ToolbarTheme.hoverInactiveColor,
+      ),
+      // 描いているときだけ「消す」を出す。普段はツールバーを混ませない。
+      if (on)
+        _IconMenuButton(
+          icon: Icon(Icons.cleaning_services_outlined, size: 18),
+          tooltip: '描いた線を消す',
+          onPressed: () {
+            model.clear();
+            setState(() {});
+          },
+          color: _ToolbarTheme.inactiveColor,
+          hoverColor: _ToolbarTheme.hoverInactiveColor,
+        ),
+      if (on)
+        _IconMenuButton(
+          icon: Icon(
+            model.autoFade ? Icons.timer_outlined : Icons.push_pin_outlined,
+            size: 18,
+          ),
+          tooltip: model.autoFade ? '線は7秒で自動的に消えます' : '線は消さずに残します',
+          onPressed: () {
+            model.setAutoFade(!model.autoFade);
+            setState(() {});
+          },
+          color: _ToolbarTheme.inactiveColor,
+          hoverColor: _ToolbarTheme.hoverInactiveColor,
+        ),
+    ]);
   }
 }
 

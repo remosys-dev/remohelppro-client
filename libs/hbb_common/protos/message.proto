@@ -859,6 +859,27 @@ message Misc {
     DisplayResolution change_display_resolution = 36;
     MessageQuery message_query = 37;
     int32 follow_current_display = 38;
+    DrawAction draw = 39;
+  }
+}
+
+// 画面注釈（双方向お絵かき）。操作は一切行わず、線を重ねて見せるだけ。
+message DrawStroke {
+  // 相手の画面の実座標（ピクセル）。表示倍率・スクロールに依存しない値を送る。
+  repeated int32 xs = 1;
+  repeated int32 ys = 2;
+  uint32 color = 3; // 0xAARRGGBB
+  uint32 width = 4; // 線の太さ（実座標基準）
+  int32 display = 5; // どのモニタか
+  // ひと筆の終わり。false の間は同じ線の続きとして繋げる。
+  bool end = 6;
+}
+
+message DrawAction {
+  oneof union {
+    DrawStroke stroke = 1; // 線を追加
+    bool clear = 2; // 送信側が描いたものを全消去
+    bool enable = 3; // お絵かきモードの開始／終了
   }
 }
 

@@ -664,6 +664,29 @@ pub fn session_send_chat(session_id: SessionID, text: String) {
     }
 }
 
+/// 画面注釈（お絵かき）を相手へ送る。data は draw_annotation の JSON。
+/// 座標は相手の画面の実ピクセルで、Flutter 側が変換済みの値を入れる。
+pub fn session_send_draw(session_id: SessionID, data: String) {
+    let Some(session) = sessions::get_session_by_session_id(&session_id) else {
+        return;
+    };
+    let Some(action) = crate::draw_annotation::from_json(&data) else {
+        return;
+    };
+    match action.union {
+        Some(hbb_common::message_proto::draw_action::Union::Stroke(s)) => {
+            session.send_draw_stroke(s.xs, s.ys, s.color, s.width, s.display, s.end);
+        }
+        Some(hbb_common::message_proto::draw_action::Union::Clear(_)) => {
+            session.send_draw_clear();
+        }
+        Some(hbb_common::message_proto::draw_action::Union::Enable(e)) => {
+            session.send_draw_enable(e);
+        }
+        None => {}
+    }
+}
+
 // Terminal functions
 pub fn session_open_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {

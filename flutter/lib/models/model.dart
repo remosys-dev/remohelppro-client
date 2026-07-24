@@ -13,6 +13,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_hbb/common/widgets/peers_view.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
+import 'package:flutter_hbb/models/annotation_model.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/cm_file_model.dart';
 import 'package:flutter_hbb/models/file_model.dart';
@@ -359,6 +360,8 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'chat_client_mode') {
         parent.target?.chatModel
             .receive(ChatModel.clientModeID, evt['text'] ?? '');
+      } else if (name == 'draw_action') {
+        parent.target?.annotationModel.onRemoteAction(evt['data'] ?? '');
       } else if (name == 'chat_server_mode') {
         parent.target?.chatModel
             .receive(int.parse(evt['id'] as String), evt['text'] ?? '');
@@ -3620,6 +3623,7 @@ class FFI {
   late final QualityMonitorModel qualityMonitorModel; // session
   late final RecordingModel recordingModel; // session
   late final InputModel inputModel; // session
+  late final AnnotationModel annotationModel; // session（画面注釈＝お絵かき）
   late final ElevationModel elevationModel; // session
   late final CmFileModel cmFileModel; // cm
   late final TextureModel textureModel; //session
@@ -3649,6 +3653,7 @@ class FFI {
     qualityMonitorModel = QualityMonitorModel(WeakReference(this));
     recordingModel = RecordingModel(WeakReference(this));
     inputModel = InputModel(WeakReference(this));
+    annotationModel = AnnotationModel(WeakReference(this));
     elevationModel = ElevationModel(WeakReference(this));
     cmFileModel = CmFileModel(WeakReference(this));
     textureModel = TextureModel(WeakReference(this));

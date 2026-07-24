@@ -783,6 +783,51 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg_out));
     }
 
+    /// 画面注釈（お絵かき）のひと筆を送る。座標は相手の画面の実座標。
+    pub fn send_draw_stroke(
+        &self,
+        xs: Vec<i32>,
+        ys: Vec<i32>,
+        color: u32,
+        width: u32,
+        display: i32,
+        end: bool,
+    ) {
+        let mut action = DrawAction::new();
+        action.set_stroke(DrawStroke {
+            xs,
+            ys,
+            color,
+            width,
+            display,
+            end,
+            ..Default::default()
+        });
+        self.send_draw_action(action);
+    }
+
+    /// 自分が描いた注釈を相手側からも消す。
+    pub fn send_draw_clear(&self) {
+        let mut action = DrawAction::new();
+        action.set_clear(true);
+        self.send_draw_action(action);
+    }
+
+    /// お絵かきモードの開始／終了を相手に知らせる（顧客側の告知帯の出し分けに使う）。
+    pub fn send_draw_enable(&self, enable: bool) {
+        let mut action = DrawAction::new();
+        action.set_enable(enable);
+        self.send_draw_action(action);
+    }
+
+    fn send_draw_action(&self, action: DrawAction) {
+        let mut misc = Misc::new();
+        misc.set_draw(action);
+        let mut msg_out = Message::new();
+        msg_out.set_misc(misc);
+        self.send(Data::Message(msg_out));
+    }
+
     // Terminal methods
     pub fn open_terminal(&self, terminal_id: i32, rows: u32, cols: u32) {
         let mut action = TerminalAction::new();
@@ -1681,6 +1726,8 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn job_done(&self, id: i32, file_num: i32);
     fn clear_all_jobs(&self);
     fn new_message(&self, msg: String);
+    /// 相手から届いた画面注釈（お絵かき）を UI へ渡す。
+    fn draw_action(&self, action: DrawAction);
     fn update_transfer_list(&self);
     fn load_last_job(&self, cnt: i32, job_json: &str, auto_start: bool);
     fn update_folder_files(

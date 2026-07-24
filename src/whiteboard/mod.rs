@@ -26,8 +26,23 @@ pub use server::*;
 #[serde(tag = "t", content = "c")]
 pub enum CustomEvent {
     Cursor(Cursor),
+    /// 画面注釈（お絵かき）のひと筆。カーソル表示と同じオーバーレイに重ねて描く。
+    /// 描画側の `tiny_skia::Stroke` と紛らわしくないよう InkStroke と名付けている。
+    Ink(InkStroke),
     Clear,
     Exit,
+}
+
+/// 折れ線ひと筆。座標はこの端末の画面の実ピクセル。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "t")]
+pub struct InkStroke {
+    pub xs: Vec<f32>,
+    pub ys: Vec<f32>,
+    pub argb: u32,
+    pub width: f32,
+    /// ひと筆の終わり。false の間は同じ線の続きとして繋げる。
+    pub end: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

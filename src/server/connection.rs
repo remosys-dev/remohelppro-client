@@ -648,6 +648,16 @@ impl Connection {
                             conn.send(msg_out).await;
                             conn.chat_unanswered = false;
                         }
+                        ipc::Data::DrawAction{data} => {
+                            // 顧客が描いた線を相談員へ返す。壊れた JSON は捨てる。
+                            if let Some(action) = crate::draw_annotation::from_json(&data) {
+                                let mut misc = Misc::new();
+                                misc.set_draw(action);
+                                let mut msg_out = Message::new();
+                                msg_out.set_misc(misc);
+                                conn.send(msg_out).await;
+                            }
+                        }
                         ipc::Data::SwitchPermission{name, enabled} => {
                             log::info!("Change permission {} -> {}", name, enabled);
                             if &name == "keyboard" {
@@ -3303,6 +3313,11 @@ impl Connection {
                         self.chat_unanswered = true;
                         self.update_auto_disconnect_timer();
                     }
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    Some(misc::Union::Draw(d)) => {
+                        self.handle_draw_action(d).await;
+                        self.update_auto_disconnect_timer();
+                    }
                     Some(misc::Union::Option(o)) => {
                         self.update_options(&o).await;
                     }
@@ -4120,6 +4135,78 @@ impl Connection {
                 .await;
             }
         }
+    }
+
+    /// 画面注釈（双方向お絵かき）の受信。
+    ///
+    /// 表示先は「自分のカーソルを見せる」機能と同じ透明オーバーレイ（whiteboard）。
+    /// 操作は一切行わない ―― カーソルもクリックも動かさないので、遠隔操作の許可が
+    /// 下りていない画面共有だけの場面でも使える。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    async fn handle_draw_action(&mut self, d: DrawAction) {
+        use crate::whiteboard;
+        let key = whiteboard::get_key_cursor(self.inner.id);
+        match d.union {
+            Some(draw_action::Union::Stroke(s)) => {
+                // 点列が食い違っていると描画側で破綻するので捨てる。
+                if s.xs.len() != s.ys.len() || s.xs.is_empty() {
+                    return;
+                }
+                whiteboard::update_whiteboard(
+                    key,
+                    whiteboard::CustomEvent::Ink(whiteboard::InkStroke {
+                        xs: s.xs.iter().map(|v| *v as f32).collect(),
+                        ys: s.ys.iter().map(|v| *v as f32).collect(),
+                        argb: s.color,
+                        width: s.width as f32,
+                        end: s.end,
+                    }),
+                );
+            }
+            Some(draw_action::Union::Clear(_)) => {
+                whiteboard::update_whiteboard(key, whiteboard::CustomEvent::Clear);
+            }
+            Some(draw_action::Union::Enable(enable)) => {
+                if enable {
+                    // オーバーレイが出せない環境なら、黙って無反応にせず理由を返す。
+                    if let Some(msg) = self.whiteboard_unsupported_reason() {
+                        let mut msg_out = Message::new();
+                        msg_out.set_message_box(MessageBox {
+                            msgtype: "nook-nocancel-hasclose".to_owned(),
+                            title: "Annotation".to_owned(),
+                            text: msg.to_owned(),
+                            link: "".to_owned(),
+                            ..Default::default()
+                        });
+                        self.send(msg_out).await;
+                        return;
+                    }
+                    whiteboard::register_whiteboard(key);
+                } else {
+                    if self.whiteboard_unsupported_reason().is_none() {
+                        whiteboard::unregister_whiteboard(key);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// 透明オーバーレイが使えない理由。使えるなら None。
+    /// 「自分のカーソルを見せる」機能と同じ判定を共有する。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn whiteboard_unsupported_reason(&self) -> Option<&'static str> {
+        #[cfg(target_os = "windows")]
+        if !crate::platform::windows::is_win_10_or_greater() {
+            return Some("Windows 10 or greater is required.");
+        }
+        #[cfg(target_os = "linux")]
+        if !crate::whiteboard::is_supported() {
+            return Some(
+                "This feature is not supported on native Wayland, please install XWayland or switch to X11.",
+            );
+        }
+        None
     }
 
     async fn toggle_privacy_mode(&mut self, t: TogglePrivacyMode) {

@@ -363,6 +363,10 @@ impl InvokeUiSession for SciterHandler {
         self.call("newMessage", &make_args!(msg));
     }
 
+    fn draw_action(&self, _action: DrawAction) {
+        // 旧 Sciter UI は画面注釈に対応しない（Flutter 版のみ）。
+    }
+
     fn switch_display(&self, display: &SwitchDisplay) {
         self.call("switchDisplay", &make_args!(display.display));
     }

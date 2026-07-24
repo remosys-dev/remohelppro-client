@@ -282,6 +282,10 @@ pub enum Data {
     ChatMessage {
         text: String,
     },
+    /// 顧客側が描いた画面注釈を CM プロセスから通信側へ渡す（JSON）。
+    DrawAction {
+        data: String,
+    },
     SwitchPermission {
         name: String,
         enabled: bool,

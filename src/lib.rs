@@ -62,6 +62,9 @@ mod tray;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod whiteboard;
 
+// 画面注釈（双方向お絵かき）の DrawAction ↔ JSON 変換
+pub mod draw_annotation;
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod updater;
 

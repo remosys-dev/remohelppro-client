@@ -1008,6 +1008,11 @@ impl InvokeUiSession for FlutterHandler {
         self.push_event("chat_client_mode", &[("text", &msg)], &[]);
     }
 
+    fn draw_action(&self, action: DrawAction) {
+        let data = crate::draw_annotation::to_json(&action);
+        self.push_event("draw_action", &[("data", &data)], &[]);
+    }
+
     fn switch_display(&self, display: &SwitchDisplay) {
         let resolutions = serialize_resolutions(&display.resolutions.resolutions);
         self.push_event(
