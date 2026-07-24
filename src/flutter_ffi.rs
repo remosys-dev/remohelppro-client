@@ -683,7 +683,8 @@ pub fn session_send_draw(session_id: SessionID, data: String) {
         Some(hbb_common::message_proto::draw_action::Union::Enable(e)) => {
             session.send_draw_enable(e);
         }
-        None => {}
+        // protobuf の oneof は non_exhaustive なので、未知の種別も受ける必要がある
+        _ => {}
     }
 }
 

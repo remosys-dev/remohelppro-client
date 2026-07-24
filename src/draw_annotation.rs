@@ -21,7 +21,8 @@ pub fn to_json(action: &DrawAction) -> String {
         }),
         Some(draw_action::Union::Clear(_)) => json!({ "kind": "clear" }),
         Some(draw_action::Union::Enable(e)) => json!({ "kind": "enable", "enable": e }),
-        None => json!({ "kind": "none" }),
+        // protobuf の oneof は non_exhaustive なので、未知の種別も受ける必要がある
+        _ => json!({ "kind": "none" }),
     };
     v.to_string()
 }

@@ -4223,7 +4223,8 @@ impl Connection {
                 // 顧客に黙って線が出ることがないよう、必ず告知帯を出す。
                 self.send_to_cm(ipc::Data::RemoteDrawing { on: enable });
             }
-            None => {}
+            // protobuf の oneof は non_exhaustive なので、未知の種別も受ける必要がある
+            _ => {}
         }
     }
 
