@@ -954,17 +954,34 @@ class _CustomerDrawButtonState extends State<_CustomerDrawButton> {
 
   @override
   Widget build(BuildContext context) {
+    // buildButton は _CmControlPanel のインスタンスメソッドなので使えない。
+    // 見た目を揃えた自前のボタンにする。
     return Listener(
       onPointerDown: (_) => _set(true),
       onPointerUp: (_) => _set(false),
       onPointerCancel: (_) => _set(false),
-      child: buildButton(
-        context,
-        color: _drawing ? Colors.blue.shade700 : MyTheme.accent,
-        onClick: () {},
-        icon: Icon(Icons.draw_outlined, color: Colors.white, size: 14),
-        text: _drawing ? '指を離すと終わります' : '自分も描く（押している間）',
-        textColor: Colors.white,
+      child: Container(
+        width: double.infinity,
+        margin: EdgeInsets.symmetric(vertical: 4.0),
+        padding: EdgeInsets.symmetric(horizontal: 10.0, vertical: 9.0),
+        decoration: BoxDecoration(
+          color: _drawing ? Colors.blue.shade700 : MyTheme.accent,
+          borderRadius: BorderRadius.circular(8.0),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.draw_outlined, color: Colors.white, size: 14),
+            SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _drawing ? '指を離すと終わります' : '自分も描く（押している間）',
+                style: TextStyle(color: Colors.white, fontSize: 12.5),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 
+// Offset/Canvas/Path/Paint などは material が dart:ui を再輸出しているので
+// dart:ui を直接 import しない（曖昧な参照を避ける）。
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../common.dart';
+import '../consts.dart';
 import 'model.dart';
+import 'platform_model.dart';
 
 /// 画面注釈（双方向お絵かき）。
 ///
@@ -164,8 +168,17 @@ class AnnotationModel with ChangeNotifier {
   // ── 内部 ──────────────────────────────────────────────────────
 
   void _addPoint(Offset offset) {
-    final pos = parent.target?.inputModel
-        .handlePointerDevicePos(kPointerEventKindMouse, offset.dx, offset.dy, false, '');
+    // 座標変換だけを借りる。描いている最中に画面が動くと線がずれるので、
+    // キャンバス移動と端スクロールは切っておく。
+    final pos = parent.target?.inputModel.handlePointerDevicePos(
+      kPointerEventKindMouse,
+      offset.dx,
+      offset.dy,
+      false,
+      '',
+      moveCanvas: false,
+      edgeScroll: false,
+    );
     if (pos == null) return;
     final x = pos.x.toInt();
     final y = pos.y.toInt();
