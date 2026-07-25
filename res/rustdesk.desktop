@@ -1,19 +1,19 @@
 [Desktop Entry]
-Name=RustDesk
-GenericName=Remote Desktop
-Comment=Remote Desktop
+Name=REMOHELP PRO
+GenericName=Remote Support
+Comment=法人向け遠隔サポート
 Exec=rustdesk %u
 Icon=rustdesk
 Terminal=false
 Type=Application
 StartupNotify=true
 Categories=Network;RemoteAccess;GTK;
-Keywords=internet;linux;dart;rust;remote-control;p2p;teamviewer;rust-lang;rdp;remote-desktop;vnc;
+Keywords=remote;support;remohelp;remohelppro;
 Actions=new-window;
 StartupWMClass=rustdesk
 
 X-Desktop-File-Install-Version=0.23
 
 [Desktop Action new-window]
-Name=Open a New Window
+Name=新しいウィンドウを開く
 Exec=rustdesk %u

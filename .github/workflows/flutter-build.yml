@@ -1714,7 +1714,9 @@ jobs:
             export CARGO_INCREMENTAL=0
             export DEB_ARCH=${{ matrix.job.deb_arch }}
             python3 ./build.py --flutter --skip-cargo
-            for name in rustdesk*??.deb; do
+            # build.py の出力が remohelppro-<version>.deb になったので、それを拾う。
+            #   ⚠ 旧 glob（rustdesk*??.deb）のままだと空振りして deb がどこにも行かない。
+            for name in remohelppro*??.deb; do
               mv "$name" "${name%%.deb}-${{ matrix.job.arch }}.deb"
             done
 
@@ -1753,7 +1755,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            rustdesk-*.deb
+            remohelppro-*.deb
             rustdesk-*.rpm
 
       - name: Upload deb

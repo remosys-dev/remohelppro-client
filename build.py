@@ -292,16 +292,22 @@ def generate_control_file(version):
     control_file_path = "../res/DEBIAN/control"
     system2('/bin/rm -rf %s' % control_file_path)
 
-    content = """Package: rustdesk
+    # REMOHELP PRO: 配布物なので発行元を自社にする。
+    #   ⚠ 内部パス（/usr/share/rustdesk, /etc/rustdesk）は**あえて変えない**。
+    #     startwm.sh / xorg.conf / systemd service / pam.d が相互に参照しており、
+    #     まとめて変えないと壊れる。利用者からは見えない場所なので、
+    #     まずは見える部分（パッケージ名・メニュー名・発行元）だけを直す。
+    content = """Package: remohelppro
 Section: net
 Priority: optional
 Version: %s
 Architecture: %s
-Maintainer: rustdesk <info@rustdesk.com>
-Homepage: https://rustdesk.com
+Maintainer: RemoSys Co.,Ltd <info@remosys.jp>
+Homepage: https://remohelppro.jp
 Depends: libgtk-3-0, libxcb-randr0, libxdo3 | libxdo4, libxfixes3, libxcb-shape0, libxcb-xfixes0, libasound2, libsystemd0, curl, libva2, libva-drm2, libva-x11-2, libgstreamer-plugins-base1.0-0, libpam0g, gstreamer1.0-pipewire%s
 Recommends: libayatana-appindicator3-1
-Description: A remote control software.
+Description: REMOHELP PRO - remote support for business
+ Screen sharing, remote control and camera support for helpdesks.
 
 """ % (version, get_deb_arch(), get_deb_extra_depends())
     file = open(control_file_path, "w")
@@ -360,7 +366,7 @@ def build_flutter_deb(version, features):
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
-    os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
+    os.rename('rustdesk.deb', '../remohelppro-%s.deb' % version)
     os.chdir("..")
 
 
@@ -397,7 +403,7 @@ def build_deb_from_folder(version, binary_folder):
 
     system2('/bin/rm -rf tmpdeb/')
     system2('/bin/rm -rf ../res/DEBIAN/control')
-    os.rename('rustdesk.deb', '../rustdesk-%s.deb' % version)
+    os.rename('rustdesk.deb', '../remohelppro-%s.deb' % version)
     os.chdir("..")
 
 
