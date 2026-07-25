@@ -21,6 +21,11 @@ on:
         # REMOHELP PRO: true のとき Windows だけをビルド（Android/iOS/macOS/Linux/appimage/flatpak を skip・分数節約）
         type: boolean
         default: false
+      linux_only:
+        # REMOHELP PRO: true のとき Linux だけをビルド（Windows/Android/iOS/macOS を skip・分数節約）
+        #   Raspberry Pi で検証するため aarch64 が要る（64bit の Raspberry Pi OS が対象）。
+        type: boolean
+        default: false
       mac_only:
         # REMOHELP PRO: true のとき macOS だけをビルド（Windows/Android/iOS/Linux/appimage/flatpak を skip・分数節約）
         #   mac-build.yml をゲート無しで呼ぶと全マトリクスが回り、1回で数時間分を消費していた。
@@ -74,7 +79,7 @@ jobs:
     uses: ./.github/workflows/bridge.yml
 
   build-RustDeskTempTopMostWindow:
-    if: ${{ !inputs.android_only && !inputs.mac_only }}
+    if: ${{ !inputs.android_only && !inputs.mac_only && !inputs.linux_only }}
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     with:
       upload-artifact: ${{ inputs.upload-artifact }}
@@ -86,7 +91,7 @@ jobs:
       fail-fast: false
 
   build-for-windows-flutter:
-    if: ${{ !inputs.android_only && !inputs.mac_only }}
+    if: ${{ !inputs.android_only && !inputs.mac_only && !inputs.linux_only }}
     name: ${{ matrix.job.target }}
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
     runs-on: ${{ matrix.job.os }}
@@ -375,7 +380,7 @@ jobs:
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
-    if: ${{ !inputs.android_only && !inputs.windows_only && !inputs.mac_only }}
+    if: ${{ !inputs.android_only && !inputs.windows_only && !inputs.mac_only && !inputs.linux_only }}
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     runs-on: ${{ matrix.job.os }}
     # Temporarily disable this action due to additional test is needed.
@@ -526,7 +531,7 @@ jobs:
             ./SignOutput/rustdesk-*.exe
 
   build-rustdesk-ios:
-    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only && !inputs.mac_only }}
+    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only && !inputs.mac_only && !inputs.linux_only }}
     name: build rustdesk ios ipa
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
@@ -646,7 +651,7 @@ jobs:
 
 
   build-for-macOS:
-    if: ${{ !inputs.android_only && !inputs.windows_only }}
+    if: ${{ !inputs.android_only && !inputs.windows_only && !inputs.linux_only }}
     name: ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     needs: [generate-bridge]
@@ -927,7 +932,7 @@ jobs:
           files: remohelppro-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
-    if: ${{ !inputs.windows_only && !inputs.mac_only }}
+    if: ${{ !inputs.windows_only && !inputs.mac_only && !inputs.linux_only }}
     needs: [generate-bridge]
     name: build rustdesk android apk ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
@@ -1787,7 +1792,7 @@ jobs:
             res/remohelppro-${{ env.VERSION }}*.zst
 
   build-rustdesk-linux-sciter:
-    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only && !inputs.mac_only }}
+    if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only && !inputs.mac_only && !inputs.linux_only }}
     runs-on: ${{ matrix.job.on }}
     name: build-rustdesk-linux-sciter ${{ matrix.job.target }}
     strategy:

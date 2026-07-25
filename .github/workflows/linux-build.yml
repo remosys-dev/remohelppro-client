@@ -1,0 +1,29 @@
+name: remohelppro Linux
+
+# REMOHELP PRO の Linux 版をビルドする。
+#
+#   ★Raspberry Pi で実機検証するために aarch64 が要る。
+#     対象は **64bit の Raspberry Pi OS（Desktop 版）**。
+#     32bit OS（armv7）では動かないので注意。
+#
+#   これまで Linux は一度も成果物が出ていなかった。原因は res/DEBIAN の
+#   maintainer script に実行権限が無く、dpkg-deb が必ず失敗していたこと（commit 029f580 で修正）。
+#
+#   `linux-build-*` タグを push すると自動ビルド。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'linux-build-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "linux"
+      linux_only: true
