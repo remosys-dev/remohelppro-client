@@ -399,7 +399,10 @@ pub fn send_chat(id: i32, text: String) {
 ///
 /// on の間だけ画面全体のオーバーレイがクリックを受け取るため、顧客は自分のPCを
 /// 操作できなくなる。必ず false を送り返すこと（オーバーレイ側にも 10 秒の安全弁がある）。
+/// ※ iOS には CM 側（被操作の受け入れ画面）が無く Data も入らないので、
+///   隣の send_chat と同じく除外する。これが無いと iOS ビルドだけ E0433/E0609 で落ちる。
 #[inline]
+#[cfg(not(any(target_os = "ios")))]
 pub fn set_customer_draw_mode(id: i32, on: bool) {
     let clients = CLIENTS.read().unwrap();
     if let Some(client) = clients.get(&id) {
@@ -412,6 +415,7 @@ pub fn set_customer_draw_mode(id: i32, on: bool) {
 /// 実際の後始末（オーバーレイの解除・線の消去・相談員への通知）は通信側で行う。
 /// CM 側の表示は、通信側から返ってくる RemoteDrawing{on:false} で戻る。
 #[inline]
+#[cfg(not(any(target_os = "ios")))]
 pub fn stop_remote_drawing(id: i32) {
     let clients = CLIENTS.read().unwrap();
     if let Some(client) = clients.get(&id) {
