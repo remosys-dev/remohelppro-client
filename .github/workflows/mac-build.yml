@@ -10,8 +10,19 @@ name: remohelppro Mac / Linux
 #     警告なしで配るには Apple Developer Program（年 $99）が必要。
 #
 #   `mac-build-*` タグを push すると自動ビルド。
+#
+#   ⚠ 既定は **macOS だけ**（mac_only）。ゲートを付けずに flutter-build.yml を呼ぶと
+#     Windows/Android/iOS/Linux まで全マトリクスが回り、1回で数時間分を消費する。
+#     Linux も一緒に作りたいときだけ、手動実行で include_linux にチェックを入れる。
+#     （Linux は res/DEBIAN/preinst の実行権限が squash で落ちており deb 化に失敗する。
+#       製品スコープ外なので未修正）
 on:
   workflow_dispatch:
+    inputs:
+      include_linux:
+        description: 'Linux 版も一緒にビルドする（既定は macOS のみ）'
+        type: boolean
+        default: false
   push:
     tags:
       - 'mac-build-*'
@@ -26,3 +37,5 @@ jobs:
     with:
       upload-artifact: true
       upload-tag: "mac"
+      # タグ push では inputs が空なので !'' = true → macOS のみ。
+      mac_only: ${{ !inputs.include_linux }}
