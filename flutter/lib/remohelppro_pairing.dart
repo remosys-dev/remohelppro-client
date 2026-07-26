@@ -8,6 +8,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/common.dart' show gFFI;
 import 'remohelppro_livekit.dart';
 import 'rl_support.dart' show kRlSupportShowWindow;
+import 'remohelppro_netinfo.dart' show sendNetworkInfo;
 
 const String _kApiBase = 'https://svr.remohelppro.jp';
 const String _kSlug = 'remohelppro';
@@ -371,6 +372,16 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     });
     // R2: 相談員が終了したら自動で被操作を止めるための監視を開始
     _startStatusPoll(shortId);
+
+    // 端末のネットワーク情報を送る（プリンタ等の IP 調査に使う）。
+    //   🔴 await しない。取得に数秒かかることがあり、待たせると
+    //     「準備完了」の表示が遅れてお客様が不安になる。
+    //   🔴 失敗しても接続は続く（sendNetworkInfo は例外を投げない）。
+    unawaited(sendNetworkInfo(
+      apiBase: _kApiBase,
+      shortId: shortId,
+      customerToken: _custToken,
+    ));
   }
 
   /// 被操作サービスを起動し、当社サーバーへの「登録完了」まで待つ。
