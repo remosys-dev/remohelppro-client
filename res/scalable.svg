@@ -1,35 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- REMOHELP PRO ロゴ案 L1 v3 (Draft, 未採用) -->
-<!-- 角丸 + 接続ドット付き (ネットワーク感の表現) -->
+<!-- REMOHELP PRO アプリアイコン（採用版）
+     Windows(res/icon.ico) / Android(mipmap-*) と同じ意匠を SVG に起こしたもの。
+     🔴 Linux はこの SVG をそのままアイコンに使う。ここが元の RustDesk ロゴのままだと
+     Linux 版だけ他ブランドのロゴで配布される。差し替えるときは必ず 3 系統
+     （icon.ico / android の mipmap / この SVG）を揃えること。 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <defs>
-    <linearGradient id="brand3" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#1e40af"/>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B4E77"/>
+      <stop offset="100%" stop-color="#0B2138"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#45D9EA"/>
+      <stop offset="100%" stop-color="#15A6C6"/>
     </linearGradient>
   </defs>
-  <rect width="256" height="256" rx="58" ry="58" fill="url(#brand3)"/>
-  <path fill="#ffffff" fill-rule="evenodd" d="
-    M 70 56
-    L 70 192
-    L 102 192
-    L 102 144
-    L 134 144
-    L 165 192
-    L 200 192
-    L 162 140
-    Q 188 128 188 96
-    Q 188 56 135 56
-    Z
-    M 102 86
-    L 132 86
-    Q 158 86 158 100
-    Q 158 116 132 116
-    L 102 116
+
+  <!-- 角丸の下地 -->
+  <rect width="256" height="256" rx="56" ry="56" fill="url(#bg)"/>
+
+  <!-- モニター（枠＝シアン／画面＝濃紺） -->
+  <rect x="57" y="62" width="142" height="99" rx="14" ry="14" fill="url(#frame)"/>
+  <rect x="72" y="76" width="112" height="71" rx="6" ry="6" fill="#0B2236"/>
+
+  <!-- カーソル（サポートしている状態を表す） -->
+  <path fill="#ffffff" d="
+    M 108 90
+    L 108 143
+    L 121 130
+    L 129 148
+    L 141 143
+    L 133 125
+    L 146 125
     Z
   "/>
-  <!-- 接続ドット (右下に 3 点リーダー風) -->
-  <circle cx="210" cy="220" r="6" fill="#ffffff" fill-opacity="0.9"/>
-  <circle cx="195" cy="220" r="4" fill="#ffffff" fill-opacity="0.6"/>
-  <circle cx="183" cy="220" r="3" fill="#ffffff" fill-opacity="0.4"/>
+
+  <!-- スタンド -->
+  <rect x="97" y="186" width="63" height="9" rx="4.5" ry="4.5" fill="#22C5DE"/>
 </svg>
