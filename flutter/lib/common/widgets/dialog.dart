@@ -1840,8 +1840,7 @@ void showConfirmSwitchSidesDialog(
           ),
           const SizedBox(height: 8),
           Text(
-            'この間、お客様はあなたのパソコンを操作できます。
-'
+            'この間、お客様はあなたのパソコンを操作できます。\n'
             '見せるのをやめるときは、画面に出る「接続」の窓から切断してください。',
           ),
         ],
