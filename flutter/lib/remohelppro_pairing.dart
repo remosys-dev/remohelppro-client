@@ -9,6 +9,7 @@ import 'package:flutter_hbb/common.dart' show gFFI;
 import 'remohelppro_livekit.dart';
 import 'rl_support.dart' show kRlSupportShowWindow;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
+import 'remohelppro_resident.dart' show RemohelpproResidentCard;
 
 const String _kApiBase = 'https://svr.remohelppro.jp';
 const String _kSlug = 'remohelppro';
@@ -785,6 +786,13 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                 ],
               ),
             ),
+            // 🔴 常駐化の許可はここに出す（2026-07-27 実機で判明）。
+            //   これまでブラウザの顧客ページにしか実装しておらず、
+            //   アプリで接続しているお客様には**何も出ていなかった**。
+            //   ＝ 相談員が「常駐にする」を押しても常駐にできなかった。
+            //   遠隔操作は常にアプリ経由なので、実運用ではこちらが本流。
+            if (_shortId != null)
+              RemohelpproResidentCard(apiBase: _kApiBase, shortId: _shortId!),
             const SizedBox(height: 16),
             _outlineButton('終了する', Icons.stop_circle_outlined, _endByCustomer,
                 color: _danger, border: const Color(0xFFF3C9C9)),
