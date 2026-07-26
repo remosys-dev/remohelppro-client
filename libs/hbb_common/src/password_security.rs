@@ -86,6 +86,18 @@ pub fn approve_mode() -> ApproveMode {
 }
 
 pub fn hide_cm() -> bool {
+    // 🔴 常駐版以外では**絶対に隠さない**。
+    //
+    //   接続管理ウィンドウ（CM）は「今つながっている相手を切る」唯一の画面。
+    //   常駐版は無人アクセス用に approve-mode=password / 固定パスワードを自分で設定するが、
+    //   その設定のまま相談員のPCで「相談員の画面を見せる」を使うと、
+    //   **相談員側が操作される側になったときに CM が出ず、切る手段が画面から消える**。
+    //   人が座っているPCで停止手段が無いのは事故になる（2026-07-26 実機で判明）。
+    //
+    //   隠してよいのは「誰も座っていない常駐端末」だけ。
+    if !crate::config::IS_RESIDENT_BUILD && Config::get_option("resident") != "Y" {
+        return false;
+    }
     approve_mode() == ApproveMode::Password
         && verification_method() == VerificationMethod::OnlyUsePermanentPassword
         && crate::config::option2bool("allow-hide-cm", &Config::get_option("allow-hide-cm"))

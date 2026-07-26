@@ -200,29 +200,11 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
           onPressed: () => connectWithToken(isTcpTunneling: true)),
     );
   }
-  // note
-  if (isDefaultConn && !bind.isDisableAccount()) {
-    v.add(
-      TTextMenu(
-          child: Text(translate('Note')),
-          onPressed: () async {
-            bool isLogin =
-                bind.mainGetLocalOption(key: 'access_token').isNotEmpty;
-            if (!isLogin) {
-              final res = await loginDialog();
-              if (res != true) return;
-              // Desktop: send message to main window to refresh login status
-              // Web: login is required before connection, so no need to refresh
-              // Mobile: same isolate, no need to send message
-              if (isDesktop) {
-                rustDeskWinManager.call(
-                    WindowType.Main, kWindowRefreshCurrentUser, "");
-              }
-            }
-            showAuditDialog(ffi);
-          }),
-    );
-  }
+  // note … 削除（2026-07-26）
+  //   ★このノートは監査サーバー（get_audit_server("conn")）へ POST する RustDesk の機能。
+  //     当社はそのサーバーを立てていないので、**書いた内容はどこにも届かない**。
+  //     さらに Web 側に正式な対応記録（作業内容・結果・対応メモ）があるため、
+  //     入口が2つあり、こちらに書くと記録が失われる。混同を避けるため外した。
   // divider
   if (isDefaultConn && (isDesktop || isWebDesktop)) {
     v.add(TTextMenu(child: Offstage(), onPressed: () {}, divider: true));

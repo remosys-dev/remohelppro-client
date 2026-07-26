@@ -428,7 +428,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Weak", "脆弱"),
         ("Medium", "普通"),
         ("Strong", "強力"),
-        ("Switch Sides", "接続方向の切り替え"),
+        ("Switch Sides", "相談員の画面を見せる"),
         ("Please confirm if you want to share your desktop?", "デスクトップの共有を許可しますか？"),
         ("Display", "ディスプレイ"),
         ("Default View Style", "既定の表示スタイル"),

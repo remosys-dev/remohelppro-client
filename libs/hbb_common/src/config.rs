@@ -2313,8 +2313,13 @@ impl UserDefaultConfig {
         match key {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             keys::OPTION_VIEW_STYLE => self.get_string(key, "adaptive", vec!["original"]),
+            // 🔴 デスクトップの既定を「ウィンドウに合わせる」(adaptive) に変更（2026-07-26）。
+            //   上流の既定は原寸(original)。高解像度のお客様PCに繋ぐと画面外にはみ出し、
+            //   スクロールしないと全体が見えない。サポート中にこれは時間を食う。
+            //   相談員が毎回切り替えるのは動線が増えるので、既定を変える。
+            //   （原寸で見たいときはツールバーから切り替えられる）
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            keys::OPTION_VIEW_STYLE => self.get_string(key, "original", vec!["adaptive"]),
+            keys::OPTION_VIEW_STYLE => self.get_string(key, "adaptive", vec!["original"]),
             keys::OPTION_SCROLL_STYLE => {
                 self.get_string(key, "scrollauto", vec!["scrolledge", "scrollbar"])
             }

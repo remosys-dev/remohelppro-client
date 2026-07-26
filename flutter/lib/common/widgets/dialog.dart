@@ -1824,9 +1824,28 @@ void showConfirmSwitchSidesDialog(
       closeConnection(id: id);
     }
 
+    // 🔴 何が起きるかを具体的に書く（2026-07-26）。
+    //   これを押すと **相談員のPCがお客様から操作される側になる**。
+    //   元の文言は "Please confirm if you want to share your desktop?" だけで、
+    //   「自分のPCが操作される」ことも「どう止めるか」も伝わらなかった。
+    //   実機で「顧客に勝手に操作されても止める手段が分からない」という事故が起きている。
     return CustomAlertDialog(
-      content: msgboxContent('info', 'Switch Sides',
-          'Please confirm if you want to share your desktop?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'あなたの画面をお客様に見せます。',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'この間、お客様はあなたのパソコンを操作できます。
+'
+            '見せるのをやめるときは、画面に出る「接続」の窓から切断してください。',
+          ),
+        ],
+      ),
       actions: [
         dialogButton('Cancel', onPressed: close, isOutline: true),
         dialogButton('OK', onPressed: submit),
