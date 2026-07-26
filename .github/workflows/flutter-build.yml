@@ -323,6 +323,14 @@ jobs:
           mv ./rustdesk/rustdesk.exe ./rustdesk/remohelppro.exe || cp ./rustdesk/rustdesk.exe ./rustdesk/remohelppro.exe
           INNER_EXE="remohelppro.exe"
           echo "RL: inner exe renamed to remohelppro.exe (all builds)"
+          # 🔴 ワンタイム版の目印。ランナー(libs/portable)がこれを見て
+          #   「使い終わったら自分ごと消す」動作に入る。
+          #   ファイル名での判定は、リネーム規則を変えた瞬間に静かに壊れるのでやめた
+          #   （実際に壊れていて、自己削除が一度も動いていなかった）。
+          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            echo "onetime" > ./rustdesk/remohelppro-onetime.flag
+            echo "RL: onetime marker placed (self-delete enabled)"
+          fi
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/$INNER_EXE

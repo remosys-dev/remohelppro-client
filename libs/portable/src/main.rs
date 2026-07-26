@@ -140,12 +140,19 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     // 2026-06-24: ワンタイム版の設定隔離先(展開dir)を子プロセスへ RL_APP_DIR で渡す。
     //   子(rustdesk.exe)の core_main がこれを APP_DIR に設定し、インストール版に触れない。
     let rl_app_dir = path.parent().map(|p| p.to_string_lossy().to_string());
-    // RL build-16 (C): 内包EXEが REMOHELP PRO.exe ならワンタイムビルドと判定。
-    //   CI(flutter-build.yml) が onetime 時のみ inner exe を REMOHELP PRO.exe にリネームする。
-    //   フリートポータブルは inner=rustdesk.exe → false → 従来動作(即spawn・自己削除なし)。
+    // 🔴 ワンタイム版かどうかは **同梱した目印ファイル** で判定する（2026-07-26 修正）。
+    //
+    //   元は内包EXEの名前が "REMOHELP PRO.exe" かどうかで見ていた。しかし CI は
+    //   実際には "remohelppro.exe"（空白なし）へリネームしており、**一度も一致して
+    //   いなかった**。＝ 自己削除がまったく動かず、お客様の PC に exe が残り、
+    //   何度でもダブルクリックで起動できる状態だった（実機で指摘を受けた「使い回し」）。
+    //
+    //   ファイル名で判定すると、リネーム規則を変えた瞬間に静かに壊れる。
+    //   しかも壊れても「消えないだけ」でエラーが出ないので気づけない。
+    //   CI が置く目印ファイルの有無で判定すれば、名前を変えても影響しない。
     let is_onetime = path
-        .file_name()
-        .map(|n| n.to_str().unwrap_or("").eq_ignore_ascii_case("REMOHELP PRO.exe"))
+        .parent()
+        .map(|d| d.join("remohelppro-onetime.flag").exists())
         .unwrap_or(false);
     // run executable
     let mut cmd = Command::new(&path);
