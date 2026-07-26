@@ -66,7 +66,19 @@ env:
   # 2. Update the `VCPKG_COMMIT_ID` in `ci.yml` and `playground.yml`.
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836" # 2025.01.13, got "/opt/artifacts/vcpkg/vcpkg: No such file or directory" with latest version
-  VERSION: "1.4.6"
+  # 🔴 ビルドごとに必ず上がる版番号（2026-07-27）。
+  #   以前は "1.4.6" 固定だったため、新しくビルドしても Windows は
+  #   「同じものが入っている」と判断し、インストーラが**更新ではなく「修復」**に
+  #   なっていた。＝ 修正を入れても手元のアプリが古いままだった（実機で判明）。
+  #   自動アップデートも「新しいかどうか」を判定できないので成立しない。
+  #
+  #   ⚠ **4桁目を足しても効かない**。Windows Installer は ProductVersion の
+  #     4桁目を無視する仕様なので、1.4.6.7 と 1.4.6.8 は「同じ版」と見なされる。
+  #     必ず3桁目までのどれかを上げること。
+  #
+  #   github.run_number はワークフローごとに実行のたび必ず増えるので3桁目に入れる。
+  #   （3桁目の上限は 65535。現状の運用では到達しない）
+  VERSION: "1.4.${{ github.run_number }}"
   NDK_VERSION: "r28c"
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
@@ -355,7 +367,10 @@ jobs:
         run: |
           pushd ./res/msi
           # remohelppro: bin-name=remohelppro(=内包exe remohelppro.exe と一致) ／ 日本語(ja-jp)UIでMSIをビルド
-          python preprocess.py --arp --bin-name remohelppro -d ../../rustdesk
+          # 🔴 --version を渡さないと MSI の中の版は exe 由来（Cargo.toml の 1.4.6）
+          #   のままになり、ファイル名だけ変わって中身は同じ版になる。
+          #   ＝ Windows は「同じものが入っている」と判断し「修復」を出す。
+          python preprocess.py --arp --bin-name remohelppro --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
           mv ./Package/bin/x64/Release/ja-jp/Package.msi ../../SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
