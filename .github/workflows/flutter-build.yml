@@ -351,7 +351,7 @@ jobs:
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
           mv ./Package/bin/x64/Release/ja-jp/Package.msi ../../SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
-          sha256sum ../../SignOutput/rustdesk-*.msi
+          sha256sum ../../SignOutput/remohelppro-*.msi
 
       # remohelppro: MSIが出来ていれば上げる（MSI失敗でもjobは失敗させない＝単一exeは別ステップで取得済み）
       - name: Upload remohelppro MSI installer (if built)
@@ -375,8 +375,8 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ./SignOutput/rustdesk-*.msi
-            ./SignOutput/rustdesk-*.exe
+            ./SignOutput/remohelppro-*.msi
+            ./SignOutput/remohelppro-*.exe
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
@@ -528,7 +528,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ./SignOutput/rustdesk-*.exe
+            ./SignOutput/remohelppro-*.exe
 
   build-rustdesk-ios:
     if: ${{ inputs.upload-artifact && !inputs.android_only && !inputs.windows_only && !inputs.mac_only && !inputs.linux_only }}
@@ -1756,7 +1756,7 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: |
             remohelppro-*.deb
-            rustdesk-*.rpm
+            remohelppro-*.rpm
 
       - name: Upload deb
         uses: actions/upload-artifact@master
