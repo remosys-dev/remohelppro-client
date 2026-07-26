@@ -2789,7 +2789,29 @@ pub fn option2bool(option: &str, value: &str) -> bool {
     }
 }
 
+/// WebSocket(443) への自動フォールバック。
+///
+/// お客様の会社ネットワークが 21115〜21119 を塞いでいると、独自ポートでは繋がらない。
+/// 多くの企業は 80/443 しか開けていないため、そのままでは「繋がらないお客様」が出る。
+/// そこで **独自ポートで繰り返し失敗したら WebSocket(443) に切り替える**。
+///
+/// 設定 `allow-websocket` が明示的に有効なら最初から WS を使う（従来どおり）。
+/// このフラグは実行中だけのもので、設定ファイルには書かない
+/// （環境が直れば次回起動で再び高速な直結を試す）。
+pub static WS_FALLBACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_ws_fallback(on: bool) {
+    WS_FALLBACK.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn is_ws_fallback() -> bool {
+    WS_FALLBACK.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub fn use_ws() -> bool {
+    if is_ws_fallback() {
+        return true;
+    }
     let option = keys::OPTION_ALLOW_WEBSOCKET;
     option2bool(option, &Config::get_option(option))
 }

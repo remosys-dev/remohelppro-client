@@ -59,6 +59,10 @@ impl RendezvousMediator {
 
     pub async fn start_all() {
         crate::test_nat_type();
+        // 独自ポート(21115-21119)で連続して失敗したら WebSocket(443) に切り替えるための回数。
+        //   企業ネットワークは 80/443 しか開いていないことが多く、
+        //   切り替えが無いと「繋がらないお客様」がそのまま残る。
+        let mut consecutive_failures: u32 = 0;
         if config::is_outgoing_only() {
             loop {
                 sleep(1.).await;
@@ -124,6 +128,35 @@ impl RendezvousMediator {
                     }));
                 }
                 join_all(futs).await;
+
+                // ── WebSocket(443) への自動フォールバック ──────────────
+                //   独自ポートで 2 回続けて駄目なら 443 に切り替える。
+                //   企業ネットワークは 80/443 しか開いていないことが多いため。
+                //   設定で明示的に WS を選んでいる場合は何もしない（既にWSなので）。
+                if config::option2bool(
+                    config::keys::OPTION_ALLOW_WEBSOCKET,
+                    &Config::get_option(config::keys::OPTION_ALLOW_WEBSOCKET),
+                ) {
+                    // 利用者が明示的にWSを選んでいる。触らない。
+                } else if config::get_online_state() > 0
+                    || conn_start_time.elapsed().as_secs() >= 30
+                {
+                    // 応答が返った（latency が記録された）か、30秒以上維持できた＝繋がっていた。
+                    // 次回はまた高速な直結から試す（環境が直っているかもしれないため）。
+                    if config::is_ws_fallback() {
+                        log::info!("connection recovered; leaving websocket fallback");
+                        config::set_ws_fallback(false);
+                    }
+                    consecutive_failures = 0;
+                } else {
+                    consecutive_failures = consecutive_failures.saturating_add(1);
+                    if consecutive_failures >= 2 && !config::is_ws_fallback() {
+                        log::info!(
+                            "rendezvous failed {consecutive_failures} times on native ports; falling back to websocket(443)"
+                        );
+                        config::set_ws_fallback(true);
+                    }
+                }
             } else {
                 server.write().unwrap().close_connections();
             }
