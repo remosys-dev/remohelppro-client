@@ -244,14 +244,40 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       //   pending_control=遠隔操作 → RustDesk（grant-control で操作許可）。
       //   ※ 画面共有(view_only)で grant-control を呼ぶと mode不一致で 409 になるため、
       //     操作員側(op)の LivekitViewer 視聴と揃えて LiveKit 経路にする。
+      // 🔴 PC で画面共有(view_only)のコードを入れたら、アプリで画面共有まで通す（2026-07-26）。
+      //   それまでは「このコードはブラウザでご利用ください」と突き返していた。
+      //   お客様は**すでにアプリを起動している**のに、そこからブラウザを開いて
+      //   同じ番号を入れ直せ、という案内になっていた。電話で誘導する相談員の手間が倍になる。
+      //   アプリを入れた人ほど不便になるのは筋が通らない。
+      //
+      //   ⚠ 画面共有は「見せるだけ」の約束なので、操作系を**顧客側で全部切ってから**
+      //     繋ぐ。RustDesk の権限は被操作側（＝お客様のPC）が判定するので、
+      //     相談員側の画面を制限するのではなく、**実際に操作できない**状態になる。
+      //     ここを緩めると、画面共有と言って操作できてしまう＝同意違反になる。
+      if (mode == 'view_only' &&
+          (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+        for (final k in const [
+          'enable-keyboard',
+          'enable-clipboard',
+          'enable-file-transfer',
+          'enable-file-copy-paste',
+          'enable-terminal',
+          'enable-tunnel',
+          'enable-remote-printer',
+        ]) {
+          await bind.mainSetOption(key: k, value: 'N');
+        }
+        await _finishRemotePairing(shortId, viewOnly: true);
+        return;
+      }
+
       if (mode == 'camera' || mode == 'view_only') {
-        // PC(Windows/Mac/Linux)では、カメラ・画面共有は「ブラウザ」で行う（アプリ不要）。
-        //   このアプリ(PC版)が担当するのは「遠隔操作」だけ。
+        // カメラはブラウザ（PC版アプリはカメラ配信を持たない）。
         if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
           throw Exception(
               'このコードは「ブラウザ」でご利用ください。\n'
               'ブラウザで svr.remohelppro.jp を開き、同じ認証コードを入力してください。\n'
-              '（画面共有・カメラはアプリ不要でご利用いただけます）');
+              '（カメラはアプリ不要でご利用いただけます）');
         }
         final isCamera = mode == 'camera';
         if (!mounted) return;
@@ -276,7 +302,26 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   /// shortId 確定後の共通処理（手入力・自動接続の両方から呼ぶ）。
   ///   自分のRustDesk ID取得（リレー登録待ちのリトライ付き）→ grant-control で
   ///   onetimeToken → それを一時パスワードに設定 → 準備完了表示＋終了監視を開始。
-  Future<void> _finishRemotePairing(String shortId) async {
+  Future<void> _finishRemotePairing(String shortId,
+      {bool viewOnly = false}) async {
+    // 🔴 遠隔操作のときは、操作系を必ず戻してから繋ぐ（2026-07-26）。
+    //   直前に同じPCで画面共有を使っていると 'N' が残ったままで、
+    //   相談員が繋いでもキーボードもマウスも効かない。原因が見えないので厄介。
+    //   画面共有側で切っているのだから、遠隔操作側で戻すのが対。
+    if (!viewOnly) {
+      for (final k in const [
+        'enable-keyboard',
+        'enable-clipboard',
+        'enable-file-transfer',
+        'enable-file-copy-paste',
+        'enable-terminal',
+        'enable-tunnel',
+        'enable-remote-printer',
+      ]) {
+        await bind.mainSetOption(key: k, value: 'Y');
+      }
+    }
+
     // ★build-27 最重要修正：ここで被操作サービスを起動する。
     //   これが無いと端末は当社サーバー(hbbs)へ一度も登録されない。
     //   それでも mainGetMyId() は「ローカル生成のID」を返してしまうため、
@@ -297,7 +342,13 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         'Content-Type': 'application/json',
         if (_custToken != null) 'x-customer-token': _custToken!,
       },
-      body: jsonEncode({'shortId': shortId, 'rustdeskId': myId}),
+      body: jsonEncode({
+        'shortId': shortId,
+        'rustdeskId': myId,
+        // 画面共有なら「見るだけ」であることをサーバーにも伝える。
+        // 相談員の画面に「操作はできません」と出すのに使う。
+        if (viewOnly) 'viewOnly': true,
+      }),
     );
     if (gr.statusCode != 200) {
       throw Exception('接続の準備に失敗しました（${gr.statusCode}）');
