@@ -19,6 +19,68 @@ const APP_METADATA_CONFIG: &str = "meta.toml";
 const META_LINE_PREFIX_TIMESTAMP: &str = "timestamp = ";
 const APP_PREFIX: &str = "rustdesk";
 const APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
+
+/// ワンタイム版の有効期限（UNIX秒）。**CI がワンタイムのビルド時にだけ渡す**。
+///
+/// 🔴 目的（2026-07-27 実機テストの指摘）＝ お客様のPCに残った古いファイルを
+///    ダブルクリックしても、**認証コードの画面すら出さない**ようにする。
+///    自己削除は入れたが、それを取りこぼした場合・実行前に別の場所へ複製された
+///    場合の**二段目の歯止め**として期限を焼き込む。
+///
+/// 埋まっていなければ期限なし＝常駐版・相談員版・開発ビルドは一切影響を受けない。
+const ONETIME_EXPIRES_AT: Option<&str> = option_env!("RL_ONETIME_EXPIRES_AT");
+
+/// 期限切れか。**判断がつかないときは false（＝起動させる）**。
+///
+/// ⚠ ここで迷って止めると、目の前で困っているお客様のサポートが始められない。
+///    時計が読めない・値が壊れているといった不確かな場合は通す。
+///    止めるのは「確実に期限を過ぎている」と言えるときだけにする。
+fn is_onetime_expired() -> bool {
+    let Some(raw) = ONETIME_EXPIRES_AT else {
+        return false;
+    };
+    let Ok(expires_at) = raw.trim().parse::<u64>() else {
+        return false;
+    };
+    if expires_at == 0 {
+        return false;
+    }
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    now.as_secs() > expires_at
+}
+
+/// 期限切れをお客様に伝える。ここで黙って終わると「押しても何も起きない」に
+/// なってしまい、お客様が同じファイルを何度も押すことになる。
+fn notify_onetime_expired() {
+    let text = "このファイルは有効期限が切れています。\n\n\
+                お手数ですが、担当者からご案内のページを開いて、\n\
+                もう一度ダウンロードしてからお使いください。\n\n\
+                （安全のため、サポート用のファイルは一定期間で使えなくなります）";
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        fn wide(s: &str) -> Vec<u16> {
+            std::ffi::OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        }
+        let body = wide(text);
+        let title = wide("REMOHELP PRO");
+        unsafe {
+            winapi::um::winuser::MessageBoxW(
+                std::ptr::null_mut(),
+                body.as_ptr(),
+                title.as_ptr(),
+                winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONWARNING,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    eprintln!("{}", text);
+}
 #[cfg(windows)]
 const SET_FOREGROUND_WINDOW_ENV_KEY: &str = "SET_FOREGROUND_WINDOW";
 
@@ -255,6 +317,11 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
 }
 
 fn main() {
+    // 🔴 展開より前に見る。期限切れなら一時フォルダにも何も置かず、そのまま終わる。
+    if is_onetime_expired() {
+        notify_onetime_expired();
+        return;
+    }
     let mut args = Vec::new();
     let mut arg_exe = Default::default();
     let mut i = 0;

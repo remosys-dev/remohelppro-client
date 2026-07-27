@@ -36,6 +36,13 @@ on:
         #   config.rs の IS_RESIDENT_BUILD を sed で true 化する（APP_NAME 焼込と同流儀）。
         type: boolean
         default: false
+      onetime_valid_days:
+        # REMOHELP PRO: ワンタイム版の有効期限（日数）。support_show_window のときだけ効く。
+        #   期限を過ぎたファイルは**起動そのものを断る**（認証コード画面を出さない）。
+        #   短くするほど「残った古いファイル」の危険は減るが、落としてすぐ使わない
+        #   お客様が再ダウンロードになる。7日は、その日のうちに使う運用を前提にした余裕。
+        type: number
+        default: 7
 
 # NOTE: F-Droid builder script 'flutter/build_fdroid.sh' reads environment
 # variables from this workflow!
@@ -363,6 +370,12 @@ jobs:
           if [ "${{ inputs.support_show_window }}" = "true" ]; then
             echo "onetime" > ./rustdesk/remohelppro-onetime.flag
             echo "RL: onetime marker placed (self-delete enabled)"
+            # 🔴 有効期限を焼き込む（2026-07-27）。お客様のPCに残った古いファイルを
+            #   ダブルクリックしても認証コード画面を出さないための二段目の歯止め。
+            #   自己削除を取りこぼした場合・実行前に複製された場合はこれで止まる。
+            #   ★ワンタイムのときだけ渡す。常駐版・相談員版には期限を付けない。
+            export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ inputs.onetime_valid_days }} * 86400 ))
+            echo "RL: onetime expires at ${RL_ONETIME_EXPIRES_AT} ($(date -u -d @${RL_ONETIME_EXPIRES_AT} '+%Y-%m-%d %H:%M UTC'))"
           fi
           pushd ./libs/portable
           pip3 install -r requirements.txt
