@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show sqrt;
 
 // Offset/Canvas/Path/Paint などは material が dart:ui を再輸出しているので
 // dart:ui を直接 import しない（曖昧な参照を避ける）。
@@ -197,6 +198,12 @@ class AnnotationModel with ChangeNotifier {
         if (_pendingXs.isNotEmpty) {
           _pendingXs[_pendingXs.length - 1] = x;
           _pendingYs[_pendingYs.length - 1] = y;
+        } else {
+          // 🔴 直前の送信で出し切った直後はここに来る。以前は何もしていなかったので、
+          //   間引きに入った点が**相手に一度も届かず**、顧客側の線だけが途中で
+          //   止まっていた（こちらの画面には見えているので気づきにくい）。
+          _pendingXs.add(x);
+          _pendingYs.add(y);
         }
         notifyListeners();
         _scheduleFlush();
@@ -214,13 +221,18 @@ class AnnotationModel with ChangeNotifier {
 
   bool _isNearlyCollinear(
       int x1, int y1, int x2, int y2, int x3, int y3) {
-    // 点3が線分(1,2)の延長からどれだけ外れているか
+    // 点3が直線(1,2)からどれだけ外れているか（＝垂線の長さ・ピクセル）。
     final dx = (x2 - x1).toDouble();
     final dy = (y2 - y1).toDouble();
-    final len = dx * dx + dy * dy;
-    if (len == 0) return true;
+    final lenSq = dx * dx + dy * dy; // ★長さの「2乗」
+    if (lenSq == 0) return true;
     final cross = ((x3 - x1) * dy - (y3 - y1) * dx).abs();
-    return cross / len.abs() < _simplifyTolerance;
+    // 🔴 必ず平方根を取ること（2026-07-27 実機で判明したバグ）。
+    //   lenSq のまま割ると、値は「ずれ ÷ 点の間隔」になってしまう。
+    //   描いている最中の点の間隔は数px しかないので、**直角に折れ曲がっても**
+    //   許容値 2.0 を下回り、すべての点が「直線上」と判定されていた。
+    //   その結果ひと筆が常に2点しか持たず、何を描いても直線になっていた。
+    return cross / sqrt(lenSq) < _simplifyTolerance;
   }
 
   void _scheduleFlush() {
@@ -244,14 +256,21 @@ class AnnotationModel with ChangeNotifier {
   void _flush(bool end) {
     if (_pendingXs.isEmpty && !end) return;
     if (_pendingXs.isEmpty && end) {
-      // 送る点は無いが、ひと筆の終わりだけは伝える
+      // 送る点は無いが、ひと筆の終わりだけは伝えたい。
+      // 🔴 ここで (0,0) を送ってはいけない（2026-07-27 実機で判明したバグ）。
+      //   受け取った側は届いた点をそのまま線に繋ぐので、**画面の左上隅へ
+      //   一直線が引かれてしまう**。お客様の画面にだけ出るので気づきにくい。
+      //   終わりを伝えるだけなら、相手が既に持っている「最後の点」をもう一度
+      //   送ればよい（同じ点＝長さ0なので見た目は変わらない）。
+      final s = _local.isNotEmpty ? _local.last : null;
+      if (s == null || s.xs.isEmpty) return;
       _send(jsonEncode({
         'kind': 'stroke',
-        'xs': [0],
-        'ys': [0],
+        'xs': [s.xs.last],
+        'ys': [s.ys.last],
         'color': colorLocal,
         'width': strokeWidth,
-        'display': 0,
+        'display': parent.target?.ffiModel.pi.currentDisplay ?? 0,
         'end': true,
       }));
       return;
