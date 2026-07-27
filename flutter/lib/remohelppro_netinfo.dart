@@ -139,6 +139,27 @@ Future<List<Map<String, dynamic>>> _nics(String? defaultIp, String? defaultIface
   return nics;
 }
 
+/// 人が読む OS 名。Windows は 10 と 11 を分ける。
+///   Platform.operatingSystemVersion は
+///   "Windows 10 Pro" 10.0 (Build 22631) のような文字列。
+///   🔴 ビルド番号 22000 以上が Windows 11。表示名は 10 のままなので、
+///     名前で判定すると 11 を 10 と誤って記録する。
+String _osLabel() {
+  if (Platform.isWindows) {
+    final v = Platform.operatingSystemVersion;
+    final m = RegExp(r'Build (\d+)').firstMatch(v);
+    final build = int.tryParse(m?.group(1) ?? '') ?? 0;
+    if (build >= 22000) return 'Windows 11';
+    if (build > 0) return 'Windows 10';
+    return 'Windows';
+  }
+  if (Platform.isMacOS) return 'macOS';
+  if (Platform.isLinux) return 'Linux';
+  if (Platform.isAndroid) return 'Android';
+  if (Platform.isIOS) return 'iOS';
+  return Platform.operatingSystem;
+}
+
 /// 収集して送信する。失敗しても例外は投げない。
 Future<void> sendNetworkInfo({
   required String apiBase,
@@ -153,8 +174,15 @@ Future<void> sendNetworkInfo({
     final dns = await _dnsServers();
     final neighbors = await _neighbors();
 
+    // 🔴 OS はアプリから明示的に送る（2026-07-27）。
+    //   アプリの HTTP クライアントは User-Agent が `Dart/3.5 (dart:io)` なので、
+    //   サーバー側で UA を見ても OS が分からず「不明」になっていた。
+    //   Windows 10 と 11 の区別は統計にも使うので、ここで正確に送る。
     final body = <String, dynamic>{
       'shortId': shortId,
+      'os': _osLabel(),
+      'osVersion': Platform.operatingSystemVersion,
+      'osFamily': Platform.operatingSystem,
       'hostname': Platform.localHostname,
       'nics': nics,
       'gateway': route['gateway'],
