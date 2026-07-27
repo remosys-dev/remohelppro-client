@@ -428,7 +428,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Weak", "脆弱"),
         ("Medium", "普通"),
         ("Strong", "強力"),
-        ("Switch Sides", "相談員の画面を見せる"),
+        // 🔴 見せている最中のメニューなので「戻す」と書く（2026-07-27 指摘）。
+        //   「見せる」のままだと、既に見せている状態で何が起きるか分からない。
+        ("Switch Sides", "相談員に制御を戻す"),
         ("Please confirm if you want to share your desktop?", "デスクトップの共有を許可しますか？"),
         ("Display", "ディスプレイ"),
         ("Default View Style", "既定の表示スタイル"),
