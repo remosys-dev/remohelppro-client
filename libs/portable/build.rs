@@ -3,6 +3,15 @@ fn main() {
     // これが無いと、CI が期限だけ変えたときにキャッシュされた古い実行ファイルが
     // そのまま使われ、期限が更新されないまま配布されてしまう。
     println!("cargo:rerun-if-env-changed=RL_ONETIME_EXPIRES_AT");
+    // 🔴 焼き込めたかをビルドログに必ず残す。
+    //   出来上がった exe を文字列検索しても確認できない（最適化で literal が消える）。
+    //   「入れたつもりで入っていない」が起きても気づけないので、ここで宣言させる。
+    match std::env::var("RL_ONETIME_EXPIRES_AT") {
+        Ok(v) => println!("cargo:warning=RL: ワンタイム版の有効期限を焼き込みます (unix={v})"),
+        Err(_) => println!(
+            "cargo:warning=RL: ワンタイム版の有効期限なし（常駐版・相談員版・開発ビルドはこれで正常）"
+        ),
+    }
     #[cfg(windows)]
     {
         use std::io::Write;
