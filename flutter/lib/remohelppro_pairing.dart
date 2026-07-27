@@ -10,6 +10,7 @@ import 'remohelppro_livekit.dart';
 import 'rl_support.dart' show kRlSupportShowWindow;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
 import 'remohelppro_resident.dart' show RemohelpproResidentCard;
+import 'remohelppro_reconnect.dart' show armReboot, tryResume;
 
 const String _kApiBase = 'https://svr.remohelppro.jp';
 const String _kSlug = 'remohelppro';
@@ -51,6 +52,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   // R2: 相談員の終了を検知して被操作を自動停止するためのポーリング
   String? _shortId;
   Timer? _statusPoll;
+  Timer? _rearm; // 再起動の合言葉を取り直す
   bool _terminated = false;
 
   bool get _codeReady => _ctrl.text.replaceAll(RegExp(r'\D'), '').length == 6;
@@ -90,6 +92,13 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   従来どおりの手入力カードを表示する（＝壊さない）。
   Future<void> _maybeAutoStart() async {
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+
+    // 🔴 再起動からの復帰を最初に試す（2026-07-27）。
+    //   サポート中に再起動を求める場面は多く、お客様が席を離れていると
+    //   認証コードを入れ直せず**続きができない**。合言葉があれば
+    //   お客様の操作なしで同じサポートに戻る。
+    if (await _tryResumeAfterReboot()) return;
+
     final dlToken = await _readAndConsumeDlToken();
     if (dlToken == null || dlToken.isEmpty) return;
     if (!mounted) return;
@@ -119,6 +128,37 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     }
   }
 
+  /// 再起動からの復帰。戻れたら true。
+  ///   合言葉が無い・期限切れ・通信不能なら false を返し、
+  ///   従来どおり「認証コードを入力してください」に落ちる（＝壊さない）。
+  Future<bool> _tryResumeAfterReboot() async {
+    try {
+      // 被操作サービスを起動して当社サーバーへ登録し、自分のIDを得る。
+      await _startServiceAndWaitRegistered();
+      final myId = await _waitForMyId();
+      if (myId == null) return false;
+
+      final token = await tryResume(apiBase: _kApiBase, rustdeskId: myId);
+      if (token == null) return false;
+
+      // 新しいワンタイムトークンを自分のパスワードにする。
+      await bind.mainSetPermanentPasswordWithResult(password: token);
+      if (!mounted) return true;
+      _connectedAt = DateTime.now();
+      _clock?.cancel();
+      _clock = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+      setState(() {
+        _ready = true;
+        _busy = false;
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// サイドカー(%TEMP%\remohelppro-pair.dlt)から DLトークンを読み、読めたら削除する（単回）。
   Future<String?> _readAndConsumeDlToken() async {
     try {
@@ -138,6 +178,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   void dispose() {
     _statusPoll?.cancel();
     _statusPoll = null;
+    _rearm?.cancel();
+    _rearm = null;
     _clock?.cancel();
     _clock = null;
     _focus.dispose();
@@ -378,6 +420,18 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   🔴 await しない。取得に数秒かかることがあり、待たせると
     //     「準備完了」の表示が遅れてお客様が不安になる。
     //   🔴 失敗しても接続は続く（sendNetworkInfo は例外を投げない）。
+    // 🔴 再起動に備えて、**接続できた時点で**復帰の合言葉を用意しておく。
+    //   相談員からの再起動指示を待つ作りにすると、Windows Update や
+    //   お客様自身の操作による再起動を拾えない。実際の現場では、
+    //   ソフトの導入後に勝手に再起動がかかる場面もある。
+    //   合言葉は1回きり・15分で失効するので、先に持っていても危険は増えない。
+    unawaited(armReboot(apiBase: _kApiBase, shortId: shortId));
+    // 長いサポートで失効しないよう、10分ごとに取り直す。
+    _rearm?.cancel();
+    _rearm = Timer.periodic(const Duration(minutes: 10), (_) {
+      if (!_terminated) unawaited(armReboot(apiBase: _kApiBase, shortId: shortId));
+    });
+
     unawaited(sendNetworkInfo(
       apiBase: _kApiBase,
       shortId: shortId,
