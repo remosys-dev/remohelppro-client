@@ -87,6 +87,22 @@ lazy_static::lazy_static! {
     static ref PENDING_SWITCH_SIDES_UUID: Arc::<Mutex<HashMap<String, (Instant, uuid::Uuid)>>> = Default::default();
 }
 
+/// 「相談員の画面を見せる」で使う一度きりの合言葉（UUID）の有効期間。
+///
+/// 🔴 上流は 10 秒だった。この 10 秒の間に、
+///     ①相談員のPCが合言葉を作る → ②お客様のPCへ届く →
+///     ③お客様のPCが**新しいプロセスを起動する** → ④それが中継サーバー経由で
+///     相談員のPCへ繋ぎ直す → ⑤合言葉を照合
+///   まで終わらせる必要がある。古いPCの起動待ちとインターネット越しの接続を
+///   考えると 10 秒はまず足りない。間に合わないと合言葉が消え、通常のログイン扱いに
+///   落ちて **お客様の画面にパスワードを聞く窓が出る**（実機テストで指摘）。
+///   お客様は相談員のPCのパスワードなど知らないので、そこで詰まる。
+///
+///   合言葉はランダムな UUID v4 で、照合できたら即座に捨てる**一度きり**のもの。
+///   期間を延ばしても、当てずっぽうで通されるものではない。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const SWITCH_SIDES_TTL: Duration = Duration::from_secs(120);
+
 #[cfg(target_os = "windows")]
 const TERMINAL_OS_LOGIN_FAILED_MSG: &str = "Incorrect username or password.";
 
@@ -2698,7 +2714,7 @@ impl Connection {
                 SWITCH_SIDES_UUID
                     .lock()
                     .unwrap()
-                    .retain(|_, v| v.0.elapsed() < Duration::from_secs(10));
+                    .retain(|_, v| v.0.elapsed() < SWITCH_SIDES_TTL);
                 let uuid_old = SWITCH_SIDES_UUID.lock().unwrap().remove(&lr.my_id);
                 if let Ok(uuid) = uuid::Uuid::from_slice(_s.uuid.to_vec().as_ref()) {
                     if let Some((_instant, uuid_old)) = uuid_old {
@@ -5352,7 +5368,7 @@ pub fn insert_switch_sides_uuid(id: String, uuid: uuid::Uuid) {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn insert_pending_switch_sides_uuid(id: String, uuid: uuid::Uuid) {
     let mut uuids = PENDING_SWITCH_SIDES_UUID.lock().unwrap();
-    uuids.retain(|_, (instant, _)| instant.elapsed() < Duration::from_secs(10));
+    uuids.retain(|_, (instant, _)| instant.elapsed() < SWITCH_SIDES_TTL);
     uuids.insert(id, (tokio::time::Instant::now(), uuid));
 }
 
@@ -5360,7 +5376,7 @@ pub fn insert_pending_switch_sides_uuid(id: String, uuid: uuid::Uuid) {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn remove_pending_switch_sides_uuid(id: &str, uuid: &uuid::Uuid) -> bool {
     let mut uuids = PENDING_SWITCH_SIDES_UUID.lock().unwrap();
-    uuids.retain(|_, (instant, _)| instant.elapsed() < Duration::from_secs(10));
+    uuids.retain(|_, (instant, _)| instant.elapsed() < SWITCH_SIDES_TTL);
     if uuids.get(id).map(|(_, stored_uuid)| stored_uuid == uuid) == Some(true) {
         uuids.remove(id);
         true

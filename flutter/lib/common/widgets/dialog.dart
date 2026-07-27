@@ -1855,6 +1855,46 @@ void showConfirmSwitchSidesDialog(
   });
 }
 
+/// 遠隔操作を終わるときの確認。
+///
+/// 🔴 ×は誤って押しやすい位置にある（2026-07-27 実機テストの指摘）。
+///   これまでは押した瞬間に切れていた。サポートの最中に切れると、お客様に
+///   もう一度アプリを起動して認証コードを入れ直してもらうことになり、
+///   電話口で「すみません、もう一度…」から始めることになる。
+///
+///   ⚠ 上流には対応記録の入力ダイアログ（showConnEndAuditDialogCloseCanceled）が
+///   あるが、あれは RustDesk の監査サーバーを立てているときにしか出ない。
+///   当社は立てていないので**一度も出たことがない**。だからここで別に確認する。
+///
+/// 戻り値: true=終了してよい / false=やめる
+Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager) async {
+  final res = await dialogManager.show<bool>((setState, close, context) {
+    return CustomAlertDialog(
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '遠隔操作を終わりますか？',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'もう一度つなぐには、お客様に認証コードを入れ直していただく必要があります。',
+          ),
+        ],
+      ),
+      actions: [
+        dialogButton('つづける', onPressed: () => close(false), isOutline: true),
+        dialogButton('終わる', onPressed: () => close(true)),
+      ],
+      onSubmit: () => close(true),
+      onCancel: () => close(false),
+    );
+  });
+  return res == true;
+}
+
 customImageQualityDialog(SessionID sessionId, String id, FFI ffi) async {
   double initQuality = kDefaultQuality;
   double initFps = kDefaultFps;

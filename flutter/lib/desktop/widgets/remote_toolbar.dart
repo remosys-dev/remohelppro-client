@@ -2386,6 +2386,12 @@ class _CloseMenu extends StatelessWidget {
       assetName: 'assets/close.svg',
       tooltip: 'Close',
       onPressed: () async {
+        // 🔴 うっかり切断の防止（2026-07-27 実機テストの指摘）。
+        //   下の監査ノートのダイアログは RustDesk の監査サーバーを立てて
+        //   いるときにしか出ない＝当社では一度も出ない。必ずここで確認する。
+        if (!await confirmCloseRemoteSession(ffi.dialogManager)) {
+          return;
+        }
         if (await showConnEndAuditDialogCloseCanceled(ffi: ffi)) {
           return;
         }
