@@ -325,6 +325,27 @@ jobs:
           pip3 install requests argparse
           BASE_URL=${{ env.SIGN_BASE_URL }} SECRET_KEY=${{ secrets.SIGN_SECRET_KEY }} python3 res/job.py sign_files ./rustdesk/
 
+      # 相談員プログラムのランチャー（autorun 相当）。
+      #   起動時に版を確認し、新しければ入れ替えてから本体を起動する。
+      #   🔴 本体を実行中に上書きすることは Windows ではできない。
+      #     起動前に差し替えるこの形でなければ、更新のたびに壊れる危険がある。
+      - name: Build launcher (operator only)
+        if: env.UPLOAD_ARTIFACT == 'true' && !inputs.support_show_window && !inputs.resident
+        shell: bash
+        run: |
+          cargo build --release -p remohelppro-launcher --target-dir ./target-launcher
+          mkdir -p ./SignOutput
+          cp ./target-launcher/release/remohelppro-launcher.exe ./SignOutput/remohelppro-launcher-${{ env.VERSION }}.exe
+          ls -la ./SignOutput/
+
+      - name: Upload launcher
+        if: env.UPLOAD_ARTIFACT == 'true' && !inputs.support_show_window && !inputs.resident
+        uses: actions/upload-artifact@master
+        with:
+          name: remohelppro-launcher-${{ matrix.job.arch }}
+          path: ./SignOutput/remohelppro-launcher-*.exe
+          if-no-files-found: ignore
+
       - name: Build self-extracted executable
         shell: bash
         if: env.UPLOAD_ARTIFACT == 'true'
