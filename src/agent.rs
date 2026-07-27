@@ -210,6 +210,53 @@ mod imp {
                     report(token, id, "done").await;
                     let _ = system_shutdown::shutdown();
                 }
+                // セーフモードで再起動する。
+                //   🔴 設定に成功したときだけ再起動する。失敗したまま再起動すると
+                //     通常モードで上がるだけだが、相談員は「セーフモードになった」と
+                //     思い込んで待つことになるので、必ず失敗として返す。
+                "safemode_reboot" => {
+                    let minutes = cmd
+                        .pointer("/target/deadlineMinutes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(crate::safemode::DEFAULT_DEADLINE_MINUTES);
+                    match crate::safemode::arm(minutes) {
+                        Ok(_) => {
+                            report(token, id, "done").await;
+                            let _ = system_shutdown::reboot();
+                        }
+                        Err(e) => {
+                            log::error!("safemode arm failed: {}", e);
+                            report(token, id, "failed").await;
+                        }
+                    }
+                }
+                // 通常モードへ戻して再起動する。
+                //   ここが失敗すると顧客PCがセーフモードのまま残るので、
+                //   失敗しても諦めず、見張り（safemode::watch）が期限で再度戻す。
+                "safemode_exit" => match crate::safemode::disarm() {
+                    Ok(_) => {
+                        report(token, id, "done").await;
+                        let _ = system_shutdown::reboot();
+                    }
+                    Err(e) => {
+                        log::error!("safemode disarm failed: {}", e);
+                        report(token, id, "failed").await;
+                    }
+                },
+                // 作業が長引いたときに、自動復帰までの猶予を延ばす。
+                "safemode_extend" => {
+                    let minutes = cmd
+                        .pointer("/target/deadlineMinutes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(crate::safemode::DEFAULT_DEADLINE_MINUTES);
+                    match crate::safemode::extend(minutes) {
+                        Ok(_) => report(token, id, "done").await,
+                        Err(e) => {
+                            log::error!("safemode extend failed: {}", e);
+                            report(token, id, "failed").await;
+                        }
+                    }
+                }
                 _ => report(token, id, "failed").await,
             }
         }
@@ -221,10 +268,21 @@ mod imp {
             "REMOHELP PRO resident agent started (poll {}s)",
             POLL_INTERVAL_SECS
         );
+        // 🔴 起動のたびに必ず呼ぶ。セーフモードの取り残しを片づけ、
+        //   セーフモード中なら自動復帰の見張りを立てる。ここを飛ばすと
+        //   顧客PCがセーフモードのまま戻らなくなる可能性がある。
+        crate::safemode::on_service_start();
         loop {
             ensure_enrolled().await;
             if let Some(token) = agent_token() {
-                let _ = post("/api/agent/heartbeat", Some(&token), json!({})).await;
+                // いまセーフモードかを毎回伝える。相談員の画面に出し、
+                // 「戻し忘れ」に気づけるようにするため。
+                let _ = post(
+                    "/api/agent/heartbeat",
+                    Some(&token),
+                    json!({ "safeMode": crate::safemode::is_safe_mode() }),
+                )
+                .await;
                 poll_and_execute(&token).await;
             }
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;

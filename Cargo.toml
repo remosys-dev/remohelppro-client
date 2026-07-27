@@ -107,6 +107,9 @@ qrcode-generator = "4.1"
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3", features = [
     "winuser",
+    # winbase は CREATE_NO_WINDOW 等で使う。これまで依存の巻き込みで偶然有効に
+    # なっていただけなので明示する（依存が変わると静かにコンパイルが通らなくなる）。
+    "winbase",
     "wincrypt",
     "shellscalingapi",
     "pdh",
