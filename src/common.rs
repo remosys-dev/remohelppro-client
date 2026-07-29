@@ -2082,6 +2082,22 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    // 🔴 REMOHELP PRO: 外部ファイルによる接続先の差し替えを受け付けない（2026-07-29）。
+    //
+    //   元は、実行ファイルの隣に custom.txt を置くだけで
+    //   **接続先サーバー・公開鍵・APIの向き先が丸ごと差し替わる**作りだった。
+    //   当社は接続先を config.rs に焼き込んで固定する方針（案A）なので、
+    //   この抜け道があると固定した意味が無くなる。
+    //
+    //   特に「継続用（消えない版）」はお客様のダウンロードフォルダに残り続ける。
+    //   そこに1ファイル置かせるだけで、別のサーバーへ繋がる端末を作れてしまう。
+    //   お客様に「このファイルを置いてください」と言うのは、
+    //   詐欺の手口として十分に成立する。
+    //
+    //   ビルドでも custom.txt は使っていない（config.rs 焼き込みに移行済み）。
+    #![allow(unreachable_code)]
+    return;
+
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
