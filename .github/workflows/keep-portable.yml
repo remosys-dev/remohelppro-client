@@ -1,0 +1,35 @@
+name: Keep Portable (continuous support)
+
+# 「継続用（消えない版）」の顧客アプリをビルドする（2026-07-29）。
+#
+# 通常の顧客版（onetime-portable）は、使い終わると**自分から消える**。
+# 毎回このページを開いて落とし直す前提の作りで、それが安全でもある。
+#
+# しかし、目や手が不自由な方・繰り返しサポートを受けるお客様にとっては、
+# 「ブラウザーを開いてページを探す」ことそのものが難しい。
+# この版は手元に残るので、アイコンをダブルクリックするだけでよい。
+#
+# 🔴 残っても危険ではない。接続には毎回、相談員が発行する認証コードが要る。
+#   ファイル単体では何もできない（常駐版のような無人アクセスとは別物）。
+#
+# 中身は onetime-portable と同じ（同じ画面・同じ操作）。違うのは
+#   ・自己削除しない  ・有効期限を焼き込まない  ・ファイル名に -keep が付く
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'keep-build-*'   # このタグを push すると自動ビルド
+
+permissions:
+  contents: write
+
+jobs:
+  build-keep-portable:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "keep-portable"
+      support_show_window: true
+      keep_mode: true
+      windows_only: true

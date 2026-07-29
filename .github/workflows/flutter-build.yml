@@ -36,6 +36,22 @@ on:
         #   config.rs の IS_RESIDENT_BUILD を sed で true 化する（APP_NAME 焼込と同流儀）。
         type: boolean
         default: false
+      keep_mode:
+        # REMOHELP PRO: true のとき「継続用（消えない版）」をビルドする。
+        #   support_show_window と**一緒に**指定する（画面・操作は顧客版と同じ）。
+        #   違いは2点だけ:
+        #     ・使い終わっても自分を消さない（onetime の目印を置かない）
+        #     ・有効期限を焼き込まない（何日後でも起動できる）
+        #
+        #   なぜ要るか（2026-07-29 ユーザー要望）:
+        #     目や手が不自由な方、毎回サポートを受けるお客様にとって、
+        #     「ブラウザーを開いてページを探して落とし直す」ことが負担になる。
+        #     手元に残しておけば、アイコンをダブルクリックするだけで済む。
+        #
+        #   🔴 残っても危険ではない。接続には毎回、相談員が発行する認証コードが要る。
+        #     ファイル単体では何もできない（常駐版のような無人アクセスとは別物）。
+        type: boolean
+        default: false
       onetime_valid_days:
         # REMOHELP PRO: ワンタイム版の有効期限（日数）。support_show_window のときだけ効く。
         #   期限を過ぎたファイルは**起動そのものを断る**（認証コード画面を出さない）。
@@ -367,7 +383,8 @@ jobs:
           #   「使い終わったら自分ごと消す」動作に入る。
           #   ファイル名での判定は、リネーム規則を変えた瞬間に静かに壊れるのでやめた
           #   （実際に壊れていて、自己削除が一度も動いていなかった）。
-          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+          #   ★継続用（keep_mode）では目印を置かない＝消えない。
+          if [ "${{ inputs.support_show_window }}" = "true" ] && [ "${{ inputs.keep_mode }}" != "true" ]; then
             echo "onetime" > ./rustdesk/remohelppro-onetime.flag
             echo "RL: onetime marker placed (self-delete enabled)"
             # 🔴 有効期限を焼き込む（2026-07-27）。お客様のPCに残った古いファイルを
@@ -382,7 +399,16 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/$INNER_EXE
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+          # 🔴 継続用は名前を分ける。同じリリースに並んでも取り違えないため、
+          #   また配布側（同期スクリプト）が種類で選び分けられるようにするため。
+          #   版の数字は真ん中に置いたまま（-1.4.15- の形）にしておくこと。
+          #   配布側が「最も新しい版」を選ぶときにこの並びを見ている。
+          SUFFIX=""
+          if [ "${{ inputs.keep_mode }}" = "true" ]; then
+            SUFFIX="-keep"
+            echo "RL: keep build (no self-delete, no expiry)"
+          fi
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${SUFFIX}.exe
 
       # remohelppro: 単一「自己展開・ダブルクリック起動」exe を成果物化（MSIビルドより前＝MSI失敗でも取れる）
       - name: Upload single self-extracting exe
