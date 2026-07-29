@@ -913,7 +913,35 @@ jobs:
             sed -i -e "s/osx_minimum_system_version = \"[0-9]*.[0-9]*\"/osx_minimum_system_version = \"${MIN_MACOS_VERSION}\"/" Cargo.toml
             sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
           fi
+          # REMOHELP PRO: アプリの識別子を自社のものにする（2026-07-29）。
+          #   元は com.carriez.rustdesk（上流の識別子）のままだった。
+          #   🔴 お客様の Mac に本家 RustDesk が入っていると**識別子が衝突**し、
+          #     画面収録などの許可が混ざる・どちらが起動するか定まらない、といった
+          #     追いにくい不具合になる。当社の識別子に変える。
+          sed -i -e 's/com\.carriez\.rustdesk/jp.remohelppro.desktop/g' flutter/macos/Runner.xcodeproj/project.pbxproj
+          echo "--- bundle identifier after patch ---"
+          grep -n 'PRODUCT_BUNDLE_IDENTIFIER' flutter/macos/Runner.xcodeproj/project.pbxproj | head -5
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
+
+      # REMOHELP PRO: Mac のアプリ名を製品名にする（2026-07-29）。
+      #   🔴 Windows だけ remohelppro.exe にリネーム済みで、**Mac が漏れていた**。
+      #     お客様には `RustDesk.app` という別製品名で届いていた。
+      #   バンドルのフォルダ名と表示名だけを変える（中の実行ファイル名は触らない）。
+      #   ⚠ アプリの識別子も変えるので、画面収録などの許可は**一度だけ取り直し**になる。
+      - name: rename macOS app bundle
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          REL="./flutter/build/macos/Build/Products/Release"
+          if [ -d "$REL/RustDesk.app" ]; then
+            mv "$REL/RustDesk.app" "$REL/REMOHELP PRO.app"
+          fi
+          PLIST="$REL/REMOHELP PRO.app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName REMOHELP PRO" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleName string REMOHELP PRO" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName REMOHELP PRO" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string REMOHELP PRO" "$PLIST"
+          echo "--- Info.plist after rename ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST"
+          ls -la "$REL"
 
       - name: create unsigned dmg
         if: env.UPLOAD_ARTIFACT == 'true'
@@ -921,7 +949,7 @@ jobs:
           CREATE_DMG="$(command -v create-dmg)"
           CREATE_DMG="$(readlink -f "$CREATE_DMG")"
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
+          create-dmg --icon "REMOHELP PRO.app" 200 190 --hide-extension "REMOHELP PRO.app" --window-size 800 400 --app-drop-link 600 185 remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg "./flutter/build/macos/Build/Products/Release/REMOHELP PRO.app"
 
       - name: Upload unsigned macOS app
         if: env.UPLOAD_ARTIFACT == 'true'
@@ -942,8 +970,8 @@ jobs:
           security unlock-keychain -p ${{ secrets.MACOS_P12_PASSWORD }} rustdesk.keychain
           # start sign the rustdesk.app and dmg
           rm -rf *.dmg || true
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/RustDesk.app -vvv
-          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 remohelppro-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
+          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict "./flutter/build/macos/Build/Products/Release/REMOHELP PRO.app" -vvv
+          create-dmg --icon "REMOHELP PRO.app" 200 190 --hide-extension "REMOHELP PRO.app" --window-size 800 400 --app-drop-link 600 185 remohelppro-${{ env.VERSION }}.dmg "./flutter/build/macos/Build/Products/Release/REMOHELP PRO.app"
           codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict remohelppro-${{ env.VERSION }}.dmg -vvv
           # notarize the remohelppro-${{ env.VERSION }}.dmg
           rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple remohelppro-${{ env.VERSION }}.dmg
