@@ -194,6 +194,90 @@ fn is_windows_7() -> bool {
     false
 }
 
+/// 落としたファイルの名前に埋まっている「合言葉」を取り出す。
+///
+/// 経緯（2026-07-29 ユーザー要望）:
+///   これまでお客様は、ページで認証コードを入れ、落としたアプリでも
+///   **もう一度**同じコードを入れていた。他社は1回で済むため、乗り換えを
+///   お願いする場面で不利だった。ページでコードを確認したブラウザが
+///   一回限りの合言葉をファイル名に埋めて配るので、ここで読んで引き渡す。
+///
+/// 想定する名前:  remohelppro-start-<短ID>.<秘密>.exe
+///
+/// 🔴 同じ名前のファイルが既にあると、ブラウザが
+///   「remohelppro-start-XXXXXX.abcdef (1).exe」のように末尾を変える。
+///   **後から落とした方が新しい合言葉**なので、ここを読めないと
+///   「2回目に落としたのに繋がらない」という一番起きやすい失敗になる。
+///   末尾の「 (1)」は取り除いてから読む。
+///
+/// 🔴 読めないときは None を返して**黙って従来どおり**にする。
+///   お客様の名前変更・別経路での入手など、読めない事情はいくらでもある。
+///   ここで止めると「押しても何も起きない」になってしまう。
+fn dl_token_from_exe_name(exe: &std::path::Path) -> Option<String> {
+    const PREFIX: &str = "remohelppro-start-";
+    let stem = exe.file_stem()?.to_string_lossy().to_string();
+    // 「 (1)」「 (12)」などの重複回避サフィックスを外す。
+    let stem = match stem.rfind(" (") {
+        Some(i) if stem.ends_with(')') && stem[i + 2..stem.len() - 1].chars().all(|c| c.is_ascii_digit()) => {
+            stem[..i].to_string()
+        }
+        _ => stem,
+    };
+    let rest = stem.strip_prefix(PREFIX)?;
+    let (short_id, secret) = rest.split_once('.')?;
+    // 形式だけ確かめる。正しさの判断はサーバーが行う（ここは通すだけ）。
+    let short_ok = short_id.len() == 6
+        && short_id
+            .chars()
+            .all(|c| c.is_ascii_digit() || (c.is_ascii_uppercase() && !"IOLU".contains(c)));
+    let secret_ok = (6..=64).contains(&secret.len())
+        && secret
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if short_ok && secret_ok {
+        Some(format!("{short_id}.{secret}"))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod dl_token_tests {
+    use super::dl_token_from_exe_name;
+    use std::path::Path;
+
+    fn t(name: &str) -> Option<String> {
+        dl_token_from_exe_name(Path::new(name))
+    }
+
+    #[test]
+    fn reads_plain_name() {
+        assert_eq!(t("remohelppro-start-A3K9XZ.Ab_9-x.exe"), Some("A3K9XZ.Ab_9-x".into()));
+    }
+
+    #[test]
+    fn reads_second_download() {
+        // ブラウザが付ける重複回避サフィックス。ここが読めないと
+        // 「2回目に落としたのに繋がらない」になる。
+        assert_eq!(t("remohelppro-start-A3K9XZ.Ab_9-x (1).exe"), Some("A3K9XZ.Ab_9-x".into()));
+        assert_eq!(t("remohelppro-start-A3K9XZ.Ab_9-x (12).exe"), Some("A3K9XZ.Ab_9-x".into()));
+    }
+
+    #[test]
+    fn ignores_anything_else() {
+        assert_eq!(t("remohelppro-customer.exe"), None);
+        assert_eq!(t("remohelppro-support.exe"), None);
+        // 短IDに紛らわしい文字(I/O/L/U)は使わない規則
+        assert_eq!(t("remohelppro-start-AIK9XZ.Ab_9-x.exe"), None);
+        // 桁数違い・秘密が短すぎる・区切り無し
+        assert_eq!(t("remohelppro-start-A3K9X.Ab_9-x.exe"), None);
+        assert_eq!(t("remohelppro-start-A3K9XZ.abc.exe"), None);
+        assert_eq!(t("remohelppro-start-A3K9XZ.exe"), None);
+        // 括弧が数字でない＝名前の一部なので外さない
+        assert_eq!(t("remohelppro-start-A3K9XZ.Ab_9-x (copy).exe"), None);
+    }
+}
+
 fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     println!("executing {}", path.display());
     // setup env
@@ -231,6 +315,12 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     cmd.env(APPNAME_RUNTIME_ENV_KEY, exe_name);
     if let Some(ref d) = rl_app_dir {
         cmd.env("RL_APP_DIR", d);
+    }
+    // ファイル名に合言葉が埋まっていれば本体へ渡す（＝認証コードの再入力を省く）。
+    //   無ければ何も渡さない＝本体は従来どおり認証コード画面を出す。
+    if let Some(tok) = dl_token_from_exe_name(&exe) {
+        println!("RL: pair token found in file name");
+        cmd.env("RL_PAIR_DL_TOKEN", tok);
     }
     if use_null_stdio() {
         cmd.stdin(Stdio::null())

@@ -159,8 +159,25 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     }
   }
 
-  /// サイドカー(%TEMP%\remohelppro-pair.dlt)から DLトークンを読み、読めたら削除する（単回）。
+  /// 合言葉（DLトークン）を受け取る。
+  ///
+  /// 🔴 2026-07-29: これまではサイドカーファイルだけを見ていたが、
+  ///   そのファイルを置くはずだった軽量ランチャーは**一度も作られなかった**。
+  ///   つまりワンクリック接続は一度も動いておらず、お客様は毎回
+  ///   ページとアプリで**2回**認証コードを入れていた。
+  ///   今は自己展開ランチャーが、自分のファイル名から読み取った合言葉を
+  ///   環境変数で渡してくる。そちらを先に見る。
+  ///
+  /// 見つからなければ null を返し、従来どおり認証コード入力画面を出す。
   Future<String?> _readAndConsumeDlToken() async {
+    // ① 起動元（自己展開ランチャー）から渡された合言葉。
+    try {
+      final env = (Platform.environment['RL_PAIR_DL_TOKEN'] ?? '').trim();
+      // サーバー側が単回消費するので、ここで消す必要はない。
+      if (env.isNotEmpty) return env;
+    } catch (_) {/* 環境変数が読めない環境でも②へ進む */}
+
+    // ② 旧方式（サイドカーファイル）。将来の別経路のために残す。
     try {
       final f = File('${Directory.systemTemp.path}/remohelppro-pair.dlt');
       if (!await f.exists()) return null;
