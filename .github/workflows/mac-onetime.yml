@@ -1,0 +1,43 @@
+name: Mac OneTime (customer)
+
+# Mac の「顧客版」をビルドする（2026-07-29）。
+#
+# 🔴 これまで Mac には顧客版が無かった。
+#   mac-build.yml は support_show_window を渡していないため、Mac のお客様には
+#   **相談員向けのフル画面**（相手一覧・自分のID・設定・インストール誘導）が
+#   出ていた。認証コードの入力欄はその中にあるので繋がりはするが、
+#   高齢のお客様に見せる画面ではない。
+#
+# この経路は Windows の顧客版と同じ扱いにする:
+#   ・認証コードの入力だけの簡単な画面
+#   ・使い終わったらアプリが自分を消す（Mac 用の後始末を実装済み）
+#   ・有効期限を焼き込む
+#
+# ⚠ 署名は未設定なので、初回は「開発元を確認できません」が出る。
+#   右クリック→開く が必要。消すには Apple Developer Program（年 $99）が要る。
+#
+# `mac-onetime-*` タグを push すると自動ビルド。
+on:
+  workflow_dispatch:
+    inputs:
+      onetime_valid_days:
+        description: 'ワンタイム版の有効期限（日数）'
+        type: number
+        default: 7
+  push:
+    tags:
+      - 'mac-onetime-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-onetime:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "mac-onetime"
+      mac_only: true
+      support_show_window: true
+      onetime_valid_days: ${{ inputs.onetime_valid_days || 7 }}

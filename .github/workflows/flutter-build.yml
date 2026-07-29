@@ -921,6 +921,16 @@ jobs:
           sed -i -e 's/com\.carriez\.rustdesk/jp.remohelppro.desktop/g' flutter/macos/Runner.xcodeproj/project.pbxproj
           echo "--- bundle identifier after patch ---"
           grep -n 'PRODUCT_BUNDLE_IDENTIFIER' flutter/macos/Runner.xcodeproj/project.pbxproj | head -5
+          # 🔴 顧客版（簡単な画面＋自己削除）の指定は Windows のジョブにしか無く、
+          #   **Mac には渡っていなかった**（2026-07-29）。そのため Mac のお客様には
+          #   相談員向けのフル画面が出ていた。ここで同じものを渡す。
+          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            export RL_EXTRA_DART_DEFINE="--dart-define=RL_SUPPORT_SHOW_WINDOW=true"
+            echo "RL: mac customer build (simple screen + self delete) ON"
+            # 期限を焼き込む。残った古いアプリを開いても認証コード画面を出さない。
+            export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ inputs.onetime_valid_days }} * 86400 ))
+            echo "RL: onetime expires at ${RL_ONETIME_EXPIRES_AT}"
+          fi
           ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
       # REMOHELP PRO: Mac のアプリ名を製品名にする（2026-07-29）。

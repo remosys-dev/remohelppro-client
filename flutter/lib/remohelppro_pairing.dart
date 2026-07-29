@@ -264,7 +264,47 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   接続前に顧客が終了した場合(_hasEverConnected=false)は server_model の自動終了が働かないため、
     //   ここで保険をかける。「終了しました」を読む数秒を残してから exit(0)。
     if (kRlSupportShowWindow) {
+      // Mac は自己展開ランナーが無いので、アプリが自分で後始末する。
+      await _selfDeleteMacApp();
       Future.delayed(const Duration(seconds: 4), () => exit(0));
+    }
+  }
+
+  /// Mac のワンタイム版が、使い終わったあと自分を消す。
+  ///
+  /// Windows は自己展開ランナーが本体ごと消してくれるが、Mac は .dmg を開いて
+  /// アプリを取り出す方式なので、**残ったアプリを誰も片付けない**。
+  /// 「1回のサポートで1回だけ使う」を Mac でも成り立たせる。
+  ///
+  /// 🔴 消す対象を厳しく絞る。パスの取り違えで人のファイルを消すことだけは
+  ///   絶対に避ける。少しでも当てはまらなければ**何もしない**。
+  Future<void> _selfDeleteMacApp() async {
+    if (!Platform.isMacOS) return;
+    try {
+      final exe = Platform.resolvedExecutable; // .../REMOHELP PRO.app/Contents/MacOS/xxx
+      final marker = exe.indexOf('.app/');
+      if (marker < 0) return;
+      final appPath = exe.substring(0, marker + 4);
+      if (!appPath.endsWith('.app')) return;
+      // DMG から直接動かしている場合は読み取り専用。消す物が無いので触らない。
+      if (appPath.startsWith('/Volumes/')) return;
+      // OS の領域は絶対に触らない。
+      if (appPath.startsWith('/System') || appPath.startsWith('/usr') ||
+          appPath.startsWith('/bin') || appPath.startsWith('/sbin')) return;
+      // 自分のアプリであることを名前でも確かめる。
+      if (!appPath.contains('REMOHELP PRO')) return;
+
+      // 自分が終わってから消す。
+      //   🔴 パスを文字列に埋め込まない。アプリ名に空白（REMOHELP PRO）が入るうえ、
+      //     引用符の付け方を間違えると **rm -rf の対象がずれる**。
+      //     引数として渡し、シェルには $1 で受け取らせれば引用は要らない。
+      await Process.start(
+        '/bin/sh',
+        ['-c', 'sleep 4; rm -rf "\$1"', 'sh', appPath],
+        mode: ProcessStartMode.detached,
+      );
+    } catch (_) {
+      // 消せなくても終了は妨げない。残っても、認証コードが無ければ何もできない。
     }
   }
 
