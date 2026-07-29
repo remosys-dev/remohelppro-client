@@ -1134,15 +1134,10 @@ class _CmControlPanel extends StatelessWidget {
           offstage: !client.remoteDrawing || client.type_() != ClientType.remote,
           child: _CustomerDrawButton(client: client),
         ),
-        Offstage(
-          offstage: !client.fromSwitch,
-          child: buildButton(context,
-              color: Colors.purple,
-              onClick: () => handleSwitchBack(context),
-              icon: Icon(Icons.reply, color: Colors.white),
-              text: "Switch Sides",
-              textColor: Colors.white),
-        ),
+        // Switch Sides（操作する側とされる側を入れ替える）は出さない。
+        //   2026-07-29 実機指摘: 音声通話のときにこのダイアログが出て、
+        //   お客様の画面に「相談員に制御を戻す」ボタンが並ぶ。
+        //   当社の運用では一度も使わない機能なので、押し間違いにしかならない。
         Offstage(
           offstage: !showElevation,
           child: buildButton(

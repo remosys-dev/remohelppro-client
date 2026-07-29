@@ -1019,6 +1019,32 @@ class FfiModel with ChangeNotifier {
   showMsgBox(SessionID sessionId, String type, String title, String text,
       String link, bool hasRetry, OverlayDialogManager dialogManager,
       {bool? hasCancel}) async {
+    // 🔴 お客様が「終了する」を押した後に、相談員へ**接続エラー**を出さない
+    //   （2026-07-29 実機指摘）。
+    //
+    //   お客様が自分で終えた場合、相手が居なくなるのは**正常な流れ**なのに、
+    //   相談員の画面には赤い「接続エラー／リモートホストによって接続が
+    //   リセットされました」が出ていた。相談員は毎回それを見て、
+    //   何か失敗したのかと確認する手間がかかる。
+    //
+    //   ⚠ 一度も繋がっていない場合の失敗（相手が居ない・コード違い）は
+    //     本物のエラーなので、そのまま出す。区別は「繋がった実績があるか」。
+    final endedNormally = type == 'error' &&
+        (title == 'Connection Error') &&
+        (text.contains('Reset by the peer') ||
+            text.contains('closed by the peer') ||
+            text.contains('接続がリセット')) &&
+        parent.target?.connType == ConnType.defaultConn &&
+        (parent.target?.ffiModel.pi.currentDisplay ?? -1) >= 0;
+    if (endedNormally) {
+      msgBox(sessionId, 'custom-nook-nocancel', 'サポート終了',
+          'お客様がサポートを終了しました。', '', dialogManager);
+      Future.delayed(const Duration(seconds: 2), () {
+        dialogManager.dismissAll();
+        closeConnection();
+      });
+      return;
+    }
     final noteAllowed = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
         (title == "Connection Error" || type == "restarting");

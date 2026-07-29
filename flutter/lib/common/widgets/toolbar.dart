@@ -189,16 +189,11 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
           child: Text(translate('View camera')),
           onPressed: () => connectWithToken(isViewCamera: true)),
     );
-    v.add(
-      TTextMenu(
-          child: Text('${translate('Terminal')} (beta)'),
-          onPressed: () => connectWithToken(isTerminal: true)),
-    );
-    v.add(
-      TTextMenu(
-          child: Text(translate('TCP tunneling')),
-          onPressed: () => connectWithToken(isTcpTunneling: true)),
-    );
+    // ターミナル / TCPトンネリング は出さない（2026-07-29 実機指摘）。
+    //   遠隔サポートの相談員が使う場面が無く、押し間違いの元にしかならない。
+    //   お客様のPCでコマンドを打つ・ポートを開くのは、説明した支援の範囲を
+    //   超える操作でもある（同意の範囲を越えない）。
+    //   機能そのものは顧客側で enable-terminal / enable-tunnel を N にして塞ぐ。
   }
   // note … 削除（2026-07-26）
   //   ★このノートは監査サーバー（get_audit_server("conn")）へ POST する RustDesk の機能。

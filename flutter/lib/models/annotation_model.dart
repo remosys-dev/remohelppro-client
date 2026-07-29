@@ -169,20 +169,23 @@ class AnnotationModel with ChangeNotifier {
   // ── 内部 ──────────────────────────────────────────────────────
 
   void _addPoint(Offset offset) {
-    // 座標変換だけを借りる。描いている最中に画面が動くと線がずれるので、
-    // キャンバス移動と端スクロールは切っておく。
-    final pos = parent.target?.inputModel.handlePointerDevicePos(
-      kPointerEventKindMouse,
-      offset.dx,
-      offset.dy,
-      false,
-      '',
-      moveCanvas: false,
-      edgeScroll: false,
-    );
-    if (pos == null) return;
-    final x = pos.x.toInt();
-    final y = pos.y.toInt();
+    // 🔴 遠隔操作の座標変換を借りない（2026-07-29 実機指摘）。
+    //
+    //   借りていた handlePointerDevicePos は**ウィンドウ全体**の座標を前提に、
+    //   タブバーと枠の分（CanvasModel.topToEdge / leftToEdge）を引く。
+    //   しかしお絵かきの層は Positioned.fill で**既にその下**に置かれており、
+    //   受け取る位置にタブバーは含まれない。＝ **二重に引いていた**。
+    //   結果、線がマウスより上（タブバーの高さぶん）にずれて描かれていた。
+    //
+    //   ここは描画専用なので、**絵を出すときの計算をそのまま逆にする**のが正しい。
+    //   下の _AnnotationPainter は  画面 = 画像 * scale + canvas.x/y  で描く。
+    //   その逆をとれば必ずマウスの真下に線が乗る（式が1つなのでずれようがない）。
+    final c = parent.target?.canvasModel;
+    if (c == null) return;
+    final scale = c.scale;
+    if (!scale.isFinite || scale <= 0) return;
+    final x = ((offset.dx - c.x) / scale).round();
+    final y = ((offset.dy - c.y) / scale).round();
 
     final s = _local.isNotEmpty ? _local.last : null;
     if (s == null) return;

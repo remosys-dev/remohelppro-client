@@ -344,6 +344,32 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                     winapi::um::winuser::AllowSetForegroundWindow(child.id() as u32);
                 }
             }
+
+            // 🔴 落としたファイルは、**アプリの終了を待たずに**消す（2026-07-29 実機指摘）。
+            //
+            //   元は「子が終わってから消す」だけだった。しかしアプリが終わらなければ
+            //   永久に消えない。実際、サポートを終えた後もファイルが残っており、
+            //   **同じファイルで何度でも接続できる**状態だった（お客様のPCに残る）。
+            //   アプリが終わるかどうかに関係なく、起動した時点で用済みなので先に消す。
+            //
+            //   展開先(dir)はアプリが使っている最中なので、ここでは触らない。
+            //   そちらは下の「子の終了後」の後始末に任せる。
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                let self_path = exe.to_string_lossy().to_string();
+                // アプリが立ち上がるまで少し待ってから消す。起動途中に消すと、
+                // OS が読み出し中のファイルを掴んでいて失敗することがある。
+                let del_now = format!(
+                    "ping -n 9 127.0.0.1 >nul & del /f /q \"{e}\" 2>nul &                      ping -n 11 127.0.0.1 >nul & del /f /q \"{e}\" 2>nul",
+                    e = self_path
+                );
+                let _ = Command::new("cmd")
+                    .args(&["/c", &del_now])
+                    .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+                    .spawn();
+            }
+
             let _ = child.wait(); // 子(REMOHELP PRO.exe)が終了するまでブロック
             // ① 展開ディレクトリ削除(子終了後はハンドル解放済み)。
             //    穴C対策: DLLのアンロード遅延でロックされることがあるので数回リトライ。
