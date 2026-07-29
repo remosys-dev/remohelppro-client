@@ -863,7 +863,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
             //   ＝ 相談員が「常駐にする」を押しても常駐にできなかった。
             //   遠隔操作は常にアプリ経由なので、実運用ではこちらが本流。
             if (_shortId != null)
-              RemohelpproResidentCard(apiBase: _kApiBase, shortId: _shortId!),
+              RemohelpproResidentCard(
+                  apiBase: _kApiBase, shortId: _shortId!, custToken: _custToken),
             const SizedBox(height: 16),
             _outlineButton('終了する', Icons.stop_circle_outlined, _endByCustomer,
                 color: _danger, border: const Color(0xFFF3C9C9)),

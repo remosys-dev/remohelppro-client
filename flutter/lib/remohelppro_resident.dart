@@ -46,10 +46,18 @@ class RemohelpproResidentCard extends StatefulWidget {
     Key? key,
     required this.apiBase,
     required this.shortId,
+    this.custToken,
   }) : super(key: key);
 
   final String apiBase;
   final String shortId;
+
+  /// 顧客セッショントークン。
+  ///
+  /// 🔴 これが無いと、**認証コードを知らない第三者でも常駐を許可できてしまう**。
+  ///   常駐は「いつでも繋いでよい」という一番重い同意なので、
+  ///   誰が押したかを取り違えてはいけない（2026-07-29）。
+  final String? custToken;
 
   @override
   State<RemohelpproResidentCard> createState() =>
@@ -82,8 +90,14 @@ class _RemohelpproResidentCardState extends State<RemohelpproResidentCard> {
   Future<void> _check() async {
     try {
       final r = await http
-          .get(Uri.parse(
-              '${widget.apiBase}/api/customer/resident-consent?shortId=${widget.shortId}'))
+          .get(
+            Uri.parse(
+                '${widget.apiBase}/api/customer/resident-consent?shortId=${widget.shortId}'),
+            headers: {
+              if (widget.custToken != null)
+                'x-customer-token': widget.custToken!,
+            },
+          )
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
       final j = jsonDecode(r.body) as Map;
@@ -106,7 +120,11 @@ class _RemohelpproResidentCardState extends State<RemohelpproResidentCard> {
       final r = await http
           .post(
             Uri.parse('${widget.apiBase}/api/customer/resident-consent'),
-            headers: const {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              if (widget.custToken != null)
+                'x-customer-token': widget.custToken!,
+            },
             body: jsonEncode({'shortId': widget.shortId}),
           )
           .timeout(const Duration(seconds: 12));
