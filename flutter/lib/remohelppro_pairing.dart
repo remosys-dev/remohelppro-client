@@ -54,6 +54,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Timer? _statusPoll;
   Timer? _rearm; // 再起動の合言葉を取り直す
   bool _terminated = false;
+  /// 直前に「操作を許可した」状態だったか。view_only へ戻ったことを検知するために持つ。
+  bool _wasFullControl = false;
 
   bool get _codeReady => _ctrl.text.replaceAll(RegExp(r'\D'), '').length == 6;
 
@@ -245,6 +247,25 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           final j = jsonDecode(r.body) as Map;
           if (j['active'] == false) {
             await _terminateBySupportEnd();
+            return;
+          }
+          // 🔴 操作の取り消しに気づく（2026-07-29）。
+          //   これまでは status（終了したか）しか見ていなかったため、
+          //   相談員が「操作を終了」を押しても**接続はそのまま操作できていた**。
+          //   ＝ 記録は「操作は終わった」なのに実態が伴わない。
+          //   お客様に「操作をやめました」と伝えた後も動かせる状態は、
+          //   この製品で最もあってはならない。
+          //
+          //   繋ぎ直してもらう（画面共有として入り直す）。黙って続けるより、
+          //   一度切れる方がお客様にも相談員にも分かりやすい。
+          final mode = j['mode'] as String?;
+          if (mode == 'view_only' && _wasFullControl) {
+            _wasFullControl = false;
+            try {
+              await bind.mainCloseAllConnections();
+            } catch (_) {}
+          } else if (mode == 'full_control') {
+            _wasFullControl = true;
           }
         }
       } catch (_) {
