@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform, File, Directory, exit;
+// Process / ProcessStartMode は Mac の自己削除で使う（自分を消す後始末を切り離して走らせる）。
+import 'dart:io' show Platform, File, Directory, exit, Process, ProcessStartMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
