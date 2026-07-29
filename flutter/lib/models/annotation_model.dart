@@ -97,6 +97,45 @@ class AnnotationModel with ChangeNotifier {
     _endStroke();
   }
 
+  // ── レーザーポインター ─────────────────────────────────────────
+  //   お絵かきとは別物。線を残さず、今指している場所だけを光点で見せる。
+  //   通信は既存のお絵かきの経路をそのまま使う（新しい橋渡しは要らない）。
+  bool _laserMode = false;
+  bool get laserMode => _laserMode;
+  Offset? _laser; // 相手から届いた光点（相手の画面の実ピクセル）
+  Offset? get laser => _laser;
+  Timer? _laserTimer;
+  DateTime _lastLaserSent = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void setLaserMode(bool on) {
+    if (_laserMode == on) return;
+    _laserMode = on;
+    if (!on) {
+      // 消えたことを相手にも伝える。伝えないと光点が残ったままになる。
+      _send(jsonEncode({'kind': 'laser'}));
+    }
+    notifyListeners();
+  }
+
+  /// 相談員がマウスを動かしたとき。offset は描画ウィジェット上の位置。
+  void onLaserMove(Offset offset) {
+    if (!_laserMode) return;
+    final c = parent.target?.canvasModel;
+    if (c == null) return;
+    final scale = c.scale;
+    if (!scale.isFinite || scale <= 0) return;
+    // 送りすぎない。1秒に約20回で、目で見て十分に滑らか。
+    final now = DateTime.now();
+    if (now.difference(_lastLaserSent).inMilliseconds < 50) return;
+    _lastLaserSent = now;
+    _send(jsonEncode({
+      'kind': 'laser',
+      'x': (offset.dx - c.x) / scale,
+      'y': (offset.dy - c.y) / scale,
+      'display': parent.target?.ffiModel.pi.currentDisplay ?? 0,
+    }));
+  }
+
   /// 自分が描いたものを全部消す（相手側からも消える）。
   void clear() {
     _local.clear();
@@ -135,8 +174,30 @@ class AnnotationModel with ChangeNotifier {
         }
         notifyListeners();
         break;
+      case 'laser':
+        // レーザーポインター（2026-07-29 ユーザー要望）。
+        //   線を残さず、相談員のマウス位置だけを光点で示す。
+        //   「そこです」と口で言うより早く、線が残らないので画面も汚れない。
+        final lx = (m['x'] as num?)?.toDouble();
+        final ly = (m['y'] as num?)?.toDouble();
+        if (lx == null || ly == null) {
+          _laser = null;
+        } else {
+          _laser = Offset(lx, ly);
+          // 相手が動かすのをやめたら自然に消す。切断や取りこぼしで
+          // 光点が画面に残り続けないための保険でもある。
+          _laserTimer?.cancel();
+          _laserTimer = Timer(const Duration(milliseconds: 1200), () {
+            _laser = null;
+            notifyListeners();
+          });
+        }
+        notifyListeners();
+        break;
       case 'clear':
         _remote.clear();
+        _laser = null;
+        _laserTimer?.cancel();
         notifyListeners();
         break;
       case 'enable':
@@ -163,6 +224,10 @@ class AnnotationModel with ChangeNotifier {
     _remote.clear();
     _pendingXs.clear();
     _pendingYs.clear();
+    _laserTimer?.cancel();
+    _laserTimer = null;
+    _laser = null;
+    _laserMode = false;
     _enabled = false;
   }
 
@@ -372,6 +437,16 @@ class _AnnotationOverlayState extends State<AnnotationOverlay> {
             ),
             size: Size.infinite,
           );
+          // レーザーポインター中はマウスの動きだけを見る。
+          //   クリックは奪わない（相談員が操作もできるように）。
+          if (model.laserMode && !model.enabled) {
+            return MouseRegion(
+              opaque: false,
+              onHover: (e) => model.onLaserMove(e.localPosition),
+              onExit: (_) => model.onLaserMove(const Offset(-1, -1)),
+              child: IgnorePointer(child: painter),
+            );
+          }
           // お絵かき OFF のときは入力を一切奪わない。
           if (!model.enabled) {
             return IgnorePointer(child: painter);
@@ -399,6 +474,10 @@ class _AnnotationPainter extends CustomPainter {
   void paint(Canvas c, Size size) {
     _paintAll(c, model.localStrokes);
     _paintAll(c, model.remoteStrokes);
+    final laser = model.laser;
+    if (laser != null) {
+      _paintLaser(c, Offset(_lxd(laser.dx), _lyd(laser.dy)));
+    }
   }
 
   void _paintAll(Canvas c, List<_Stroke> strokes) {
@@ -421,8 +500,21 @@ class _AnnotationPainter extends CustomPainter {
     }
   }
 
+  /// レーザーポインターの光点。線は残さず、今指している場所だけを見せる。
+  ///   中心を白く、外側をぼかした赤にする。写真や暗い画面でも埋もれない。
+  void _paintLaser(Canvas c, Offset p) {
+    final glow = Paint()
+      ..color = const Color(0x66FF3B30)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    c.drawCircle(p, 13, glow);
+    c.drawCircle(p, 7, Paint()..color = const Color(0xCCFF3B30));
+    c.drawCircle(p, 2.5, Paint()..color = const Color(0xFFFFFFFF));
+  }
+
   /// 相手の実座標 → こちらの表示座標。拡大・スクロールに追従させる。
   double _lx(int x) => x * canvas.scale + canvas.x;
+  double _lxd(double x) => x * canvas.scale + canvas.x;
+  double _lyd(double y) => y * canvas.scale + canvas.y;
   double _ly(int y) => y * canvas.scale + canvas.y;
 
   @override

@@ -623,6 +623,28 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
         hoverColor:
             on ? _ToolbarTheme.hoverBlueColor : _ToolbarTheme.hoverInactiveColor,
       ),
+      // レーザーポインター（2026-07-29 ユーザー要望）。
+      //   線を残さず、今指している場所だけを光点で見せる。
+      //   「そこです」と口で説明するより早く、画面も汚れない。
+      //   お絵かきと同時には使わない（どちらか一方）。
+      _IconMenuButton(
+        icon: Icon(Icons.highlight_outlined, size: 18),
+        tooltip: model.laserMode
+            ? 'レーザーポインターをやめる'
+            : 'レーザーポインター（線を残さず指し示す）',
+        onPressed: () {
+          final next = !model.laserMode;
+          if (next && on) model.setEnabled(false);
+          model.setLaserMode(next);
+          setState(() {});
+        },
+        color: model.laserMode
+            ? _ToolbarTheme.blueColor
+            : _ToolbarTheme.inactiveColor,
+        hoverColor: model.laserMode
+            ? _ToolbarTheme.hoverBlueColor
+            : _ToolbarTheme.hoverInactiveColor,
+      ),
       // 描いているときだけ「消す」を出す。普段はツールバーを混ませない。
       if (on)
         _IconMenuButton(
