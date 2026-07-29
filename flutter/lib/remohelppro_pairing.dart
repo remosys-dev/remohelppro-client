@@ -83,8 +83,41 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _focus.addListener(() {
       if (mounted) setState(() {});
     });
-    // ワンクリック接続：ランチャーが置いた DLトークンがあれば、手入力を飛ばして自動接続する。
-    _maybeAutoStart();
+    // 🔴 起動したら、まず前回の一時パスワードを無効にする（2026-07-29）。
+    //
+    //   設定は %LOCALAPPDATA% の**固定の場所**に残る。実行のたびに消えない。
+    //   お客様がサポートの途中で窓を閉じるなど、終了処理を通らずに落ちると、
+    //   前回の一時パスワードが**そのまま残る**。
+    //   次に起動した瞬間、認証コードを入れる前から、その番号を知っている人が
+    //   繋げてしまう。
+    //
+    //   顧客ページには「接続には毎回、担当者からお伝えする認証コードが必要です」
+    //   と書いている。ここを塞がないと、その約束が嘘になる。
+    //
+    //   特に「継続用（消えない版）」は手元に残り続けるので影響が大きい。
+    //   ワンタイム版も、自己削除を取りこぼしたときの保険になる。
+    //   ⚠ 必ず自動接続より**先に**終わらせること。同時に走らせると、
+    //     復帰や自動接続が設定した**正しいパスワードを消してしまう**。
+    _bootSequence();
+  }
+
+  /// 起動時の順番を守る。無効化 → 自動接続。
+  Future<void> _bootSequence() async {
+    await _invalidateLeftoverPassword();
+    if (!mounted) return;
+    // ワンクリック接続：ランチャーが渡した合言葉があれば、手入力を飛ばして自動接続する。
+    await _maybeAutoStart();
+  }
+
+  /// 前回の一時パスワードを使えなくする。失敗しても起動は妨げない。
+  Future<void> _invalidateLeftoverPassword() async {
+    if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+    try {
+      final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+      await bind.mainSetPermanentPasswordWithResult(password: 'boot-$rnd');
+    } catch (_) {
+      // 設定を書けない環境でも、この後の認証コード入力は妨げない。
+    }
   }
 
   /// ワンクリック接続の入口。
