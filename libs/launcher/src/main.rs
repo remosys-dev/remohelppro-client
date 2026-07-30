@@ -28,12 +28,48 @@ use std::time::Duration;
 
 const VERSION_API: &str =
     "https://svr.remohelppro.jp/api/app/version?kind=operator_exe";
-/// 本体の実行ファイル名。ランチャーと同じフォルダに置く。
+/// 本体の実行ファイル名（持ち運び版）。ランチャーと同じフォルダに置く。
 const APP_EXE: &str = "remohelppro-operator.exe";
 /// 手元の版を覚えておくファイル。
 const VERSION_FILE: &str = "remohelppro-operator.version";
 /// これ未満のサイズは「落とし切れていない」とみなす。
 const MIN_SIZE: u64 = 5_000_000;
+
+/// 本体の実行ファイル名（インストーラで入れた場合）。
+///
+/// 🔴 この2つを取り違えていた（2026-07-31 実機指摘）。
+///   `remohelppro://` の受け先をランチャーに向けたが、ランチャーは
+///   持ち運び版の名前しか探しておらず、インストーラが置くのは
+///   `remohelppro.exe` だった。＝**本体が見つからず、相談員が
+///   「操作アプリで開く」を押しても起動しなかった。**
+const APP_EXE_INSTALLED: &str = "remohelppro.exe";
+
+/// このフォルダの本体はどちらの形か。
+///
+/// 🔴 インストール版のときは**更新をしない**。
+///   更新で落ちてくるのは「自己展開の持ち運び版」で、インストール版の
+///   中身（本体exe＋多数のDLL）とは形が違う。上書きすると**インストールを壊す**。
+///   インストール版の更新は MSI で行う別の仕組みが要る（未実装）。
+enum AppKind {
+    /// 持ち運び版。版を確かめて入れ替えてよい。
+    Portable(PathBuf),
+    /// インストール版。起動するだけ。
+    Installed(PathBuf),
+    /// 見つからない。
+    Missing,
+}
+
+fn find_app(dir: &Path) -> AppKind {
+    let portable = dir.join(APP_EXE);
+    if portable.exists() {
+        return AppKind::Portable(portable);
+    }
+    let installed = dir.join(APP_EXE_INSTALLED);
+    if installed.exists() {
+        return AppKind::Installed(installed);
+    }
+    AppKind::Missing
+}
 
 fn main() {
     let dir = std::env::current_exe()
@@ -41,12 +77,21 @@ fn main() {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // 更新は「できたら嬉しい」もの。失敗は握りつぶして先へ進む。
-    if let Err(e) = try_update(&dir) {
-        eprintln!("update skipped: {e}");
+    match find_app(&dir) {
+        AppKind::Portable(app) => {
+            // 更新は「できたら嬉しい」もの。失敗は握りつぶして先へ進む。
+            if let Err(e) = try_update(&dir) {
+                eprintln!("update skipped: {e}");
+            }
+            launch_app(&app);
+        }
+        AppKind::Installed(app) => {
+            // 🔴 インストール版は更新しない（上書きすると壊れる）。そのまま起動する。
+            eprintln!("installed layout: launch without update");
+            launch_app(&app);
+        }
+        AppKind::Missing => not_found(),
     }
-
-    launch(&dir);
 }
 
 fn try_update(dir: &Path) -> Result<(), String> {
@@ -118,10 +163,9 @@ fn try_update(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn launch(dir: &Path) {
-    let app = dir.join(APP_EXE);
-    if !app.exists() {
-        // 本体が無ければ何もできない。ここだけは知らせる。
+/// 本体が無いときだけ知らせる。
+fn not_found() {
+    {
         #[cfg(windows)]
         unsafe {
             use std::ffi::OsStr;
@@ -140,11 +184,17 @@ fn launch(dir: &Path) {
                 winapi::um::winuser::MB_ICONERROR,
             );
         }
-        return;
     }
+}
 
+/// 見つけた本体を、受け取った引数のまま起動する。
+///
+/// 🔴 引数（remohelppro://... の URL）を必ず渡すこと。
+///   落とすと、相談員が「操作アプリで開く」を押しても
+///   **接続先が分からないまま**アプリだけが立ち上がる。
+fn launch_app(app: &Path) {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut cmd = Command::new(&app);
+    let mut cmd = Command::new(app);
     cmd.args(&args);
     // 起動したら見届けない。ランチャーは即座に終わる。
     let _ = cmd.spawn();

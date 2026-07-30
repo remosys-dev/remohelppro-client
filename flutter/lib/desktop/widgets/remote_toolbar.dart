@@ -664,7 +664,7 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
     final laserOn = widget.ffi.ffiModel.showMyCursor;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _IconMenuButton(
-        icon: Icon(Icons.draw_outlined, size: 18),
+        icon: const Icon(Icons.draw_outlined, size: 18),
         tooltip: on ? '画面に描くのをやめる' : '画面に描いて指し示す',
         onPressed: () {
           model.setEnabled(!on);
@@ -682,7 +682,13 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
       //     見つけられない場所（キーボード設定の奥）にあったので、
       //     ここに分かる名前で出す。
       _IconMenuButton(
-        icon: Icon(Icons.highlight_outlined, size: 18),
+        // 🔴 アイコンが空白のまま出ていた（2026-07-31 実機指摘）。
+        //   `Icons.highlight_outlined` は存在するのに描かれず、
+        //   **文字だけのボタン**になり、押しても変化が見えなかった。
+        //   ⚠ Flutter は使っているアイコンだけを埋め込む。`const` にして
+        //     取りこぼしを防ぎ、他でも使われている確実なものへ変える。
+        //   ⚠ 意味も分かりやすくする。狙いを定める十字は「指し示す」に合う。
+        icon: const Icon(Icons.gps_fixed, size: 18),
         tooltip: laserOn
             ? 'レーザーポインターをやめる（操作できるようになります）'
             : 'レーザーポインター（指すだけ・操作はお客様）',
@@ -698,7 +704,7 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
       // 描いているときだけ「消す」を出す。普段はツールバーを混ませない。
       if (on)
         _IconMenuButton(
-          icon: Icon(Icons.cleaning_services_outlined, size: 18),
+          icon: const Icon(Icons.cleaning_services_outlined, size: 18),
           tooltip: '描いた線を消す',
           onPressed: () {
             model.clear();
