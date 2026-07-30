@@ -1713,9 +1713,19 @@ pub fn session_close_voice_call(session_id: SessionID) {
 }
 
 pub fn session_get_conn_token(session_id: SessionID) -> SyncReturn<Option<String>> {
+    // 🔴 ここが None を返すと、ファイル送受信の窓で
+    //   「パスワードを入力してください」が出る（2026-07-30 実機指摘）。
+    //   どちらが原因かを次の実機で切り分けられるよう、理由を記録する。
+    //   ①セッションが見つからない ②見つかるが前回のパスワードが空
+    //   ⚠ パスワードそのものは絶対に書かない。有無だけを残す。
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
-        SyncReturn(session.get_conn_token())
+        let token = session.get_conn_token();
+        if token.is_none() {
+            log::warn!("conn token is empty: the last password is not kept in this session");
+        }
+        SyncReturn(token)
     } else {
+        log::warn!("conn token is empty: session not found");
         SyncReturn(None)
     }
 }

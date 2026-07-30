@@ -3631,6 +3631,17 @@ class FFI {
   var connType = ConnType.defaultConn;
   var closed = false;
 
+  /// この接続を始めたときに渡された認証コード（平文）。
+  ///
+  /// 🔴 ファイル送受信の窓を開くときに使い回すために覚えておく（2026-07-30 実機指摘）。
+  ///   ファイル送受信は**別の接続**を張る。上流は「合鍵（connToken）」を渡して
+  ///   認証を省く作りだが、上流自身が「accept で繋いだ場合は効かない」と
+  ///   注記している通り、効かない経路がある。効かないと相談員に
+  ///   「パスワードを入力してください」が出る。お客様に番号を聞き直させるのは筋が悪い。
+  ///   ⚠ 合鍵が効くならそちらが先に使われるので、これは**効かなかったときの控え**。
+  ///   ⚠ 覚えるのはこのアプリの中だけ。保存も送信もしない。
+  String? presetPassword;
+
   /// dialogManager use late to ensure init after main page binding [globalKey]
   late final dialogManager = OverlayDialogManager();
 
@@ -3722,6 +3733,11 @@ class FFI {
     List<int>? displays,
   }) {
     closed = false;
+    // 認証コードを覚えておく（ファイル送受信の窓を開くときの控え）。
+    //   空文字は「無い」と同じ扱いにする。
+    if (password != null && password.isNotEmpty) {
+      presetPassword = password;
+    }
     if (isMobile) mobileReset();
     assert(
         (!(isPortForward && isViewCamera)) &&

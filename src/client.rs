@@ -3369,6 +3369,16 @@ pub fn handle_login_error(
     err: &str,
     interface: &impl Interface,
 ) -> bool {
+    // 🔴 どの理由で認証を求めることになったかを残す（2026-07-30）。
+    //   ファイル送受信で「パスワードを入力してください」が出る件の切り分けに使う。
+    //   接続の種類も一緒に出す（ファイル送受信だけで起きるのかを見分けるため）。
+    if err == LOGIN_MSG_PASSWORD_EMPTY || err == LOGIN_MSG_PASSWORD_WRONG {
+        log::warn!(
+            "login needs a password again: reason={}, conn_type={:?}",
+            err,
+            lc.read().unwrap().conn_type
+        );
+    }
     if err == LOGIN_MSG_PASSWORD_EMPTY {
         lc.write().unwrap().password = Default::default();
         interface.msgbox("input-password", "Password Required", "", "");

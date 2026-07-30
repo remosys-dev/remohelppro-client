@@ -6,12 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
-import 'package:flutter_hbb/common/widgets/login.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
-import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 
 bool isEditOsPassword = false;
@@ -170,11 +168,19 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
       bool isTcpTunneling = false,
       bool isTerminal = false}) {
     final connToken = bind.sessionGetConnToken(sessionId: ffi.sessionId);
+    // 🔴 認証コードも一緒に渡す（2026-07-30 実機指摘）。
+    //   ファイル送受信を開くと「パスワードを入力してください」が出ていた。
+    //   合鍵（connToken）が効かない経路があり、そうなると認証の手がかりが
+    //   何も無い状態で新しい接続を張ってしまう。
+    //   ⚠ 合鍵が効くならそちらが先に使われる（Rust 側で「前回の値」が
+    //     空でなければ控えは見ない）。**順番を変えていない**ので、
+    //     今まで通り繋がっていた経路の動きは変わらない。
     connect(context, id,
         isFileTransfer: isFileTransfer,
         isViewCamera: isViewCamera,
         isTerminal: isTerminal,
         isTcpTunneling: isTcpTunneling,
+        password: ffi.presetPassword,
         connToken: connToken);
   }
 
