@@ -161,24 +161,31 @@ pub fn core_main() -> Option<Vec<String>> {
         crate::portable_service::client::set_quick_support(_is_quick_support);
     }
 
-    // RL build-16 (A): 既導入PCでワンタイムを起動 → メッセージ表示して即終了。
-    //   portable_service 起動(下方)・elevate ループ・Flutter UI への到達を構造的に遮断する。
-    //   既導入PCにワンタイムは不要(既にフリート遠隔可)＝事故クラスを根絶。message_box は
-    //   src/platform/windows.rs の MessageBoxW 実装を流用(global_init 前でも安全)。
-    //   !_is_elevate && !_is_run_as_system: 昇格サブプロセスは主プロセスのAガード通過後に生成され
-    //   実質到達しないが、多重防御として条件を残す。
-    #[cfg(windows)]
-    if _is_rl_onetime
-        && crate::platform::is_installed()
-        && !_is_elevate
-        && !_is_run_as_system
-    {
-        crate::platform::message_box(
-            "このPCにはすでにREMOHELP PRO（遠隔）が導入されています。\n\
-             ワンタイム接続は不要のため起動しません。",
-        );
-        return None;
-    }
+    // 🔴 「既に導入済みのPCではワンタイムを起動しない」という止め方をやめた
+    //   （2026-07-31 実機指摘）。
+    //
+    //   元は、REMOHELP PRO が入っているPCでワンタイム版を起動すると
+    //   メッセージを出して**即終了**していた。「導入済み＝すでに遠隔で
+    //   繋がるのだから、ワンタイムは不要」という判断だった。
+    //
+    //   ★その判断が誤り。見ていたのは `is_installed()` だけで、
+    //     **入っているのが相談員アプリでも顧客アプリでも同じ扱い**だった。
+    //     相談員アプリは「見る側」であって、そのPCが遠隔操作される
+    //     わけではない。にもかかわらず、顧客としては一切繋がれなかった。
+    //
+    //   ★現場では役割が入れ替わる。
+    //     ・相談員のPCが不調で、同僚に繋いでもらう
+    //     ・「繋がりますか」の確認で、お互いに繋ぎ合う
+    //     ・担当者が自分のPCで動作を見せる
+    //     どれも普通に起きる。締め出してよい理由が無い。
+    //
+    //   ⚠ 当初の心配（入っている方の設定やIDを壊す）は、**別の仕組みで
+    //     既に防いでいる**ので、ここで拒否する必要は無い。
+    //       ・`RL_APP_DIR` で設定を隔離 → 入っている方の設定に触れない
+    //       ・Quick Support で動く      → 入っている方のサービスに触れない
+    //     二重に掛けた鍵が、正当な利用を締め出していた。
+    //
+    //   ⚠ この2つの隔離を外すときは、ここの判断もやり直すこと。
     let mut log_name = "".to_owned();
     // Keep portable-service logs under a stable directory name.
     let has_portable_service_shmem_arg = args
