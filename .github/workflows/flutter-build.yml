@@ -359,6 +359,13 @@ jobs:
           cargo build --release -p remohelppro-launcher --target-dir ./target-launcher
           mkdir -p ./SignOutput
           cp ./target-launcher/release/remohelppro-launcher.exe ./SignOutput/remohelppro-launcher-${{ env.VERSION }}.exe
+          # 🔴 インストーラ（MSI）にも同梱する（2026-07-30 追加）。
+          #   MSI は dist フォルダの中身を丸ごと取り込む作りなので、ここに置けば入る。
+          #   置かないと、相談員のPCにランチャーが無いまま
+          #   remohelppro:// の受け先をランチャーに向けることになり、
+          #   **「遠隔操作」を押しても何も起きない**。順番を間違えないこと。
+          cp ./target-launcher/release/remohelppro-launcher.exe ./rustdesk/remohelppro-launcher.exe
+          echo "RL: launcher bundled into the installer payload"
           ls -la ./SignOutput/
 
       - name: Upload launcher
@@ -430,6 +437,21 @@ jobs:
           # 🔴 --version を渡さないと MSI の中の版は exe 由来（Cargo.toml の 1.4.6）
           #   のままになり、ファイル名だけ変わって中身は同じ版になる。
           #   ＝ Windows は「同じものが入っている」と判断し「修復」を出す。
+          # 🔴 相談員版だけ、remohelppro:// の受け先をランチャーへ向ける（2026-07-30 追加）。
+          #   相談員が「遠隔操作」を押すたびに、ランチャーが版を確かめて
+          #   入れ替えてから本体を起動する＝**接続の直前に毎回自動更新**される。
+          #   押し忘れが起きない。更新できなくても本体は起動する（仕事を止めない）。
+          #   ⚠ 常駐版・顧客版の MSI にはランチャーを同梱していないので、
+          #     絶対に向けないこと。向けると「押しても何も起きない」になる。
+          if [ "${{ inputs.support_show_window }}" != "true" ] && [ "${{ inputs.resident }}" != "true" ]; then
+            sed -i 's|"\[INSTALLFOLDER_INNER\]$(var.BinName).exe" "%1"|"[INSTALLFOLDER_INNER]remohelppro-launcher.exe" "%1"|' ./Package/Components/Regs.wxs
+            if grep -q 'remohelppro-launcher.exe" "%1"' ./Package/Components/Regs.wxs; then
+              echo "RL: remohelppro:// -> launcher (auto update before every connect)"
+            else
+              echo "RL: ✗ URI の付け替えに失敗した。MSI を作らない"
+              exit 1
+            fi
+          fi
           python preprocess.py --arp --bin-name remohelppro --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
