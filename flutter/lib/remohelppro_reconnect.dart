@@ -45,12 +45,20 @@ File _tokenFile() {
 Future<void> armReboot({
   required String apiBase,
   required String shortId,
+  String? custToken,
 }) async {
   try {
     final r = await http
         .post(
           Uri.parse('$apiBase/api/customer/reconnect-arm'),
-          headers: const {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            // 🔴 本人であることを示す（2026-07-30 追加）。
+            //   これが無いと、短IDを知っただけの第三者が復帰の合言葉を取得でき、
+            //   相談員の接続先を自分の端末に差し替えられた。
+            if (custToken != null && custToken.isNotEmpty)
+              'x-customer-token': custToken,
+          },
           body: jsonEncode({'shortId': shortId}),
         )
         .timeout(const Duration(seconds: 10));
@@ -99,4 +107,79 @@ Future<String?> tryResume({
   } catch (_) {
     return null;
   }
+}
+
+// ───────────────────────────────────────────────────────────────
+// 再起動をまたいでサポートを続けるための「起動し直す仕掛け」。
+//
+// 🔴 これが無く、再起動後の自動再接続は成り立っていなかった（2026-07-30 実機指摘）。
+//   合言葉を用意する仕組み（armReboot）と、それを使って復帰する仕組み（tryResume）は
+//   出来ていたのに、**再起動後にアプリを起こす人が誰も居なかった**。
+//   Windows は落としてきた1個のファイルを勝手に起動し直したりしない。
+//
+// やりかた:
+//   ① 落としてきたファイルを、消えない場所に1つだけ控える
+//      （元のファイルは使い終わりしだい消えるので、控えが要る）
+//   ② RunOnce に登録する。Windows が**次の起動で1回だけ**実行して、
+//      登録を自分で消す。「1回きり」という約束と形が合っている。
+//   ③ サポートが終わったら、控えと登録を両方消す
+//
+// ⚠ **Windows はログインしてからでないと RunOnce を実行しない。**
+//   パスワードが要るPCで、お客様が席を離れていると復帰できない。
+//   これは仕組みの限界であり、無人での復帰が要るお客様には常駐版を使う。
+//   （常駐版はサービスとして動くのでログイン前から繋がる）
+
+const _kResumeRunKey =
+    r'HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce';
+const _kResumeRunName = 'REMOHELPPRO_RESUME';
+
+Directory _resumeDir() {
+  final base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+  return Directory('$base/REMOHELP PRO/resume');
+}
+
+File _resumeExe() => File('${_resumeDir().path}/remohelppro-resume.exe');
+
+/// 接続できた時点で呼ぶ。再起動されても戻れるように控えを作る。
+/// 失敗しても例外は投げない（サポートそのものは続ける）。
+Future<void> prepareRebootResume() async {
+  if (!Platform.isWindows) return;
+  // ランナー（落としてきた1個のファイル）の場所。ワンタイム版のときだけ渡ってくる。
+  final runner = Platform.environment['RL_RUNNER_EXE'] ?? '';
+  if (runner.isEmpty) return;
+  try {
+    final src = File(runner);
+    if (!src.existsSync()) return;
+    final dir = _resumeDir();
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final dst = _resumeExe();
+    // 既に同じ大きさの控えがあれば作り直さない（30MB弱の複製を毎回は避ける）。
+    if (!dst.existsSync() || dst.lengthSync() != src.lengthSync()) {
+      src.copySync(dst.path);
+    }
+    await Process.run('reg', [
+      'add', _kResumeRunKey,
+      '/v', _kResumeRunName,
+      '/t', 'REG_SZ',
+      '/d', '"${dst.path}"',
+      '/f',
+    ]);
+  } catch (_) {
+    // 控えが作れなければ、再起動後は認証コードの入れ直しになるだけ。
+  }
+}
+
+/// サポートが終わったときに呼ぶ。控えと登録を残さない。
+///
+/// 🔴 残すと、次にPCを起動したときに勝手にアプリが立ち上がる。
+///   お客様は「勝手に動いた」と受け取る。必ず消すこと。
+Future<void> clearRebootResume() async {
+  if (!Platform.isWindows) return;
+  try {
+    await Process.run('reg', ['delete', _kResumeRunKey, '/v', _kResumeRunName, '/f']);
+  } catch (_) {}
+  try {
+    final f = _resumeExe();
+    if (f.existsSync()) f.deleteSync();
+  } catch (_) {}
 }

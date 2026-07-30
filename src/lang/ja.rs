@@ -312,7 +312,10 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Use both passwords", "両方のパスワードを使用する"),
         ("Set permanent password", "固定パスワードを設定"),
         ("Enable remote restart", "リモートからの再起動を有効化する"),
-        ("Restart remote device", "リモートの端末を再起動"),
+        // 🔴 何が起きるかを名前で伝える（2026-07-30 ユーザー指示）。
+        //   「再起動」だけでは、サポートが切れて終わると受け取られる。
+        //   実際は再起動後に自動で繋ぎ直すので、そこまで名前に入れる。
+        ("Restart remote device", "再起動後に再接続"),
         ("Are you sure you want to restart", "本当に再起動しますか"),
         ("Restarting remote device", "リモートデバイスを再起動中"),
         ("remote_restarting_tip", "リモートコンピューターは再起動中です。このメッセージボックスを閉じて、しばらくした後にパスワードを使用して再接続してください。"),

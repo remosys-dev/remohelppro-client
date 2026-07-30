@@ -259,18 +259,18 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
           blockInput.value = !blockInput.value;
         }));
   }
-  // switchSides
-  if (isDefaultConn &&
-      isDesktop &&
-      ffiModel.keyboard &&
-      pi.platform != kPeerPlatformAndroid &&
-      versionCmp(pi.version, '1.2.0') >= 0 &&
-      bind.peerGetSessionsCount(id: id, connType: ffi.connType.index) == 1) {
-    v.add(TTextMenu(
-        child: Text(translate('Switch Sides')),
-        onPressed: () =>
-            showConfirmSwitchSidesDialog(sessionId, id, ffi.dialogManager)));
-  }
+  // Switch Sides（操作する側とされる側を入れ替える）は出さない。
+  //
+  // 🔴 2026-07-30 実機指摘。入口が2つあり、**戻る道だけを塞いでいた**。
+  //   昨日（指摘⑤）顧客側の接続管理ウィンドウから消したが、そちらが
+  //   「元に戻す」ボタンだった。相談員のツールバーに入口が残ったため、
+  //   一度入れ替えると**二度と戻せない**状態になっていた。
+  //   表示も「相談員に制御を戻す」のままで、顧客側に出す前提の文言が
+  //   相談員の画面に出ており、意味が通らなかった。
+  //
+  // 🔴 入口ごと無くす。遠隔サポートで、**お客様が相談員のPCを操作する**
+  //   場面は無い。あるとすれば事故か、誘導された操作である。
+  //   相談員の画面をお見せしたいだけなら、入れ替えではなく画面共有で足りる。
   // refresh
   if (pi.version.isNotEmpty) {
     v.add(TTextMenu(

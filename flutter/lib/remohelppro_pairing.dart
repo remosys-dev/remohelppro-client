@@ -11,9 +11,20 @@ import 'remohelppro_livekit.dart';
 import 'rl_support.dart' show kRlSupportShowWindow;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
 import 'remohelppro_resident.dart' show RemohelpproResidentCard;
-import 'remohelppro_reconnect.dart' show armReboot, tryResume;
+import 'remohelppro_reconnect.dart'
+    show armReboot, tryResume, prepareRebootResume, clearRebootResume;
 
 const String _kApiBase = 'https://svr.remohelppro.jp';
+
+/// 相談員が居なくなってアプリが自分を終了する直前に、server_model から呼ばれる。
+///
+/// 🔴 サーバーへ「終わった」と伝えるためだけの受け口（2026-07-30 追加）。
+///   これが無いと、お客様のアプリが消えたあとも当社の画面は「接続中」と出続け、
+///   相談員は繋がると思って繋がらない。**画面が嘘をつく**状態だった。
+///   server_model は shortId も顧客トークンも知らないので、
+///   知っているこちら側に処理を預ける形にする。
+Future<void> Function()? rlNotifySupportEnded;
+
 const String _kSlug = 'remohelppro';
 
 // REMOHELP PRO ブランド配色（ブルー系）。ここを変えれば一括で色が変わる。
@@ -84,6 +95,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _focus.addListener(() {
       if (mounted) setState(() {});
     });
+    // 相談員が居なくなってアプリが自分を終了する直前に、
+    //   サーバーへ「終わった」と伝えるための受け口を預ける。
+    rlNotifySupportEnded = _notifySupportEndedToServer;
     // 🔴 起動したら、まず前回の一時パスワードを無効にする（2026-07-29）。
     //
     //   設定は %LOCALAPPDATA% の**固定の場所**に残る。実行のたびに消えない。
@@ -229,6 +243,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
   @override
   void dispose() {
+    rlNotifySupportEnded = null;
     _statusPoll?.cancel();
     _statusPoll = null;
     _rearm?.cancel();
@@ -254,6 +269,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     } catch (_) {}
     try {
       await bind.mainStopService();
+    } catch (_) {}
+    // 再起動復帰の控えと自動起動の登録を消す。
+    //   🔴 残すと、次にPCを起動したときに勝手にアプリが立ち上がる。
+    //     お客様は「勝手に動いた」と受け取る。
+    try {
+      await clearRebootResume();
     } catch (_) {}
     // 一時パスワードをランダム化して無効化（同じIDへ再接続できないように）
     try {
@@ -346,6 +367,33 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         /* 一時的な通信エラーは無視（次のtickで再確認） */
       }
     });
+  }
+
+  /// 相談員が居なくなり、アプリが自分を終了する直前の後始末。
+  ///
+  /// 🔴 サーバーへ終了を伝え、再起動復帰の控えも消す（2026-07-30 追加）。
+  ///   伝えないと当社の画面は「接続中」のまま残り、相談員は繋がると
+  ///   思って繋がらない。控えを残すと次の起動で勝手にアプリが立ち上がる。
+  ///   ⚠ ここは終了の直前なので、時間をかけないこと（数秒で切る）。
+  Future<void> _notifySupportEndedToServer() async {
+    final sid = _shortId;
+    if (sid != null) {
+      try {
+        await http
+            .post(
+              Uri.parse('$_kApiBase/api/customer/session-end'),
+              headers: {
+                'Content-Type': 'application/json',
+                if (_custToken != null) 'x-customer-token': _custToken!,
+              },
+              body: jsonEncode({'shortId': sid}),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+    try {
+      await clearRebootResume();
+    } catch (_) {}
   }
 
   /// 顧客が自分で「終了する」を押したとき。
@@ -537,11 +585,19 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   お客様自身の操作による再起動を拾えない。実際の現場では、
     //   ソフトの導入後に勝手に再起動がかかる場面もある。
     //   合言葉は1回きり・15分で失効するので、先に持っていても危険は増えない。
-    unawaited(armReboot(apiBase: _kApiBase, shortId: shortId));
+    unawaited(armReboot(
+        apiBase: _kApiBase, shortId: shortId, custToken: _custToken));
+    // 🔴 合言葉だけでは戻れない。再起動後に**自分を起動し直す**控えも要る。
+    //   これが無いまま合言葉だけ用意していたため、再起動後の自動再接続は
+    //   一度も成立していなかった（2026-07-30 実機指摘）。
+    unawaited(prepareRebootResume());
     // 長いサポートで失効しないよう、10分ごとに取り直す。
     _rearm?.cancel();
     _rearm = Timer.periodic(const Duration(minutes: 10), (_) {
-      if (!_terminated) unawaited(armReboot(apiBase: _kApiBase, shortId: shortId));
+      if (!_terminated) {
+        unawaited(armReboot(
+            apiBase: _kApiBase, shortId: shortId, custToken: _custToken));
+      }
     });
 
     unawaited(sendNetworkInfo(

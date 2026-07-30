@@ -17,6 +17,8 @@ import '../common/formatter/id_formatter.dart';
 import '../desktop/pages/server_page.dart' as desktop;
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
+// 終了をサーバーへ伝える受け口（顧客アプリの接続画面が預ける）。
+import '../remohelppro_pairing.dart' show rlNotifySupportEnded;
 import 'model.dart';
 
 const kLoginDialogTag = "LOGIN";
@@ -193,7 +195,28 @@ class ServerModel with ChangeNotifier {
           kRlSupportShowWindow &&
           _hasEverConnected) {
         if (_clients.isEmpty) {
-          if (_zeroClientLengthCounter++ >= 4) {
+          // 🔴 待つ時間を 2秒 → 30秒 に延ばした（2026-07-30 実機指摘）。
+          //
+          //   0.5秒ごとに見ているので 4 = 2秒だった。相談員がビュアーの窓を
+          //   閉じただけで、2秒後にお客様のアプリが完全に終了していた。
+          //   ・回線が一瞬途切れただけでも終わる
+          //   ・窓を閉じ違えただけでも終わる
+          //   ・**再起動をまたぐ再接続と正面からぶつかる**
+          //     （再起動で接続が切れた瞬間に終了すると、戻る相手が居なくなる）
+          //
+          //   30秒あれば繋ぎ直せる。認証コードは変わらないので、
+          //   その間に戻れるのは**同じ相談員だけ**。緩めても危険は増えない。
+          if (_zeroClientLengthCounter++ >= 60) {
+            // 🔴 終わったことをサーバーへ伝えてから落ちる。
+            //   伝えないと、当社の画面はいつまでも「接続中」と出る。
+            //   お客様のアプリは既に消えているのに相談員には繋がって見える
+            //   ＝画面が嘘をつく。実際にこの食い違いが起きていた。
+            final notify = rlNotifySupportEnded;
+            if (notify != null) {
+              try {
+                await notify();
+              } catch (_) {}
+            }
             try {
               await bind.mainCloseAllConnections();
             } catch (_) {}

@@ -607,10 +607,61 @@ class _AnnotationMenu extends StatefulWidget {
 }
 
 class _AnnotationMenuState extends State<_AnnotationMenu> {
+  /// レーザーを入れる前の「見るだけ」の状態。やめたときにここへ戻す。
+  ///   🔴 無条件に操作を戻してはいけない。画面共有（見るだけの約束）の
+  ///     セッションでレーザーを使ってやめたときに、操作できる状態に
+  ///     なってしまうと**同意の範囲を越える**。
+  bool _viewOnlyBeforeLaser = false;
+
+  /// レーザーポインターの入切。
+  ///
+  /// 🔴 独自の通信は使わない（2026-07-30 作り直し）。
+  ///   最初は「お絵かきの経路に相乗りする」作りにしたが、あの経路は
+  ///   種別が stroke/clear/enable の3つに固定された型で、独自の種別は
+  ///   **相談員のPCから出る前に捨てられていた**（実機で動かなかった）。
+  ///   RustDesk には元から「自分のカーソルを相手の画面に見せる」仕組みがあり、
+  ///   そちらは**操作せず位置だけ描く**。ご要望どおりなので、それに載せる。
+  ///
+  /// 「見るだけ」も一緒に入れる。指すだけで操作しないのがレーザーなので、
+  /// 操作できる状態のままだと、指しているつもりで動かしてしまう。
+  Future<void> _setLaser(bool on) async {
+    final ffi = widget.ffi;
+    final m = ffi.ffiModel;
+    final sid = ffi.sessionId;
+
+    if (m.showMyCursor != on) {
+      await bind.sessionToggleOption(
+          sessionId: sid, value: kOptionToggleShowMyCursor);
+      final v = await bind.sessionGetToggleOption(
+              sessionId: sid, arg: kOptionToggleShowMyCursor) ??
+          on;
+      m.setShowMyCursor(v);
+    }
+
+    if (on) {
+      _viewOnlyBeforeLaser = m.viewOnly;
+      if (!m.viewOnly) {
+        await bind.sessionToggleOption(
+            sessionId: sid, value: kOptionToggleViewOnly);
+        final v = await bind.sessionGetToggleOption(
+            sessionId: sid, arg: kOptionToggleViewOnly);
+        m.setViewOnly(ffi.id, v ?? true);
+      }
+    } else if (!_viewOnlyBeforeLaser && m.viewOnly) {
+      await bind.sessionToggleOption(
+          sessionId: sid, value: kOptionToggleViewOnly);
+      final v = await bind.sessionGetToggleOption(
+          sessionId: sid, arg: kOptionToggleViewOnly);
+      m.setViewOnly(ffi.id, v ?? false);
+    }
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final model = widget.ffi.annotationModel;
     final on = model.enabled;
+    final laserOn = widget.ffi.ffiModel.showMyCursor;
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _IconMenuButton(
         icon: Icon(Icons.draw_outlined, size: 18),
@@ -623,25 +674,24 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
         hoverColor:
             on ? _ToolbarTheme.hoverBlueColor : _ToolbarTheme.hoverInactiveColor,
       ),
-      // レーザーポインター（2026-07-29 ユーザー要望）。
-      //   線を残さず、今指している場所だけを光点で見せる。
-      //   「そこです」と口で説明するより早く、画面も汚れない。
-      //   お絵かきと同時には使わない（どちらか一方）。
+      // レーザーポインター（2026-07-29 ユーザー要望／2026-07-30 作り直し）。
+      //   お客様の画面に、相談員のカーソル位置だけを見せる。
+      //   **操作はしない**。動かすのはお客様で、相談員は指すだけ。
+      //   「そこをクリックしてください」を、口で説明するより早く伝えられる。
+      //   ⚠ 元からある「自分のカーソルを表示する」に載せている。
+      //     見つけられない場所（キーボード設定の奥）にあったので、
+      //     ここに分かる名前で出す。
       _IconMenuButton(
         icon: Icon(Icons.highlight_outlined, size: 18),
-        tooltip: model.laserMode
-            ? 'レーザーポインターをやめる'
-            : 'レーザーポインター（線を残さず指し示す）',
+        tooltip: laserOn
+            ? 'レーザーポインターをやめる（操作できるようになります）'
+            : 'レーザーポインター（指すだけ・操作はお客様）',
         onPressed: () {
-          final next = !model.laserMode;
-          if (next && on) model.setEnabled(false);
-          model.setLaserMode(next);
-          setState(() {});
+          if (!laserOn && on) model.setEnabled(false);
+          _setLaser(!laserOn);
         },
-        color: model.laserMode
-            ? _ToolbarTheme.blueColor
-            : _ToolbarTheme.inactiveColor,
-        hoverColor: model.laserMode
+        color: laserOn ? _ToolbarTheme.blueColor : _ToolbarTheme.inactiveColor,
+        hoverColor: laserOn
             ? _ToolbarTheme.hoverBlueColor
             : _ToolbarTheme.hoverInactiveColor,
       ),
