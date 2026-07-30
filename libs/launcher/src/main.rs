@@ -68,6 +68,17 @@ fn try_update(dir: &Path) -> Result<(), String> {
         return Err("no version info".into());
     }
 
+    // 🔴 落としてくる先を当社に限る（2026-07-30 点検 G5）。
+    //   ここは**無人で実行ファイルを入れ替える**経路なので、
+    //   返ってきた URL をそのまま信じてはいけない。
+    //   サーバー側の設定ミスや書き換えがあっても、別のホストからは取らない。
+    //   ⚠ 前方一致で見る。`https://svr.remohelppro.jp.example.com/` のような
+    //     紛らわしい名前を通さないため、区切りの `/` まで含めて比べる。
+    const ALLOWED_PREFIX: &str = "https://svr.remohelppro.jp/";
+    if !url.starts_with(ALLOWED_PREFIX) {
+        return Err(format!("refused update url: {url}"));
+    }
+
     let current = fs::read_to_string(&vfile).unwrap_or_default();
     // 本体が無いときは版が同じでも取りに行く（初回・破損時の復旧）。
     if current.trim() == latest && app.exists() {

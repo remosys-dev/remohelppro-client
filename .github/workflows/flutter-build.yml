@@ -993,6 +993,25 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST"
           ls -la "$REL"
 
+      # 🔴 証明書が無くても「自分で署名」だけはしておく（2026-07-30 実機指摘）。
+      #
+      #   Apple Silicon は**無署名の実行ファイルを動かせない**。そのため
+      #   「壊れているため開けません」と出る。壊れてはおらず、署名が無いだけ。
+      #   アドホック署名（`--sign -`）は証明書も費用も要らず、
+      #   「Apple が認めた発行元」にはならないが、**実行はできるようになる**。
+      #
+      #   ⚠ これだけでは Gatekeeper は通らない。お客様には
+      #     右クリック→開く、または隔離属性の解除が必要。
+      #     本当の解決は Apple Developer Program での署名＋公証。
+      #   ⚠ 証明書がある場合は下の本署名が上書きするので、ここは邪魔をしない。
+      - name: Ad-hoc codesign (no certificate)
+        if: env.UPLOAD_ARTIFACT == 'true' && env.MACOS_P12_BASE64 == null
+        run: |
+          APP="./flutter/build/macos/Build/Products/Release/REMOHELP PRO.app"
+          codesign --force --deep --sign - "$APP"
+          codesign -dv "$APP" 2>&1 | head -5 || true
+          echo "RL: ad-hoc signed (runs on Apple Silicon; Gatekeeper still warns)"
+
       - name: create unsigned dmg
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
