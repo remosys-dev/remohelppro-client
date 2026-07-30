@@ -428,9 +428,14 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # 🔴 continue-on-error を外した（2026-07-30）。
+      #   「MSIが失敗しても単一exeは別ステップで取得済みだから」という理由で
+      #   付けていたが、そのために**MSIが作られていないのにビルドは成功**と表示され、
+      #   相談員のインストーラが古いまま配られ続けていた（実際に起きた）。
+      #   単一exeの取得は**この工程より前**で済んでいるので、ここで落としても
+      #   失うものは無い。作られなかったことが分かる方が大事。
       - name: Build msi
         if: env.UPLOAD_ARTIFACT == 'true'
-        continue-on-error: true
         run: |
           pushd ./res/msi
           # remohelppro: bin-name=remohelppro(=内包exe remohelppro.exe と一致) ／ 日本語(ja-jp)UIでMSIをビルド
@@ -443,15 +448,28 @@ jobs:
           #   押し忘れが起きない。更新できなくても本体は起動する（仕事を止めない）。
           #   ⚠ 常駐版・顧客版の MSI にはランチャーを同梱していないので、
           #     絶対に向けないこと。向けると「押しても何も起きない」になる。
-          if [ "${{ inputs.support_show_window }}" != "true" ] && [ "${{ inputs.resident }}" != "true" ]; then
-            sed -i 's|"\[INSTALLFOLDER_INNER\]$(var.BinName).exe" "%1"|"[INSTALLFOLDER_INNER]remohelppro-launcher.exe" "%1"|' ./Package/Components/Regs.wxs
-            if grep -q 'remohelppro-launcher.exe" "%1"' ./Package/Components/Regs.wxs; then
-              echo "RL: remohelppro:// -> launcher (auto update before every connect)"
-            else
-              echo "RL: ✗ URI の付け替えに失敗した。MSI を作らない"
+          # ⚠ この工程は shell 指定が無く **PowerShell** で動く。
+          #   bash の書き方（if [ ... ]／sed）を混ぜると工程ごと落ちる。
+          #   しかも continue-on-error: true なので**ビルドは成功と表示される**。
+          #   実際にそれで MSI が作られていなかった（2026-07-30）。
+          if ("${{ inputs.support_show_window }}" -ne "true" -and "${{ inputs.resident }}" -ne "true") {
+            $regs = "./Package/Components/Regs.wxs"
+            $before = '"[INSTALLFOLDER_INNER]$(var.BinName).exe" "%1"'
+            $after  = '"[INSTALLFOLDER_INNER]remohelppro-launcher.exe" "%1"'
+            $txt = Get-Content $regs -Raw
+            if (-not $txt.Contains($before)) {
+              Write-Host "RL: X URI の付け替え対象が見つからない。MSI を作らない"
               exit 1
-            fi
-          fi
+            }
+            $txt = $txt.Replace($before, $after)
+            Set-Content -Path $regs -Value $txt -Encoding utf8 -NoNewline
+            if ((Get-Content $regs -Raw).Contains($after)) {
+              Write-Host "RL: remohelppro:// -> launcher (auto update before every connect)"
+            } else {
+              Write-Host "RL: X URI の付け替えに失敗した。MSI を作らない"
+              exit 1
+            }
+          }
           python preprocess.py --arp --bin-name remohelppro --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
