@@ -40,7 +40,14 @@
 			     手で消してもらう運用は忘れられるので、導入時に必ず消す。
 			     ⚠ 消すのは当社のスキームだけ。他のキーには触れない。 -->
 			<Component Id="Product.Registry.RemoveUserOverride" Guid="B3F1A6D2-77C4-4E58-9C2A-5E0D1F4A8B37">
-				<RegistryKey Root="HKCU" Key="Software\Classes\$(var.ProductLower)" ForceDeleteOnInstall="yes" />
+				<!-- ⚠ WiX v4 では RegistryKey の ForceDeleteOnInstall は使えない
+				     （v3 の書き方。v4 では RemoveRegistryKey を使う）。
+				     Action="removeOnInstall" ＝ 導入時に、この枝ごと消す。 -->
+				<RemoveRegistryKey Root="HKCU" Key="Software\Classes\$(var.ProductLower)" Action="removeOnInstall" />
+				<!-- 部品には目印（KeyPath）が要る。レジストリ値を1つ置いて印にする。
+				     消した記録を残す意味も兼ねる。 -->
+				<RegistryValue Root="HKCU" Key="Software\REMOHELP PRO"
+				               Name="UserOverrideRemoved" Type="string" Value="1" KeyPath="yes" />
 			</Component>
 
 			<Component Id="Product.Registry.Command" Guid="BC8D581C-5960-4843-93DC-E347CD43BD49">
