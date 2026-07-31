@@ -1029,16 +1029,19 @@ class FfiModel with ChangeNotifier {
     //
     //   ⚠ 一度も繋がっていない場合の失敗（相手が居ない・コード違い）は
     //     本物のエラーなので、そのまま出す。区別は「繋がった実績があるか」。
-    final endedNormally = type == 'error' &&
-        (title == 'Connection Error') &&
-        (text.contains('Reset by the peer') ||
-            text.contains('closed by the peer') ||
-            text.contains('接続がリセット')) &&
-        parent.target?.connType == ConnType.defaultConn &&
-        (parent.target?.ffiModel.pi.currentDisplay ?? -1) >= 0;
-    if (endedNormally) {
+    // 🔴 相手が意図して閉じた合図（2026-07-31 作り直し）。
+    //
+    //   前はエラー本文の文字列を照合していたが、実際の文面は
+    //   "Closed manually by the peer" で、照合していた語と一致せず
+    //   **一度も効いていなかった**。文字列に頼るのをやめ、
+    //   Rust 側（io_loop.rs）で種別そのものを分けるようにした。
+    //   ここに来るのは「正常に終わった」ときだけ。
+    //
+    //   ⚠ 本物の失敗（相手が居ない・コード違い・回線断）はこの種別に
+    //     ならないので、今までどおりエラーとして出る。
+    if (type == 'session-ended') {
       msgBox(sessionId, 'custom-nook-nocancel', 'サポート終了',
-          'お客様がサポートを終了しました。', '', dialogManager);
+          'サポートを終了しました。この画面を閉じます。', '', dialogManager);
       Future.delayed(const Duration(seconds: 2), () {
         dialogManager.dismissAll();
         closeConnection();

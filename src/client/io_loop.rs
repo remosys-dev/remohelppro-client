@@ -1832,7 +1832,24 @@ impl<T: InvokeUiSession> Remote<T> {
                     }
                     Some(misc::Union::CloseReason(c)) => {
                         self.sent_close_reason = true; // The controlled end will close, no need to send close reason
-                        self.handler.msgbox("error", "Connection Error", &c, "");
+                        // 🔴 これは**相手が意図して閉じた**合図。エラーではない
+                        //   （2026-07-31 実機指摘・何度も直しきれなかった箇所）。
+                        //
+                        //   お客様が「終了する」を押した／相談員が操作を終了した／
+                        //   サポートを終了した——どれも正常な流れなのに、
+                        //   相談員の画面には赤い「接続エラー」が出ていた。
+                        //   毎回それを見て「何か失敗したのか」と確認する手間が生じる。
+                        //
+                        //   ★以前は Flutter 側で**エラー本文の文字列を照合**して
+                        //     見分けようとしたが、実際の文面は
+                        //     "Closed manually by the peer" で、照合していた語と
+                        //     一致せず**一度も効いていなかった**。
+                        //     文字列に頼るのをやめ、ここで種別を分ける。
+                        //
+                        //   ⚠ 本物の失敗（相手が居ない・コード違い・回線断）は
+                        //     この分岐を通らないので、今までどおりエラーになる。
+                        self.handler
+                            .msgbox("session-ended", "サポート終了", &c, "");
                         return false;
                     }
                     Some(misc::Union::BackNotification(notification)) => {
