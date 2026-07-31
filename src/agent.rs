@@ -124,7 +124,22 @@ mod imp {
         }
         let mut enroll = Config::get_option("enroll-token");
         if enroll.is_empty() {
-            // `--enroll` で渡されていなければ、実行ファイル名から拾う
+            // 🔴 自己展開のランナーが渡してくる値を最優先で見る（2026-07-31 追加）。
+            //
+            //   常駐版は「remohelppro-resident-setup__t-<トークン>.exe」という名前で
+            //   配るが、**実際に動くのは展開先の remohelppro.exe** なので、
+            //   自分の名前からは絶対に取れない。下の
+            //   enroll_token_from_filename() は常に空を返していた。
+            //   ＝ **端末が1台も登録されない**。落とせるのに何も起きない、
+            //   という一番分かりにくい壊れ方をしていた（実機で判明）。
+            enroll = std::env::var("RL_ENROLL_TOKEN").unwrap_or_default();
+            if !enroll.is_empty() {
+                log::info!("REMOHELP PRO agent: enroll token from runner");
+                Config::set_option("enroll-token".to_owned(), enroll.clone());
+            }
+        }
+        if enroll.is_empty() {
+            // ランナーを経由しない配り方（展開済みを直接置く等）への保険。
             enroll = enroll_token_from_filename();
             if !enroll.is_empty() {
                 log::info!("REMOHELP PRO agent: enroll token from filename");

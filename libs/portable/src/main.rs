@@ -241,6 +241,81 @@ fn dl_token_from_exe_name(exe: &std::path::Path) -> Option<String> {
     }
 }
 
+/// 常駐版の「会社の登録トークン」を、自分のファイル名から取り出す。
+///
+/// 配布サーバーは `remohelppro-resident-setup__t-<トークン>.exe` という名前で配る。
+/// お客様がコマンドを打たずに済ませるための仕組み（名前なので署名は壊れない）。
+///
+/// 🔴 これが無く、**登録が一度も成立していなかった**（2026-07-31 実機指摘）。
+///   本体側（agent.rs）は `current_exe()` の名前から探していたが、
+///   常駐版は**自己展開**で配るため、実際に動くのは展開先の `remohelppro.exe`。
+///   その名前に `__t-` は無いので、必ず空になっていた。
+///   ＝ 端末が1台も登録されない。ダウンロードは成功するのに何も起きない。
+///   ワンタイム版の合言葉と同じく、**ランナーが読んで環境変数で渡す**。
+///
+/// ブラウザが重複ダウンロードで付ける ` (1)` などは捨てる。
+fn enroll_token_from_exe_name(exe: &std::path::Path) -> Option<String> {
+    const MARK: &str = "__t-";
+    let stem = exe.file_stem()?.to_string_lossy().to_string();
+    let stem = match stem.rfind(" (") {
+        Some(i)
+            if stem.ends_with(')')
+                && stem[i + 2..stem.len() - 1].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            stem[..i].to_string()
+        }
+        _ => stem,
+    };
+    let pos = stem.find(MARK)?;
+    let token: String = stem[pos + MARK.len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    // 形式だけ確かめる。正しさの判断はサーバーが行う。
+    if (8..=64).contains(&token.len()) {
+        Some(token)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod enroll_token_tests {
+    use super::enroll_token_from_exe_name;
+    use std::path::Path;
+
+    fn t(name: &str) -> Option<String> {
+        enroll_token_from_exe_name(Path::new(name))
+    }
+
+    #[test]
+    fn takes_token_from_name() {
+        assert_eq!(
+            t("remohelppro-resident-setup__t-AbCd1234EfGh.exe"),
+            Some("AbCd1234EfGh".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_browser_duplicate_suffix() {
+        assert_eq!(
+            t("remohelppro-resident-setup__t-AbCd1234EfGh (1).exe"),
+            Some("AbCd1234EfGh".to_string())
+        );
+    }
+
+    #[test]
+    fn none_without_mark() {
+        assert_eq!(t("remohelppro-resident-setup.exe"), None);
+        assert_eq!(t("remohelppro.exe"), None);
+    }
+
+    #[test]
+    fn none_when_too_short() {
+        assert_eq!(t("remohelppro-resident-setup__t-abc.exe"), None);
+    }
+}
+
 #[cfg(test)]
 mod dl_token_tests {
     use super::dl_token_from_exe_name;
@@ -329,6 +404,13 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     if let Some(tok) = dl_token_from_exe_name(&exe) {
         println!("RL: pair token found in file name");
         cmd.env("RL_PAIR_DL_TOKEN", tok);
+    }
+    // 🔴 常駐版の登録トークンも渡す（2026-07-31 追加）。
+    //   本体は展開先で動くので、**自分の名前からは絶対に取れない**。
+    //   ここで読んで渡さないと、端末が1台も登録されない。
+    if let Some(tok) = enroll_token_from_exe_name(&exe) {
+        println!("RL: enroll token found in file name");
+        cmd.env("RL_ENROLL_TOKEN", tok);
     }
     if use_null_stdio() {
         cmd.stdin(Stdio::null())
