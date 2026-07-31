@@ -1867,6 +1867,16 @@ void showConfirmSwitchSidesDialog(
 ///   当社は立てていないので**一度も出たことがない**。だからここで別に確認する。
 ///
 /// 戻り値: true=終了してよい / false=やめる
+/// 🔴 終わらせ方を1つに揃える（2026-07-31 ユーザー指示）。
+///
+///   終了の入口が3つあり、押す場所によって**起きることが違っていた**。
+///     ・相談員コンソールの「サポートを終了」→ 本当に終わる
+///     ・ビュアーの窓の ×                    → 窓が閉じるだけ
+///     ・ツールバーの ×                      → 接続が切れるだけ
+///   お客様側は終わっておらず、相談員は「終わった」と思っている。
+///   どこを押しても**同じ確認・同じ結果**にする。
+///
+/// 戻り値: true=終了してよい / false=やめる
 Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager) async {
   final res = await dialogManager.show<bool>((setState, close, context) {
     return CustomAlertDialog(
@@ -1875,24 +1885,51 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager) async
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '遠隔操作を終わりますか？',
+            'サポートを終了しますか？',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
+            'この接続を終了し、お客様の画面のアプリも終了します。\n'
             'もう一度つなぐには、お客様に認証コードを入れ直していただく必要があります。',
           ),
         ],
       ),
       actions: [
         dialogButton('つづける', onPressed: () => close(false), isOutline: true),
-        dialogButton('終わる', onPressed: () => close(true)),
+        dialogButton('サポートを終了する', onPressed: () => close(true)),
       ],
       onSubmit: () => close(true),
       onCancel: () => close(false),
     );
   });
   return res == true;
+}
+
+/// サポートの終了を、当社サーバーへ伝える。
+///
+/// 🔴 これを呼ばないと、接続が切れるだけで**セッションは終わらない**。
+///   相談員は終わったつもりでも、お客様のアプリは動いたまま・
+///   コンソールには「対応中」が残る。実際にそうなっていた。
+///
+/// ⚠ ビュアーは当社サーバーに利用者としてログインしていないため、
+///   相談員の資格では呼べない。接続に使った**その回限りの合言葉**で
+///   本人性を示す。合言葉が違えばサーバーは何もしない。
+/// ⚠ 失敗しても呼び出し側は止めない。伝えられなくても、お客様側は
+///   接続が切れてから一定時間で終わる（二重の保険）。
+Future<void> notifySupportEnded(FFI ffi) async {
+  try {
+    final id = ffi.id;
+    final token = ffi.presetPassword ?? '';
+    if (id.isEmpty || token.isEmpty) return;
+    // ⚠ この構成には既に http（utils/http_service.dart を as http で読み込み）がある。
+    //   独自に package:http を足すと put/post の名前が衝突する。既存を使う。
+    await http.post(
+      Uri.parse('https://svr.remohelppro.jp/api/customer/end-by-viewer'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'rustdeskId': id, 'token': token}),
+    ).timeout(const Duration(seconds: 5));
+  } catch (_) {}
 }
 
 customImageQualityDialog(SessionID sessionId, String id, FFI ffi) async {

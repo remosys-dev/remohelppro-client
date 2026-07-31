@@ -682,13 +682,26 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
       //     見つけられない場所（キーボード設定の奥）にあったので、
       //     ここに分かる名前で出す。
       _IconMenuButton(
-        // 🔴 アイコンが空白のまま出ていた（2026-07-31 実機指摘）。
-        //   `Icons.highlight_outlined` は存在するのに描かれず、
-        //   **文字だけのボタン**になり、押しても変化が見えなかった。
-        //   ⚠ Flutter は使っているアイコンだけを埋め込む。`const` にして
-        //     取りこぼしを防ぎ、他でも使われている確実なものへ変える。
-        //   ⚠ 意味も分かりやすくする。狙いを定める十字は「指し示す」に合う。
-        icon: const Icon(Icons.gps_fixed, size: 18),
+        // 🔴 アイコンが**二度**空白のまま出た（2026-07-31 実機指摘）。
+        //   Icons.highlight_outlined → Icons.gps_fixed と替えたが、どちらも
+        //   描かれなかった。Flutter は使っているアイコンだけを字形として
+        //   埋め込むため、取りこぼすと**無言で空白**になる。
+        //   原因を追う価値より、確実に出る方法に替える価値の方が大きい。
+        //
+        //   ★字形の埋め込みに依存しない「文字」にする。
+        //     押しても見た目が変わらないと、相談員は「効かない」と判断して
+        //     もう一度押す＝**入れて即座に戻す**ことになる（実際に0.5秒間隔で
+        //     2回押された記録が残っていた）。見た目の変化は機能の一部。
+        icon: Text(
+          laserOn ? '◉' : '◎',
+          style: TextStyle(
+            fontSize: 17,
+            height: 1.0,
+            color: laserOn
+                ? _ToolbarTheme.blueColor
+                : _ToolbarTheme.inactiveColor,
+          ),
+        ),
         tooltip: laserOn
             ? 'レーザーポインターをやめる（操作できるようになります）'
             : 'レーザーポインター（指すだけ・操作はお客様）',
@@ -2473,6 +2486,11 @@ class _CloseMenu extends StatelessWidget {
         if (await showConnEndAuditDialogCloseCanceled(ffi: ffi)) {
           return;
         }
+        // 🔴 終了を当社サーバーへ伝える（2026-07-31 ユーザー指示）。
+        //   これが無いと**接続が切れるだけ**で、お客様のアプリは動いたまま、
+        //   コンソールには「対応中」が残る。相談員は終わったつもりでいる。
+        //   終わらせ方は3か所あるが、どこを押しても同じ結果にする。
+        await notifySupportEnded(ffi);
         closeConnection(id: id);
       },
       color: _ToolbarTheme.redColor,
