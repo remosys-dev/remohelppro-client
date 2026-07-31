@@ -86,8 +86,15 @@ fn main() {
             launch_app(&app);
         }
         AppKind::Installed(app) => {
-            // 🔴 インストール版は更新しない（上書きすると壊れる）。そのまま起動する。
+            // 🔴 インストール版は**上書きしない**。更新で落ちてくるのは
+            //   自己展開の持ち運び版で、インストール版（本体exe＋多数のDLL）
+            //   とは形が違う。上書きするとインストールが壊れ、二度と起動しない。
+            //
+            //   代わりに「新しい版があります」と**知らせるだけ**にする
+            //   （2026-07-31 ユーザー判断）。
+            //   ⚠ 知らせても**必ず起動する**。相談員の仕事を止めない。
             eprintln!("installed layout: launch without update");
+            notify_if_newer();
             launch_app(&app);
         }
         AppKind::Missing => not_found(),
@@ -198,4 +205,112 @@ fn launch_app(app: &Path) {
     cmd.args(&args);
     // 起動したら見届けない。ランチャーは即座に終わる。
     let _ = cmd.spawn();
+}
+
+// ── インストール版へのお知らせ ────────────────────────────────
+//
+// 🔴 インストール版は自動更新できない（上書きするとインストールが壊れる）。
+//   そこで「新しい版があります」と知らせるだけにする（2026-07-31 ユーザー判断）。
+//
+// ⚠ 知らせても**必ず本体を起動する**。相談員は電話中で、お客様を待たせている。
+//   ここで止めると、更新より大事なことが止まる。
+// ⚠ 同じ版のお知らせは**一度だけ**。押すたびに出すと読まなくなる。
+
+/// お知らせ済みの版を覚えておくファイル。
+fn notified_file() -> PathBuf {
+    std::env::var("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("REMOHELP PRO")
+        .join("notified.version")
+}
+
+/// いま入っている版（インストーラが登録した値）。
+///
+/// ⚠ 依存を増やさないため `reg query` の出力から拾う。
+///   読めなければ None を返し、**お知らせは出さない**
+///   （比べられないのに「新しい版があります」と出すのは害になる）。
+fn installed_version() -> Option<String> {
+    for root in [
+        r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\remohelppro",
+        r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\remohelppro",
+    ] {
+        let out = Command::new("reg")
+            .args(["query", root, "/v", "DisplayVersion"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        for line in text.lines() {
+            if line.contains("DisplayVersion") {
+                if let Some(v) = line.split_whitespace().last() {
+                    return Some(v.trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 「1.4.22.29757852」→ (1,4,22) のように、前3つだけ比べる。
+fn ver3(s: &str) -> (u32, u32, u32) {
+    let mut it = s.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
+fn notify_if_newer() {
+    let Some(current) = installed_version() else {
+        return; // 比べられないなら黙る
+    };
+    let Ok(body) = ureq::get("https://svr.remohelppro.jp/api/app/version?kind=operator_msi")
+        .timeout(Duration::from_secs(6))
+        .call()
+        .and_then(|r| Ok(r.into_string()?))
+    else {
+        return; // 通信できないだけ。仕事は止めない
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return;
+    };
+    let latest = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+    if latest.is_empty() || ver3(latest) <= ver3(&current) {
+        return;
+    }
+    // 同じ版で二度は出さない。
+    let marker = notified_file();
+    if fs::read_to_string(&marker).unwrap_or_default().trim() == latest {
+        return;
+    }
+    if let Some(dir) = marker.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(&marker, latest);
+
+    #[cfg(windows)]
+    unsafe {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        let to_w = |s: &str| {
+            OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        };
+        let msg = format!(
+            "新しい版があります。\n\n\
+             お手元: {current}\n\
+             最新  : {latest}\n\n\
+             svr.remohelppro.jp/download から入れ直してください。\n\
+             （このままでも接続できます）"
+        );
+        winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            to_w(&msg).as_ptr(),
+            to_w("REMOHELP PRO").as_ptr(),
+            winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONINFORMATION,
+        );
+    }
 }
