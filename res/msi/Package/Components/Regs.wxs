@@ -32,6 +32,17 @@
 				</RegistryKey>
 			</Component>
 
+			<!-- 🔴 利用者ごとの上書き登録を、導入時に消す（2026-07-31）。
+			     ランチャーの不具合で相談員が繋げなくなったとき、応急処置として
+			     HKCU 側に「本体を直接開く」登録を入れてもらった。
+			     HKCU は HKCR より優先されるため、残っていると**この MSI が
+			     入れた設定が効かない**（＝自動更新が働かない）。
+			     手で消してもらう運用は忘れられるので、導入時に必ず消す。
+			     ⚠ 消すのは当社のスキームだけ。他のキーには触れない。 -->
+			<Component Id="Product.Registry.RemoveUserOverride" Guid="B3F1A6D2-77C4-4E58-9C2A-5E0D1F4A8B37">
+				<RegistryKey Root="HKCU" Key="Software\Classes\$(var.ProductLower)" ForceDeleteOnInstall="yes" />
+			</Component>
+
 			<Component Id="Product.Registry.Command" Guid="BC8D581C-5960-4843-93DC-E347CD43BD49">
 				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell" />
 				<RegistryKey Root="HKCR" Key="$(var.ProductLower)\shell\open" />

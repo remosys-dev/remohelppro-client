@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:ui' as ui;
 
@@ -389,7 +390,72 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     return widget.params["windowId"];
   }
 
+  /// 🔴 窓を閉じたら「サポート終了」にする（2026-07-31 ユーザー要望）。
+  ///
+  ///   相談員は「操作を終了」を押し忘れる。ボタンの場所が分かりにくく見落とす。
+  ///   **窓を閉じたら終わる**方が直感に合う。
+  ///   ただし押し間違いで終わってしまうと困るので、必ず一度確認する。
+  ///
+  ///   ⚠ 確認は**接続が1つのときにも**出す。上流は2つ以上のときしか
+  ///     出しておらず、1つのときは黙って閉じていた。
+  ///   ⚠ 終了を伝えるのに使うのは、接続に使った**その回限りの合言葉**。
+  ///     ビュアーは当社サーバーに利用者としてログインしていないため、
+  ///     相談員の資格では呼べない。合言葉を持っている＝当事者、と見なす。
+  ///   ⚠ 伝えられなくても窓は閉じる。**相談員の操作を止めない**。
+  ///     伝わらなかった場合もお客様側は接続が切れて30秒で終わる。
+  Future<bool> _confirmEndSupportAndNotify() async {
+    final ffi = tabController.length > 0
+        ? tabController.state.value.tabs
+            .map((t) => t.page)
+            .whereType<RemotePage>()
+            .firstOrNull
+        : null;
+
+    final ok = await showDialog<bool>(
+      context: Get.context!,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('サポートを終了しますか？'),
+        content: const Text(
+          '閉じると、この接続を終了します。\n'
+          'お客様の画面のアプリも終了し、同じ番号では繋がらなくなります。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('戻る'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('サポートを終了する'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+
+    // お客様側へ即座に伝える。失敗しても閉じるのは止めない。
+    try {
+      final id = ffi?.id ?? '';
+      final token = ffi?.ffi.presetPassword ?? '';
+      if (id.isNotEmpty && token.isNotEmpty) {
+        await http
+            .post(
+              Uri.parse('https://svr.remohelppro.jp/api/customer/end-by-viewer'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'rustdeskId': id, 'token': token}),
+            )
+            .timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {}
+    return true;
+  }
+
   Future<bool> handleWindowCloseButton() async {
+    // 🔴 まず「本当に終わってよいか」を訊く（接続の数によらず）。
+    if (tabController.length > 0) {
+      if (!await _confirmEndSupportAndNotify()) return false;
+    }
     final connLength = tabController.length;
     if (connLength == 1) {
       if (await desktopTryShowTabAuditDialogCloseCancelled(
@@ -403,17 +469,10 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       tabController.clear();
       return true;
     } else {
-      final bool res;
-      if (!option2bool(kOptionEnableConfirmClosingTabs,
-          bind.mainGetLocalOption(key: kOptionEnableConfirmClosingTabs))) {
-        res = true;
-      } else {
-        res = await closeConfirmDialog();
-      }
-      if (res) {
-        tabController.clear();
-      }
-      return res;
+      // 上で一度確認済みなので、ここでは重ねて訊かない。
+      //   同じことを2回訊くと、押し間違いを誘う。
+      tabController.clear();
+      return true;
     }
   }
 

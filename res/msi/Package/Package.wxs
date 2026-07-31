@@ -43,6 +43,7 @@
 			<ComponentRef Id="Product.Registry.InstallFolder" />
 			<ComponentRef Id="Product.Registry.DefaultIcon" />
 			<ComponentRef Id="Product.Registry.CommandPlay" />
+			<ComponentRef Id="Product.Registry.RemoveUserOverride" />
 			<ComponentRef Id="Product.Registry.URLProtocol" />
 			<ComponentRef Id="Product.Registry.Command" />
 			<ComponentRef Id="Product.Registry.UninstallApp" />
