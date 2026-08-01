@@ -12,7 +12,13 @@ import 'rl_support.dart' show kRlSupportShowWindow;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
 import 'remohelppro_resident.dart' show RemohelpproResidentCard;
 import 'remohelppro_reconnect.dart'
-    show armReboot, tryResume, prepareRebootResume, clearRebootResume;
+    show
+        armReboot,
+        tryResume,
+        prepareRebootResume,
+        clearRebootResume,
+        preparePrelogonResume,
+        PrelogonResult;
 
 const String _kApiBase = 'https://svr.remohelppro.jp';
 
@@ -66,6 +72,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Timer? _statusPoll;
   Timer? _rearm; // 再起動の合言葉を取り直す
   bool _terminated = false;
+  /// ログオン前の再接続の用意が走っている最中か（二重起動を防ぐ）。
+  bool _prelogonBusy = false;
   /// 直前に「操作を許可した」状態だったか。view_only へ戻ったことを検知するために持つ。
   bool _wasFullControl = false;
 
@@ -362,11 +370,48 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           } else if (mode == 'full_control') {
             _wasFullControl = true;
           }
+          // 🔴 ログオン前の再接続の指示（2026-08-01 ユーザー指示）。
+          //   相談員が「再起動して続ける」を押すと、ここに立つ。
+          //   ⚠ 1回の指示に対して1回だけ実行する。二重に走らせると
+          //     お客様の画面に管理者の確認が何度も出る。
+          if (j['prelogon'] == true && !_prelogonBusy) {
+            _prelogonBusy = true;
+            unawaited(_runPrelogon(shortId));
+          }
         }
       } catch (_) {
         /* 一時的な通信エラーは無視（次のtickで再確認） */
       }
     });
+  }
+
+  /// ログオン前の再接続を用意し、結果をサーバーへ返す。
+  ///
+  /// 🔴 結果を必ず返すこと。黙って失敗すると、相談員は用意できたと信じて
+  ///   再起動を促し、**戻ってこないPCを待ち続ける**ことになる。
+  Future<void> _runPrelogon(String shortId) async {
+    PrelogonResult r;
+    try {
+      r = await preparePrelogonResume(shortId);
+    } catch (_) {
+      r = PrelogonResult.failed;
+    }
+    final name = r == PrelogonResult.ok
+        ? 'ok'
+        : (r == PrelogonResult.noAdmin ? 'noAdmin' : 'failed');
+    try {
+      await http.post(
+        Uri.parse('$_kApiBase/api/customer/prelogon-result'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (_custToken != null) 'x-customer-token': _custToken!,
+        },
+        body: jsonEncode({'shortId': shortId, 'result': name}),
+      );
+    } catch (_) {
+      // 返せなくても、相談員側は「返事が無い」ことで気づける（画面に出す）。
+    }
+    _prelogonBusy = false;
   }
 
   /// 相談員が居なくなり、アプリが自分を終了する直前の後始末。

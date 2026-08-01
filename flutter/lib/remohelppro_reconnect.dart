@@ -25,6 +25,63 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+// ───────────────────────────────────────────────────────────────
+// ログオン前の再接続（2026-08-01 ユーザー指示）。
+//
+// 上の仕組み（RunOnce）は **お客様がログオンしてからしか動かない**。
+// 席を離れていればそこで止まる。ログオン画面から続けられるのは
+// Windows サービスだけなので、再起動をまたぐときだけ一時的に作る。
+//
+// ⚠ 作れるのは管理者だけ。UAC（画面が暗くなる確認）は Windows の
+//   仕組みなので回避できない。押していただけなければ従来のやり方に落とす。
+// ⚠ 消すのは**サービス自身**（期限とサポート終了を自分で見る）。
+//   ここから消しに行くと、そのたびに管理者の確認が出てしまう。
+
+/// 一時サービスが自分を消すまでの時間。復帰の窓（サーバー側30分）と揃える。
+const int kPrelogonMinutes = 30;
+
+/// 結果。相談員にそのまま伝えられる粒度にする。
+enum PrelogonResult { ok, noAdmin, failed }
+
+/// ログオン前の再接続を用意する。
+///
+/// 戻り値をそのまま相談員に見せる想定なので、**曖昧な失敗を作らない**。
+///   ok      … 用意できた。再起動してよい
+///   noAdmin … 管理者権限が無い（お客様が「いいえ」を押した場合も含む）
+///   failed  … それ以外（ウイルス対策ソフトに止められた等）
+Future<PrelogonResult> preparePrelogonResume(String shortId) async {
+  if (!Platform.isWindows) return PrelogonResult.failed;
+  try {
+    // 今動いているアプリ一式の場所。設定とIDもここにある（丸ごと複製する）。
+    final appDir = Platform.environment['RL_APP_DIR'] ?? '';
+    if (appDir.isEmpty) return PrelogonResult.failed;
+    final exe = Platform.resolvedExecutable;
+    final deadline = (DateTime.now().millisecondsSinceEpoch ~/ 1000) +
+        kPrelogonMinutes * 60;
+
+    // 昇格して実行する。終了コードで結果を受け取る（0=成功 2=権限なし）。
+    //   ⚠ お客様が UAC で「いいえ」を押すと Start-Process が例外を投げる。
+    //     それは「権限が無い」と同じ扱いにする（相談員への伝え方が同じため）。
+    final ps = "\$ErrorActionPreference='Stop';"
+        "\$p=Start-Process -FilePath '${exe.replaceAll("'", "''")}'"
+        " -ArgumentList '--rl-prelogon-install','${appDir.replaceAll("'", "''")}','$shortId','$deadline'"
+        " -Verb RunAs -Wait -PassThru;"
+        "exit \$p.ExitCode";
+    final r = await Process.run(
+        'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+    if (r.exitCode == 0) return PrelogonResult.ok;
+    if (r.exitCode == 2) return PrelogonResult.noAdmin;
+    // Start-Process が投げた（＝「いいえ」を押された）場合もここに来る。
+    final err = '${r.stderr}';
+    if (err.contains('cancel') || err.contains('キャンセル') || err.contains('操作は')) {
+      return PrelogonResult.noAdmin;
+    }
+    return PrelogonResult.failed;
+  } catch (_) {
+    return PrelogonResult.failed;
+  }
+}
+
 /// 合言葉を置く場所。再起動をまたぐので一時フォルダではなく
 /// ユーザーのアプリデータに置く。
 File _tokenFile() {

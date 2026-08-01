@@ -37,6 +37,22 @@ pub fn core_main() -> Option<Vec<String>> {
             *config::APP_DIR.write().unwrap() = d;
         }
     }
+    // ログオン前の再接続（一時サービス）として動く場合（2026-08-01）。
+    //   サービスに環境変数は渡らないので、**実行ファイルの隣の目印**で判断する。
+    //   目印があるときだけ、設定とIDをその場所に固定する。
+    //   ここを落とすと別のIDになり、相談員からは永久に見つからない。
+    //   ⚠ global_init より先に決めること（後から変えても手遅れ）。
+    #[cfg(windows)]
+    let mut _rl_prelogon: Option<crate::rl_prelogon::Marker> = None;
+    #[cfg(windows)]
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(m) = crate::rl_prelogon::read_marker(dir) {
+                *config::APP_DIR.write().unwrap() = dir.to_string_lossy().to_string();
+                _rl_prelogon = Some(m);
+            }
+        }
+    }
     // ワンタイム(RL_APP_DIR 有)は、インストール済みPCでも Quick Support(単独)で動かし、
     // 既存インストールの Windows サービスに一切触れない(停止/ID破壊を防ぐ)。
     let _is_rl_onetime = std::env::var("RL_APP_DIR")
@@ -430,7 +446,36 @@ pub fn core_main() -> Option<Vec<String>> {
             return None;
         } else if args[0] == "--service" {
             log::info!("start --service");
+            // 一時サービスなら、まず自分の期限を見て、過ぎていれば自分を消す。
+            //   通信できなくても、電源を抜かれて翌日起動でも、ここで消える。
+            #[cfg(windows)]
+            if let Some(m) = _rl_prelogon.take() {
+                crate::rl_prelogon::start_watchdog(m);
+            }
             crate::start_os_service();
+            return None;
+        } else if args[0] == "--rl-prelogon-install" {
+            // 一時サービスを作る（昇格済みで呼ばれる）。
+            //   使い方: --rl-prelogon-install <展開先> <短いID> <期限UNIX秒>
+            //   ⚠ 結果は**終了コード**で返す。0=成功／2=権限が無い／1=その他の失敗。
+            //     顧客アプリはこれを見て、相談員に理由を伝える。
+            #[cfg(windows)]
+            {
+                if args.len() < 4 {
+                    return None;
+                }
+                let src = std::path::PathBuf::from(&args[1]);
+                let deadline = args[3].parse::<u64>().unwrap_or(0);
+                match crate::rl_prelogon::install(&src, &args[2], deadline) {
+                    Ok(_) => std::process::exit(0),
+                    Err(e) => {
+                        log::error!("RL prelogon install failed: {e}");
+                        let code = if e.to_string().contains("not elevated") { 2 } else { 1 };
+                        std::process::exit(code);
+                    }
+                }
+            }
+            #[cfg(not(windows))]
             return None;
         } else if args[0] == "--server" {
             log::info!("start --server with user {}", crate::username());

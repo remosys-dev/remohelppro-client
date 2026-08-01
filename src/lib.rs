@@ -63,6 +63,9 @@ mod tray;
 mod whiteboard;
 #[cfg(windows)]
 mod safemode;
+/// ログオン前の再接続（一時サービス）。2026-08-01 追加。
+#[cfg(windows)]
+pub mod rl_prelogon;
 
 // 画面注釈（双方向お絵かき）の DrawAction ↔ JSON 変換
 pub mod draw_annotation;
