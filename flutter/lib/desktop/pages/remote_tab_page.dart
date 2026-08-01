@@ -82,6 +82,13 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         selectedIcon: selectedIcon,
         unselectedIcon: unselectedIcon,
         onTabCloseButton: () async {
+          // 🔴 タブの × も「サポートを終了」と同じ扱いにする
+          //   （2026-08-01 検証で判明。揃えたつもりで漏れていた）。
+          //   ここは確認も、サーバーへの終了の連絡も通っていなかった。
+          //   最後のタブを閉じると窓ごと閉じるので、相談員は終わったつもりでも
+          //   お客様のアプリは動いたまま・コンソールは「対応中」のまま残る。
+          //   ＝ 元の症状がそのまま残っていた。
+          if (!await _confirmEndSupportAndNotify()) return;
           if (await desktopTryShowTabAuditDialogCloseCancelled(
             id: peerId!,
             tabController: tabController,
@@ -332,6 +339,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           style: style,
         ),
         proc: () async {
+          // 🔴 右クリックの「閉じる」も同じ扱いにする（2026-08-01）。
+          if (!await _confirmEndSupportAndNotify()) return;
           if (await desktopTryShowTabAuditDialogCloseCancelled(
             id: key,
             tabController: tabController,

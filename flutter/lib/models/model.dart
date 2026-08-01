@@ -1096,7 +1096,14 @@ class FfiModel with ChangeNotifier {
         });
         return;
       }
-      if ((state == 'expired' || state == 'ended') && _pi.isSet.isTrue) {
+      // 🔴 alive（お客様は居る）のときは**絶対に終わらせない**
+      //   （2026-08-01 検証で判明）。切れているのはこちら側の都合なので、
+      //   今までどおり繋ぎ直しの案内を出すだけにする。
+      //   ここを expired と同じ扱いにすると、お客様は元気なのに
+      //   ビュアーが勝手にサポートを終わらせる。
+      if (state == 'alive') {
+        // 何もしない（下の通常のエラー処理へ落ちる）
+      } else if ((state == 'expired' || state == 'ended') && _pi.isSet.isTrue) {
         // 期限切れなら、こちらから終わらせる（お客様のアプリも終わる）。
         //   待ち続けると、相談員は終わったことに気づかず、
         //   お客様のPCには復帰用の控えが残ったままになる。
