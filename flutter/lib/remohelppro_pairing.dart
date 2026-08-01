@@ -235,9 +235,14 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           apiBase: _kApiBase, shortId: res.shortId, custToken: _custToken));
       unawaited(prepareRebootResume());
       _rearm?.cancel();
+      // ⚠ 通常の接続と同じく、終了後は叩かない（2026-08-01 検証で指摘）。
+      //   これが無いと、サポートが終わってもアプリ終了まで10分ごとに
+      //   控えを取り直そうとし続ける。
       _rearm = Timer.periodic(const Duration(minutes: 10), (_) {
-        unawaited(armReboot(
-            apiBase: _kApiBase, shortId: res.shortId, custToken: _custToken));
+        if (!_terminated) {
+          unawaited(armReboot(
+              apiBase: _kApiBase, shortId: res.shortId, custToken: _custToken));
+        }
       });
       return true;
     } catch (_) {
@@ -298,6 +303,11 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _terminated = true;
     _statusPoll?.cancel();
     _statusPoll = null;
+    // ⚠ 控えの取り直しも止める（2026-08-01 検証で指摘）。
+    //   止めていなかったため、終了後もアプリが生きている間は
+    //   10分ごとにサーバーを叩き続けていた。
+    _rearm?.cancel();
+    _rearm = null;
     _clock?.cancel();
     _clock = null;
     try {
@@ -657,7 +667,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   相談員からの再起動指示を待つ作りにすると、Windows Update や
     //   お客様自身の操作による再起動を拾えない。実際の現場では、
     //   ソフトの導入後に勝手に再起動がかかる場面もある。
-    //   合言葉は1回きり・15分で失効するので、先に持っていても危険は増えない。
+    //   合言葉は1回きり・30分で失効するので、先に持っていても危険は増えない。
     unawaited(armReboot(
         apiBase: _kApiBase, shortId: shortId, custToken: _custToken));
     // 🔴 合言葉だけでは戻れない。再起動後に**自分を起動し直す**控えも要る。

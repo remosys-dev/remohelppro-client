@@ -544,12 +544,6 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                     d = dir_path,
                     e = self_path
                 );
-                // ⚠ ここも .args ではなく raw_arg。理由は上の del_now と同じ
-                //   （Rust が " を \" に書き換え、cmd が理解できない）。
-                let del_cmd = format!(
-                    "/c ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
-                    s = sweep
-                );
                 // ⚠ 控えから起動されたときは、展開先だけ片付けて**控えは残す**。
                 //   控えを消すと次の再起動で戻れなくなる（上の is_resume_copy 参照）。
                 let sweep = if is_resume_copy {
@@ -557,6 +551,8 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                 } else {
                     sweep
                 };
+                // ⚠ ここも .args ではなく raw_arg。理由は上の del_now と同じ
+                //   （Rust が " を \" に書き換え、cmd が理解できない）。
                 let del_cmd = format!(
                     "/c ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
                     s = sweep

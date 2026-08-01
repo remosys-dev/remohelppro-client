@@ -1877,7 +1877,60 @@ void showConfirmSwitchSidesDialog(
 ///   どこを押しても**同じ確認・同じ結果**にする。
 ///
 /// 戻り値: true=終了してよい / false=やめる
-Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager) async {
+Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
+    {FFI? ffi}) async {
+  // 🔴🔴 再起動を待っている間は、**閉じてもサポートを終了しない**
+  //   （2026-08-01 本番の記録で実害を確認）。
+  //
+  //   実際に起きたこと（セッション HF3V16）:
+  //     21:11:17  接続・復帰の控えを作成（期限は 21:41:18）
+  //     21:24:04  ビュアーがサポートを終了させた
+  //     21:26:54  お客様のPCが戻ってきた → 403 で拒否
+  //   **期限まで14分24秒残っていたのに、2分50秒前にこちらが終わらせていた。**
+  //   お客様のPCはちゃんと戻ってきていたのに、迎える側が先に帰っていた。
+  //
+  //   ★「×を押したら終了」と「再起動中は待つ」が正面からぶつかっている。
+  //     待っている最中は、閉じる＝諦めるとは限らない。窓が邪魔なだけかもしれない。
+  //     ここで黙って終了させると、**お客様は締め出される**。
+  //
+  //   ⚠ 終了そのものを禁じない。相談員が「それでも終了する」と決めたなら従う。
+  //     禁じると、本当に戻ってこないPCを永久に待つことになる。
+  //     決めるのは相談員で、こちらは**何が起きるかを伝える**のが仕事。
+  if (ffi != null) {
+    final (state, remainSec) = await rlWatchReconnect(ffi);
+    if (state == 'waiting') {
+      final m = (remainSec / 60).ceil();
+      final res = await dialogManager.show<bool>((setState, close, context) {
+        return CustomAlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'お客様のパソコンが再起動中です',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'あと およそ $m 分、戻りを待つことができます。\n'
+                '戻り次第、自動でつなぎ直します。\n\n'
+                'ここで終了すると、お客様が戻ってきても\n'
+                'つなぎ直せなくなります\n'
+                '（認証コードの入れ直しが必要になります）。',
+              ),
+            ],
+          ),
+          actions: [
+            dialogButton('待つ', onPressed: () => close(false), isOutline: true),
+            dialogButton('それでも終了する', onPressed: () => close(true)),
+          ],
+          onSubmit: () => close(false), // 既定は「待つ」。誤操作で締め出さない
+          onCancel: () => close(false),
+        );
+      });
+      return res == true;
+    }
+  }
   final res = await dialogManager.show<bool>((setState, close, context) {
     return CustomAlertDialog(
       content: Column(

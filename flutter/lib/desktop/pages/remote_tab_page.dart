@@ -403,7 +403,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
   Future<bool> _confirmEndSupportAndNotify() async {
     final ffi = _currentFfi();
     if (ffi == null) return true; // 対象が取れないときは閉じるのを妨げない
-    if (!await confirmCloseRemoteSession(ffi.dialogManager)) return false;
+    if (!await confirmCloseRemoteSession(ffi.dialogManager, ffi: ffi)) return false;
     await notifySupportEnded(ffi);
     return true;
   }
