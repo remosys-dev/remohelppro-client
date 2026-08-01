@@ -140,11 +140,6 @@ Future<String?> tryResume({
   try {
     if (!f.existsSync()) return null;
     token = f.readAsStringSync().trim();
-    // 🔴 読んだ時点で消す。成功しても失敗しても1回きり。
-    //   残すと、次の起動でも復帰を試みてしまう。
-    try {
-      f.deleteSync();
-    } catch (_) {}
   } catch (_) {
     return null;
   }
@@ -158,10 +153,25 @@ Future<String?> tryResume({
           body: jsonEncode({'token': token, 'rustdeskId': rustdeskId}),
         )
         .timeout(const Duration(seconds: 15));
+    // 🔴 消すのは**サーバーの返事を受け取ってから**（2026-08-01 作り直し）。
+    //
+    //   元は「読んだ時点で消す」だった。1回きりを守るための判断だったが、
+    //   **再起動の直後はネットワークがまだ上がっていない**ことが多い。
+    //   そこで通信に失敗すると、合言葉は既に消えており、**二度と戻れない**。
+    //   お客様は席を離れたまま、サポートは終わってしまう。
+    //
+    //   サーバーが返事をくれた時点で消す（200 でも 403 でも1回きりは保たれる）。
+    //   返事が無い＝通信できていないので、残して次の起動でもう一度試す。
+    //   ⚠ 残した場合も、サーバー側の期限（30分）で必ず無効になる。
+    //     手元に残ることが「いつまでも戻れる」を意味しないのが要点。
+    try {
+      f.deleteSync();
+    } catch (_) {}
     if (r.statusCode != 200) return null;
     final j = jsonDecode(r.body) as Map;
     return j['onetimeToken'] as String?;
   } catch (_) {
+    // 通信できなかった。合言葉は残す（次の起動でもう一度試せる）。
     return null;
   }
 }
@@ -231,6 +241,17 @@ Future<void> prepareRebootResume() async {
 /// 🔴 残すと、次にPCを起動したときに勝手にアプリが立ち上がる。
 ///   お客様は「勝手に動いた」と受け取る。必ず消すこと。
 Future<void> clearRebootResume() async {
+  // 🔴 合言葉のファイルも消す（2026-08-01 追加）。
+  //   これを消していなかったため、サポートが終わった後も
+  //   %LOCALAPPDATA%\REMOHELP PRO\reconnect.token が残り、
+  //   **次に起動したとき古い合言葉で復帰を試みて 403 になっていた**。
+  //   実害は「毎回1回だけ無駄な要求が飛ぶ」ことだが、記録が
+  //   403 だらけになり、本当の失敗が埋もれて原因を追えなくなる。
+  //   ⚠ Windows 以外でも消す（下の RunOnce の処理より前に置く）。
+  try {
+    final f = _tokenFile();
+    if (f.existsSync()) f.deleteSync();
+  } catch (_) {}
   if (!Platform.isWindows) return;
   try {
     await Process.run('reg', ['delete', _kResumeRunKey, '/v', _kResumeRunName, '/f']);

@@ -358,6 +358,25 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     // setup env
     let exe = std::env::current_exe().unwrap_or_default();
     let exe_name = exe.file_name().unwrap_or_default();
+    // 🔴🔴 再起動復帰の「控え」から起動されたときは、自分を消さない
+    //   （2026-08-01 実機で判明。私が自己削除を直したことで壊した回帰）。
+    //
+    //   再起動をまたぐために、落としたファイルの複製を
+    //   %LOCALAPPDATA%\REMOHELP PRO\resume\ に置き、RunOnce に登録している。
+    //   再起動後はその**控えが起動される**ので、ここでいう「自分」は控えになる。
+    //   自己削除をそのまま働かせると、控えが消える。
+    //   顧客アプリ側は「同じ大きさなら作り直さない」判断なので複製もされず、
+    //   結果 **2回目の再起動から、ログオンしても何も起動しない**。
+    //
+    //   1.4.23 まではこれが表に出なかった。自己削除そのものが動いていなかったため
+    //   （cmd への引数の渡し方が壊れていた）。直したとたんに露出した。
+    //
+    //   ⚠ 控えを消すのは顧客アプリの clearRebootResume（サポート終了時）。
+    //     ここで消さなくても残り続けない。
+    let is_resume_copy = {
+        let p = exe.to_string_lossy().to_lowercase();
+        p.contains("\\remohelp pro\\resume\\") || p.contains("/remohelp pro/resume/")
+    };
     // 2026-06-24: ワンタイム版の設定隔離先(展開dir)を子プロセスへ RL_APP_DIR で渡す。
     //   子(rustdesk.exe)の core_main がこれを APP_DIR に設定し、インストール版に触れない。
     let rl_app_dir = path.parent().map(|p| p.to_string_lossy().to_string());
@@ -482,7 +501,7 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                     "/c for /L %i in (1,1,3600) do @(if not exist \"{e}\" (exit) else (ping -n 2 127.0.0.1 >nul & del /f /q \"{e}\" >nul 2>nul))",
                     e = self_path
                 );
-                if !self_path.contains('"') {
+                if !self_path.contains('"') && !is_resume_copy {
                     let _ = Command::new("cmd")
                         .raw_arg(&del_now)
                         .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
@@ -527,6 +546,17 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                 );
                 // ⚠ ここも .args ではなく raw_arg。理由は上の del_now と同じ
                 //   （Rust が " を \" に書き換え、cmd が理解できない）。
+                let del_cmd = format!(
+                    "/c ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
+                    s = sweep
+                );
+                // ⚠ 控えから起動されたときは、展開先だけ片付けて**控えは残す**。
+                //   控えを消すと次の再起動で戻れなくなる（上の is_resume_copy 参照）。
+                let sweep = if is_resume_copy {
+                    format!("rmdir /s /q \"{d}\" 2>nul", d = dir_path)
+                } else {
+                    sweep
+                };
                 let del_cmd = format!(
                     "/c ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
                     s = sweep
