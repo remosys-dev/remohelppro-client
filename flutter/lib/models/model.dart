@@ -1063,7 +1063,20 @@ class FfiModel with ChangeNotifier {
     //     ここへ入れない。あれは本物のエラーなので今までどおり出す。
     //   ⚠ 尋ねられないとき（相談員側の回線断など）は waiting が返る。
     //     迷ったらサポートを終わらせない、という向きに倒している。
-    if (title == 'Connection Error' && _pi.isSet.isTrue && parent.target != null) {
+    //
+    //   🔴 「繋がった実績があるか」を条件にしていたのが誤りだった
+    //     （2026-08-01 実機指摘・作り直し）。
+    //     再起動の直後に相談員がビュアーを開くと、**一度も繋がっていない**ので
+    //     条件を外れ、赤い「接続エラー」がそのまま出ていた。
+    //     お客様のPCが戻る前に開くのは普通の操作なので、ここを弾いてはいけない。
+    //
+    //   ★待つべきかどうかは**サーバーが知っている**。そちらに従う。
+    //     waiting が返るのは「進行中のセッションで・合言葉が合っていて・
+    //     復帰の控えがある」ときだけなので、判断の材料として十分。
+    //   ⚠ ただし expired / ended でこちらから終わらせるのは、
+    //     **繋がった実績があるときだけ**にする。認証コードの打ち間違いで
+    //     一度も繋がっていない場合に「終了しました」と出すと嘘になる。
+    if (title == 'Connection Error' && parent.target != null) {
       final ffi = parent.target!;
       final (state, remainSec) = await rlWatchReconnect(ffi);
       if (state == 'waiting') {
@@ -1083,7 +1096,7 @@ class FfiModel with ChangeNotifier {
         });
         return;
       }
-      if (state == 'expired' || state == 'ended') {
+      if ((state == 'expired' || state == 'ended') && _pi.isSet.isTrue) {
         // 期限切れなら、こちらから終わらせる（お客様のアプリも終わる）。
         //   待ち続けると、相談員は終わったことに気づかず、
         //   お客様のPCには復帰用の控えが残ったままになる。
