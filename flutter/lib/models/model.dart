@@ -1048,6 +1048,65 @@ class FfiModel with ChangeNotifier {
       });
       return;
     }
+    // 🔴 再起動をまたぐ待機（2026-08-01 ユーザー指示）。
+    //
+    //   お客様のPCが再起動すると、ここに「接続エラー」として来る。
+    //   相談員には**故障と再起動の区別がつかない**。実際には戻ってくるのに
+    //   赤いエラーが出て、待てばいいのか諦めるのかも分からなかった。
+    //
+    //   ★当社サーバーに「待つべきか」を尋ねて、答えに従う。
+    //     waiting → 待っていると伝え、5秒ごとに繋ぎ直しを試す
+    //     expired → 戻らなかった。両側とも終わらせる
+    //     ended   → 既に終わっている。そう伝えて閉じる
+    //
+    //   ⚠ 一度も繋がっていない失敗（相手が居ない・コード違い）は
+    //     ここへ入れない。あれは本物のエラーなので今までどおり出す。
+    //   ⚠ 尋ねられないとき（相談員側の回線断など）は waiting が返る。
+    //     迷ったらサポートを終わらせない、という向きに倒している。
+    if (title == 'Connection Error' && _pi.isSet.isTrue && parent.target != null) {
+      final ffi = parent.target!;
+      final (state, remainSec) = await rlWatchReconnect(ffi);
+      if (state == 'waiting') {
+        final m = (remainSec / 60).ceil();
+        msgBox(
+            sessionId,
+            'custom-nook-nocancel',
+            '再起動後の再接続を待っています',
+            'お客様のパソコンが再起動しています。\n'
+                '戻り次第、自動でつなぎ直します。\n\n'
+                '残り およそ $m 分',
+            '',
+            dialogManager);
+        _timer?.cancel();
+        _timer = Timer(const Duration(seconds: 5), () {
+          reconnect(dialogManager, sessionId, false);
+        });
+        return;
+      }
+      if (state == 'expired' || state == 'ended') {
+        // 期限切れなら、こちらから終わらせる（お客様のアプリも終わる）。
+        //   待ち続けると、相談員は終わったことに気づかず、
+        //   お客様のPCには復帰用の控えが残ったままになる。
+        if (state == 'expired') await notifySupportEnded(ffi);
+        msgBox(
+            sessionId,
+            'custom-nook-nocancel',
+            'サポートを終了しました',
+            state == 'expired'
+                ? 'お客様が戻りませんでした。\n'
+                    'もう一度サポートする場合は、認証コードを発行し直してください。'
+                : 'このサポートは既に終了しています。\n'
+                    '続ける場合は、認証コードを発行し直してください。',
+            '',
+            dialogManager);
+        _timer?.cancel();
+        Future.delayed(const Duration(seconds: 4), () {
+          dialogManager.dismissAll();
+          closeConnection();
+        });
+        return;
+      }
+    }
     final noteAllowed = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
         (title == "Connection Error" || type == "restarting");

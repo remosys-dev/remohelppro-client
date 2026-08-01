@@ -1906,6 +1906,43 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager) async
   return res == true;
 }
 
+/// 接続が切れたとき、「待つべきか・終わったのか」を当社サーバーに尋ねる。
+///
+/// 🔴 これが無いと、相談員には**再起動も故障も同じ「接続エラー」**に見える
+///   （2026-08-01 ユーザー指示で追加）。待てばいいのか諦めるのかが分からず、
+///   毎回コンソールに戻って確かめることになっていた。
+///
+/// 返す値: ('waiting' | 'expired' | 'ended', 残り秒)
+///   waiting … 戻ってくる見込みがある（繋ぎ直しを続ける）
+///   expired … 待つ時間が尽きた（相談員側から終わらせる）
+///   ended   … 既に終わっている
+///
+/// ⚠ 通信できないときは **waiting** を返す。相談員側の回線が一瞬切れただけで
+///   サポートを終わらせてしまわないため。迷ったら終わらせない。
+Future<(String, int)> rlWatchReconnect(FFI ffi) async {
+  try {
+    final id = ffi.id;
+    final token = ffi.presetPassword ?? '';
+    if (id.isEmpty || token.isEmpty) return ('ended', 0);
+    final res = await http
+        .post(
+          Uri.parse('https://svr.remohelppro.jp/api/customer/reconnect-watch'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'rustdeskId': id, 'token': token}),
+        )
+        .timeout(const Duration(seconds: 5));
+    if (res.statusCode != 200) return ('waiting', 60);
+    final j = jsonDecode(res.body) as Map;
+    final state = (j['state'] as String?) ?? 'ended';
+    final remain = (j['remainingSec'] as num?)?.toInt() ?? 0;
+    debugPrint('RL reconnect-watch: $state 残り$remain秒');
+    return (state, remain);
+  } catch (e) {
+    debugPrint('RL reconnect-watch: 尋ねられなかった $e');
+    return ('waiting', 60);
+  }
+}
+
 /// サポートの終了を、当社サーバーへ伝える。
 ///
 /// 🔴 これを呼ばないと、接続が切れるだけで**セッションは終わらない**。
