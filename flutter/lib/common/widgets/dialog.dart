@@ -1921,15 +1921,25 @@ Future<void> notifySupportEnded(FFI ffi) async {
   try {
     final id = ffi.id;
     final token = ffi.presetPassword ?? '';
-    if (id.isEmpty || token.isEmpty) return;
+    // ⚠ 実機で「窓を閉じたのにサポートが終わらない」が起きた（2026-08-01）。
+    //   この関数は失敗を握りつぶすので、**何が起きたか誰も分からなかった**。
+    //   合言葉そのものは書かない（長さだけ）。相談員のPCのログに残す。
+    debugPrint('RL end-by-viewer: id=$id tokenLen=${token.length}');
+    if (id.isEmpty || token.isEmpty) {
+      debugPrint('RL end-by-viewer: 送らない（IDか合言葉が空）');
+      return;
+    }
     // ⚠ この構成には既に http（utils/http_service.dart を as http で読み込み）がある。
     //   独自に package:http を足すと put/post の名前が衝突する。既存を使う。
-    await http.post(
+    final res = await http.post(
       Uri.parse('https://svr.remohelppro.jp/api/customer/end-by-viewer'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'rustdeskId': id, 'token': token}),
     ).timeout(const Duration(seconds: 5));
-  } catch (_) {}
+    debugPrint('RL end-by-viewer: 応答 ${res.statusCode}');
+  } catch (e) {
+    debugPrint('RL end-by-viewer: 送れなかった $e');
+  }
 }
 
 customImageQualityDialog(SessionID sessionId, String id, FFI ffi) async {

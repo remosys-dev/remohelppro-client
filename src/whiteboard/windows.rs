@@ -1,6 +1,6 @@
 use super::{
     server::{Ripple, EVENT_PROXY},
-    win_linux::{create_font_face, draw_text},
+    win_linux::create_font_face,
     Cursor, CustomEvent,
 };
 use hbb_common::{anyhow::anyhow, log, ResultType};
@@ -105,7 +105,8 @@ impl InkLine {
 }
 
 pub(super) fn create_event_loop() -> ResultType<()> {
-    let face = match create_font_face() {
+    // 名前を描かなくなったので今は使わない（フォント読み込み失敗のログは残す）
+    let _face = match create_font_face() {
         Ok(face) => Some(face),
         Err(err) => {
             log::error!("Failed to create font face: {}", err);
@@ -293,58 +294,35 @@ pub(super) fn create_event_loop() -> ResultType<()> {
                     }
                 }
 
+                // レーザーポインターの印（2026-08-01 ユーザー要望で作り直し）。
+                //
+                //   元は「マウスの矢印 ＋ 相談員の名前 ＋ クリックで広がる波紋」
+                //   だった。これは複数人で同時に操作する場面で
+                //   「誰のカーソルか」を見せるための描き方で、**指し示す道具
+                //   としては読み取りにくい**（矢印は先端がどこか分かりづらく、
+                //   名前と波紋が視線を散らす）というご指摘。
+                //
+                //   ★レーザーポインターは「一点を指す」ためのもの。
+                //     赤い点ひとつだけにする。名前も波紋も出さない。
+                //     白い縁を付けて、暗い画面でも明るい画面でも見えるようにする。
                 for cursor in last_cursors.values() {
-                    let (x, y) = (cursor.x, cursor.y);
-                    let size = 1.5f32;
-
                     let mut pb = PathBuilder::new();
-                    pb.move_to(x, y);
-                    pb.line_to(x, y + 16.0 * size);
-                    pb.line_to(x + 4.0 * size, y + 13.0 * size);
-                    pb.line_to(x + 7.0 * size, y + 20.0 * size);
-                    pb.line_to(x + 9.0 * size, y + 19.0 * size);
-                    pb.line_to(x + 6.0 * size, y + 12.0 * size);
-                    pb.line_to(x + 11.0 * size, y + 12.0 * size);
-                    pb.close();
-
+                    pb.push_circle(cursor.x, cursor.y, 7.0);
                     if let Some(path) = pb.finish() {
-                        let rgba = super::argb_to_rgba(cursor.argb);
-                        let mut arrow_paint = Paint::default();
-                        // Note: The real color is bgra here.
-                        arrow_paint.set_color_rgba8(rgba.2, rgba.1, rgba.0, rgba.3);
-                        arrow_paint.anti_alias = true;
-                        pixmap.fill_path(
-                            &path,
-                            &arrow_paint,
-                            FillRule::Winding,
-                            Transform::identity(),
-                            None,
-                        );
-
-                        let mut black_paint = Paint::default();
-                        black_paint.set_color_rgba8(0, 0, 0, 255);
-                        black_paint.anti_alias = true;
+                        // 下地の白い縁（背景に溶けないように）
+                        let mut halo = Paint::default();
+                        halo.set_color_rgba8(255, 255, 255, 235);
+                        halo.anti_alias = true;
                         let mut stroke = Stroke::default();
-                        stroke.width = 1.0f32;
-                        pixmap.stroke_path(
-                            &path,
-                            &black_paint,
-                            &stroke,
-                            Transform::identity(),
-                            None,
-                        );
+                        stroke.width = 3.0f32;
+                        pixmap.stroke_path(&path, &halo, &stroke, Transform::identity(), None);
 
-                        face.as_ref().map(|face| {
-                            draw_text(
-                                &mut pixmap,
-                                face,
-                                &cursor.text,
-                                x + 24.0 * size,
-                                y + 24.0 * size,
-                                &arrow_paint,
-                                14.0f32,
-                            );
-                        });
+                        // 赤い点
+                        let mut dot = Paint::default();
+                        // Note: The real color is bgra here.（青→緑→赤 の順で渡す）
+                        dot.set_color_rgba8(48, 48, 235, 255);
+                        dot.anti_alias = true;
+                        pixmap.fill_path(&path, &dot, FillRule::Winding, Transform::identity(), None);
                     }
                 }
 
@@ -376,13 +354,8 @@ pub(super) fn create_event_loop() -> ResultType<()> {
             }
             Event::UserEvent((k, evt)) => match evt {
                 CustomEvent::Cursor(cursor) => {
-                    if cursor.btns != 0 {
-                        ripples.push(Ripple {
-                            x: cursor.x,
-                            y: cursor.y,
-                            start_time: Instant::now(),
-                        });
-                    }
+                    // クリックの波紋は出さない（2026-08-01）。
+                    // 「点だけで指したい」というご要望。広がる円は視線を散らす。
                     last_cursors.insert(k, cursor);
                 }
                 CustomEvent::Ink(ink) => {

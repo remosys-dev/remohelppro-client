@@ -670,7 +670,10 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _IconMenuButton(
         icon: const Icon(Icons.draw_outlined, size: 18),
-        tooltip: on ? '画面に描くのをやめる' : '画面に描いて指し示す',
+        // ⚠ この文字はそのまま**ボタンの下のラベル**になる（showButtonLabel）。
+        //   長いと隣まで伸びて、どこまでがどのボタンか分からなくなる。
+        //   実機で「画面に描いて指…」と切れて、隣のレーザーと地続きに見えていた。
+        tooltip: on ? '描きをやめる' : '描き',
         onPressed: () {
           model.setEnabled(!on);
           setState(() {});
@@ -731,9 +734,9 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
             ),
           ),
         ),
-        tooltip: laserOn
-            ? 'レーザーポインターをやめる（操作できるようになります）'
-            : 'レーザーポインター（指すだけ・操作はお客様）',
+        // ⚠ ここも下のラベルになる。短く、押せば効く名前にする。
+        //   （長い説明を入れると隣のボタンと繋がって読めてしまう）
+        tooltip: laserOn ? 'レーザーを消す' : 'レーザーポインター',
         onPressed: () {
           if (!laserOn && on) model.setEnabled(false);
           _setLaser(!laserOn);
