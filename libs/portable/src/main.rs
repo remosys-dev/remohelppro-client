@@ -461,14 +461,33 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                 //   ランナーが終わった次の一巡で必ず消える。1秒おきに約1時間。
                 //   消えたら即座にやめる（無駄に居座らない）。
                 //   ⚠ 窓なし・別プロセスなので、お客様には何も見えない。
+                //
+                //   🔴🔴 2026-08-01 実機検証で判明した**真の原因**（作り直し）。
+                //   ここまでの直しは全部「回数」や「目印」の話で、**呼び出しそのもの
+                //   が壊れていた**ことに気付いていなかった。自己削除は一度も動いて
+                //   いない。
+                //
+                //   .args(&["/c", cmdline]) だと Rust が引数を逃がす際に、文字列中の
+                //   " を \" の形に書き換える。ところが **cmd.exe は \" という書き方を
+                //   知らない**（cmd の逃がし記号は ^ で、\ は普通の文字）。結果、
+                //   パスの引用が壊れた命令が渡り、cmd は何もせず即座に終わる。
+                //   ログにも窓にも何も出ないので、目で追っても気付けない。
+                //
+                //   raw_arg は Rust の逃がし処理を通さず、書いた通りに渡す。
+                //   （実機で確認: .args → 消えない / .raw_arg → 消える）
+                //   ⚠ raw_arg を使う以上、パスは自分で "" で囲う責任がある。
+                //      展開先は %LOCALAPPDATA% 配下なので " は入り得ないが、
+                //      念のため " を含むパスは諦める（壊れた命令を投げない）。
                 let del_now = format!(
-                    "for /L %i in (1,1,3600) do @(if not exist \"{e}\" (exit) else (ping -n 2 127.0.0.1 >nul & del /f /q \"{e}\" >nul 2>nul))",
+                    "/c for /L %i in (1,1,3600) do @(if not exist \"{e}\" (exit) else (ping -n 2 127.0.0.1 >nul & del /f /q \"{e}\" >nul 2>nul))",
                     e = self_path
                 );
-                let _ = Command::new("cmd")
-                    .args(&["/c", &del_now])
-                    .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
-                    .spawn();
+                if !self_path.contains('"') {
+                    let _ = Command::new("cmd")
+                        .raw_arg(&del_now)
+                        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+                        .spawn();
+                }
             }
 
             let _ = child.wait(); // 子(REMOHELP PRO.exe)が終了するまでブロック
@@ -506,14 +525,18 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                     d = dir_path,
                     e = self_path
                 );
+                // ⚠ ここも .args ではなく raw_arg。理由は上の del_now と同じ
+                //   （Rust が " を \" に書き換え、cmd が理解できない）。
                 let del_cmd = format!(
-                    "ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
+                    "/c ping -n 3 127.0.0.1 >nul & {s} & ping -n 4 127.0.0.1 >nul & {s}",
                     s = sweep
                 );
-                let _ = Command::new("cmd")
-                    .args(&["/c", &del_cmd])
-                    .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
-                    .spawn();
+                if !self_path.contains('"') && !dir_path.contains('"') {
+                    let _ = Command::new("cmd")
+                        .raw_arg(&del_cmd)
+                        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+                        .spawn();
+                }
             }
         }
     } else {

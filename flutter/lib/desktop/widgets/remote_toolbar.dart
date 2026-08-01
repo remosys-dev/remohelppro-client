@@ -662,6 +662,11 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
     final model = widget.ffi.annotationModel;
     final on = model.enabled;
     final laserOn = widget.ffi.ffiModel.showMyCursor;
+    // 印の色は**地の色から決める**。地が明るければ濃く、暗ければ白。
+    // （`_IconMenuButton` の `color` は地の色。マウスを乗せると
+    //  hover 色に変わるが、入切それぞれ明暗の向きは同じなので判定は変わらない）
+    final laserMark = _ToolbarTheme.iconOn(
+        laserOn ? _ToolbarTheme.blueColor : _ToolbarTheme.inactiveColor);
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _IconMenuButton(
         icon: const Icon(Icons.draw_outlined, size: 18),
@@ -682,24 +687,48 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
       //     見つけられない場所（キーボード設定の奥）にあったので、
       //     ここに分かる名前で出す。
       _IconMenuButton(
-        // 🔴 アイコンが**二度**空白のまま出た（2026-07-31 実機指摘）。
-        //   Icons.highlight_outlined → Icons.gps_fixed と替えたが、どちらも
-        //   描かれなかった。Flutter は使っているアイコンだけを字形として
-        //   埋め込むため、取りこぼすと**無言で空白**になる。
-        //   原因を追う価値より、確実に出る方法に替える価値の方が大きい。
+        // 🔴🔴 アイコンが**三度**空白のまま出た（2026-08-01 実機指摘）。
+        //   原因がやっと分かった。字形の話ではなく、**色の指定を間違えていた**。
         //
-        //   ★字形の埋め込みに依存しない「文字」にする。
-        //     押しても見た目が変わらないと、相談員は「効かない」と判断して
-        //     もう一度押す＝**入れて即座に戻す**ことになる（実際に0.5秒間隔で
-        //     2回押された記録が残っていた）。見た目の変化は機能の一部。
-        icon: Text(
-          laserOn ? '◉' : '◎',
-          style: TextStyle(
-            fontSize: 17,
-            height: 1.0,
-            color: laserOn
-                ? _ToolbarTheme.blueColor
-                : _ToolbarTheme.inactiveColor,
+        //   `_IconMenuButton` の `color` は**アイコンの色ではなく背景色**。
+        //   私はそれを知らずに、文字の色にも同じ `inactiveColor` を渡していた。
+        //   ＝ 薄い灰色の地に、薄い灰色の文字。**在るのに見えない**。
+        //   隣の「画面に描いて指し示す」が見えているのは、あちらが色を
+        //   指定せず、周りの既定色（濃い色）をそのまま使っているから。
+        //
+        //   ★二度と同じ間違いをしないよう、二重に手を打つ。
+        //     ① 色は地の明るさから自動で決める（`iconOn` = SVG と同じ流儀）
+        //     ② 字形の埋め込みにも依存しない「図形」で描く
+        //        （丸い枠＋入のときは中に点）。フォントも
+        //        アイコン字形も要らないので、取りこぼしようがない。
+        //
+        //   押しても見た目が変わらないと、相談員は「効かない」と判断して
+        //   もう一度押す＝**入れて即座に戻す**ことになる（実際に0.5秒間隔で
+        //   2回押された記録が残っていた）。見た目の変化は機能の一部。
+        icon: SizedBox(
+          width: 18,
+          height: 18,
+          child: Center(
+            child: Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: laserMark, width: 2),
+              ),
+              child: laserOn
+                  ? Center(
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: laserMark,
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
           ),
         ),
         tooltip: laserOn

@@ -1549,7 +1549,28 @@ pub mod client {
     ) {
         if RUNNING.lock().unwrap().clone() {
             crate::input_service::update_latest_input_cursor_time(conn);
-            handle_mouse_(evt, conn, username, argb, simulate, show_cursor).ok();
+            // 🔴🔴 レーザーポインターが顧客の画面に出なかった真の原因
+            //   （2026-08-01 実機調査で判明。それまで3回、見当違いを直していた）。
+            //
+            //   相談員のカーソルを顧客の画面に描く仕組みは、まず「この接続の
+            //   ぶんを描きます」と**登録**してから使う。登録が無ければ、描く側は
+            //   **黙って何もしない**（警告もログも出ない）。
+            //
+            //   ★その登録は本体プロセスで行われるのに、ここで show_cursor を
+            //     そのまま渡すと、描く処理は**ポータブルサービスという別プロセス**
+            //     で走る。登録の控えはプロセスごとに別物なので、別プロセスからは
+            //     **永久に見つからない**。＝ 押しても何も起きない。
+            //
+            //   ⚠ ワンタイム(顧客)版は必ずポータブルサービスを立てるため、
+            //     **この道を必ず通る**。通常インストール版は通らないので、
+            //     同じ版でも顧客側だけ動かない、という見え方になっていた。
+            //
+            //   直し方: 操作の再現は今まで通り別プロセスへ渡し、
+            //   **カーソルを描くぶんだけ本体プロセスに残す**（＝登録がある側）。
+            handle_mouse_(evt, conn, username.clone(), argb, simulate, false).ok();
+            if show_cursor {
+                crate::input_service::handle_mouse_(evt, conn, username, argb, false, true);
+            }
         } else {
             crate::input_service::handle_mouse_(evt, conn, username, argb, simulate, show_cursor);
         }
