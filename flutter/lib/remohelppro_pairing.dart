@@ -196,12 +196,16 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       final myId = await _waitForMyId();
       if (myId == null) return false;
 
-      final token = await tryResume(apiBase: _kApiBase, rustdeskId: myId);
-      if (token == null) return false;
+      final res = await tryResume(apiBase: _kApiBase, rustdeskId: myId);
+      if (res == null) return false;
 
       // 新しいワンタイムトークンを自分のパスワードにする。
-      await bind.mainSetPermanentPasswordWithResult(password: token);
+      await bind.mainSetPermanentPasswordWithResult(password: res.onetimeToken);
       if (!mounted) return true;
+      _shortId = res.shortId;
+      if (res.customerToken != null && res.customerToken!.isNotEmpty) {
+        _custToken = res.customerToken;
+      }
       _connectedAt = DateTime.now();
       _clock?.cancel();
       _clock = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -210,6 +214,30 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       setState(() {
         _ready = true;
         _busy = false;
+      });
+
+      // 🔴🔴 戻った後の「続きの準備」を必ずやり直す（2026-08-01 作り直し）。
+      //
+      //   ここまでは合言葉を入れ直すだけで終わっていた。その結果:
+      //     ・終了の見張りが動かない
+      //       → 相談員が終了しても**お客様のPCが止まらない**。
+      //         接続できる状態のまま残り、自己削除も走らない
+      //     ・次の控えを作らない
+      //       → **2回目の再起動には戻れない**
+      //     ・RunOnce を登録し直さない
+      //       → Windows は一度実行すると登録を自分で消すので、
+      //         次の再起動で**何も起動しない**
+      //
+      //   ＝ 復帰は「1回だけ、しかも後始末なし」でしか成り立っていなかった。
+      //   通常の接続（_finishRemotePairing）と同じ準備をここでも行う。
+      _startStatusPoll(res.shortId);
+      unawaited(armReboot(
+          apiBase: _kApiBase, shortId: res.shortId, custToken: _custToken));
+      unawaited(prepareRebootResume());
+      _rearm?.cancel();
+      _rearm = Timer.periodic(const Duration(minutes: 10), (_) {
+        unawaited(armReboot(
+            apiBase: _kApiBase, shortId: res.shortId, custToken: _custToken));
       });
       return true;
     } catch (_) {

@@ -129,9 +129,23 @@ Future<void> armReboot({
   }
 }
 
+/// 復帰できたときにサーバーから返るもの。
+///
+/// 🔴 onetimeToken だけでは足りない（2026-08-01 作り直し）。
+///   短ID と顧客トークンが無いと、戻った後に
+///   「終了の見張り」も「次の再起動の控え」も始められない。
+///   実際、戻れても**相談員が終了してもお客様のPCが止まらず、
+///   2回目の再起動にも戻れない**状態になっていた。
+class ResumeResult {
+  final String onetimeToken;
+  final String shortId;
+  final String? customerToken;
+  const ResumeResult(this.onetimeToken, this.shortId, this.customerToken);
+}
+
 /// 起動時に呼ぶ。合言葉があれば同じセッションに戻る。
-/// 戻れたら onetimeToken を返す。戻れなければ null。
-Future<String?> tryResume({
+/// 戻れたら接続に必要な一式を返す。戻れなければ null。
+Future<ResumeResult?> tryResume({
   required String apiBase,
   required String rustdeskId,
 }) async {
@@ -169,7 +183,10 @@ Future<String?> tryResume({
     } catch (_) {}
     if (r.statusCode != 200) return null;
     final j = jsonDecode(r.body) as Map;
-    return j['onetimeToken'] as String?;
+    final ot = j['onetimeToken'] as String?;
+    final sid = j['shortId'] as String?;
+    if (ot == null || ot.isEmpty || sid == null || sid.isEmpty) return null;
+    return ResumeResult(ot, sid, j['customerToken'] as String?);
   } catch (_) {
     // 通信できなかった。合言葉は残す（次の起動でもう一度試せる）。
     return null;
