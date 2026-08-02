@@ -241,11 +241,96 @@ Future<void> prepareRebootResume() async {
     if (!dst.existsSync() || dst.lengthSync() != src.lengthSync()) {
       src.copySync(dst.path);
     }
+
+    // 🔴🔴 RunOnce から**直接プログラムを呼ばない**（2026-08-02 実機で確定）。
+    //
+    //   実機で起きたこと:
+    //     ・登録は正しく作られていた（パスも中身も確認済み）
+    //     ・再起動後、Windows は登録を**消した**（＝処理はした）
+    //     ・しかしプログラムは**一度も動かなかった**（記録も展開もゼロ）
+    //     ・同じパスを手で実行すると、警告も出ずに普通に起動した
+    //   ＝ パスは正しい。**ログインした瞬間に呼ばれても起動しきれない**。
+    //
+    //   ★RunOnce は1回しか呼ばれず、失敗しても何も残らない。
+    //     ログイン直後は、ネットワークも周辺の部品もまだ揃っていない。
+    //     そこへ30MBの自己展開プログラムを直接ぶつけるのが無理筋だった。
+    //
+    //   間に**小さな命令書**を挟む:
+    //     ① 20秒待つ（準備が整うのを待つ）
+    //     ② 起動する
+    //     ③ 動き出したか確かめる。だめならもう2回試す（20秒おき）
+    //     ④ 試したことを必ず記録に残す
+    //   ⚠ ④が肝心。今回いちばん困ったのは「失敗したのか、試してすら
+    //     いないのか」が分からなかったこと。次からは記録を見れば分かる。
+    // ⚠ 区切りを ¥ にそろえる。混ざっていても起動できることは確かめたが、
+    //   バッチの中では素直な形にしておく（読む人が迷わない）。
+    //   🔴 パスの組み立てで `\\r` `\\n` を作らないこと（2026-08-02 検証で発見）。
+    //     `'$base\\rl-resume.log'` と書くと `\r` が**復帰コード**として解釈され、
+    //     `resumel-resume.log` という壊れたパスになる。実際に一度そう書いていた。
+    //     区切りは r'\' を足す形にして、文字として確実に扱う。
+    final sep = r'\';
+    final base = dir.path.replaceAll('/', sep);
+    final cmdPath = base + sep + 'rl-resume.cmd';
+    final logPath = base + sep + 'rl-resume.log';
+    final exePath = dst.path.replaceAll('/', sep);
+    //   🔴 `for` の中にまとめて書かないこと（2026-08-02 検証で発見）。
+    //     `for /L ... do ( ... )` の中は**丸ごと先に読まれる**ため、
+    //     `%date%` も `errorlevel` も**ループに入る前の値で固定**される。
+    //     実際に試したところ、3回とも同じ秒に走り、一度も起動しなかった。
+    //     （`setlocal enabledelayedexpansion` と `!` を使う手もあるが、
+    //      ここは3回だけなので、素直に3回並べる方が読み違えようがない）
+    //   ⚠ 待つのは20秒。ログイン直後は、まだ回線も周辺の部品も揃っていない。
+    //     直接呼んで失敗したのが今回の原因なので、ここは急がない。
+    //   ⚠ 記録は**英字で書く**（2026-08-02 検証で決めた）。
+    //     日本語を入れるには chcp 65001 が要るが、それを入れると
+    //     `find` の判定が壊れる（文字コードが噛み合わない）。
+    //     この記録は我々が原因を追うためのものなので、
+    //     文字コードの問題を持ち込む価値が無い。
+    //   ⚠ `find` は**フルパスで呼ぶ**。PATH に別の find があると
+    //     そちらが呼ばれて、判定が常に「見つからない」になる。
+    //     （実際、検証中に他の find が呼ばれて誤判定した）
+    const findExe = r'%SystemRoot%\System32\find.exe';
+    const taskChk =
+        'tasklist /FI "IMAGENAME eq remohelppro.exe" | $findExe /I "remohelppro.exe" >nul';
+
+    String tryOnce(String n) => [
+          'ping -n 21 127.0.0.1 >nul',
+          taskChk,
+          'if not errorlevel 1 goto :running',
+          'echo [%date% %time%] try $n >> "$logPath"',
+          'start "" "$exePath"',
+        ].join('\r\n');
+
+    final cmd = [
+      '@echo off',
+      'echo [%date% %time%] START >> "$logPath"',
+      tryOnce('1'),
+      tryOnce('2'),
+      tryOnce('3'),
+      'ping -n 11 127.0.0.1 >nul',
+      taskChk,
+      'if errorlevel 1 (echo [%date% %time%] FAILED >> "$logPath") '
+          'else (echo [%date% %time%] OK >> "$logPath")',
+      'goto :end',
+      ':running',
+      'echo [%date% %time%] ALREADY-RUNNING >> "$logPath"',
+      ':end',
+      // 命令書は残さない。お客様のPCに当社のファイルを残さない。
+      //   ⚠ 記録（.log）は残す。うまくいかなかったときに、
+      //     試したかどうかを確かめられるようにするため。
+      //     サポートが終わるときに clearRebootResume が消す。
+      'del /f /q "$cmdPath" >nul 2>nul',
+      '',
+    ].join('\r\n');
+    File(cmdPath).writeAsStringSync(cmd);
+
+    // RunOnce にはこの命令書を登録する。
+    //   ⚠ cmd を窓なしで走らせるため /c と start を使う。
     await Process.run('reg', [
       'add', _kResumeRunKey,
       '/v', _kResumeRunName,
       '/t', 'REG_SZ',
-      '/d', '"${dst.path}"',
+      '/d', 'cmd /c start "" /min "$cmdPath"',
       '/f',
     ]);
   } catch (_) {
@@ -272,6 +357,16 @@ Future<void> clearRebootResume() async {
   if (!Platform.isWindows) return;
   try {
     await Process.run('reg', ['delete', _kResumeRunKey, '/v', _kResumeRunName, '/f']);
+  } catch (_) {}
+  // ⚠ 命令書と、その記録も消す（2026-08-02 追加）。
+  //   消し忘れると、お客様のPCに当社のファイルが残る。
+  //   「使い終わったら消える」という約束はここまで含む。
+  try {
+    final d = _resumeDir().path.replaceAll('/', r'\');
+    for (final n in ['rl-resume.cmd', 'rl-resume.log']) {
+      final f = File('$d\\$n');
+      if (f.existsSync()) f.deleteSync();
+    }
   } catch (_) {}
   try {
     final f = _resumeExe();
