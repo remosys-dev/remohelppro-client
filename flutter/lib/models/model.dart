@@ -936,7 +936,14 @@ class FfiModel with ChangeNotifier {
     } else if (type == 'elevation-error') {
       showElevationError(sessionId, type, title, text, dialogManager);
     } else if (type == 'relay-hint' || type == 'relay-hint2') {
-      showRelayHintDialog(sessionId, type, title, text, dialogManager, peerId);
+      // 🔴 まず「待つべきか」を確かめる（2026-08-03 実機指摘）。
+      //   切れた1回目はここへ来ており、通常のエラー画面を通っていなかった。
+      //   お客様が再起動しているだけなら、中継の案内は見当違い。
+      //   showMsgBox の中で待機の判断をしているので、そちらへ回す。
+      //   ⚠ 待つ必要が無ければ showMsgBox が普通に出すので、
+      //     中継の案内が要る場面（回線の都合で直接つながらない）でも
+      //     相談員は「再試行」で従来どおり進める。
+      showMsgBox(sessionId, type, title, text, link, true, dialogManager);
     } else if (text == kMsgboxTextWaitingForImage) {
       showConnectedWaitingForImage(dialogManager, sessionId, type, title, text);
     } else if (title == 'Privacy mode') {
@@ -1076,7 +1083,16 @@ class FfiModel with ChangeNotifier {
     //   ⚠ ただし expired / ended でこちらから終わらせるのは、
     //     **繋がった実績があるときだけ**にする。認証コードの打ち間違いで
     //     一度も繋がっていない場合に「終了しました」と出すと嘘になる。
-    if (title == 'Connection Error' && parent.target != null) {
+    //   🔴 中継の案内（relay-hint）も同じ入口に通す（2026-08-03 実機指摘）。
+    //     切れた**1回目**は「中継サーバー経由で接続してみては」という
+    //     別の画面が出ており、ここを通っていなかった。
+    //     相談員が「再試行」を押して初めて、こちらの案内が出ていた。
+    //     お客様が再起動しているだけなのに中継を勧めるのは見当違いで、
+    //     しかも赤いエラーに見えるので、相談員を無用に慌てさせる。
+    if ((title == 'Connection Error' ||
+            type == 'relay-hint' ||
+            type == 'relay-hint2') &&
+        parent.target != null) {
       final ffi = parent.target!;
       final (state, remainSec) = await rlWatchReconnect(ffi);
       if (state == 'waiting') {

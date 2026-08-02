@@ -2666,6 +2666,50 @@ pub fn wide_string(s: &str) -> Vec<u16> {
 }
 
 /// send message to currently shown window
+/// 同じ実行ファイルが持っている、その種類の窓を探す。
+///
+/// 🔴 題名で探さない（2026-08-03 追加）。
+///   題名は "remohelppro" と "REMOHELP PRO" のように表記が揺れ、
+///   `FindWindowW` は大小まで厳密に照合するため、ひとたびずれると
+///   **永久に見つからない**。実際にそうなっていた。
+///   実行ファイルの場所は表記ゆれが無いので、そちらで見分ける。
+///
+/// ⚠ 自分自身の窓は返さない（呼ぶ側は「まだ窓を持っていない起動直後」なので
+///   通常は問題にならないが、念のため除く）。
+fn find_window_of_this_exe(class_name: &str) -> HWND {
+    unsafe {
+        let me = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        let my_pid = std::process::id();
+        let class_utf16 = wide_string(class_name);
+        let mut hwnd: HWND = std::ptr::null_mut();
+        loop {
+            // 同じクラスの窓を順に辿る（題名は問わない）。
+            hwnd = FindWindowExW(
+                std::ptr::null_mut(),
+                hwnd,
+                class_utf16.as_ptr(),
+                std::ptr::null(),
+            );
+            if hwnd.is_null() {
+                return std::ptr::null_mut();
+            }
+            let mut pid: DWORD = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == 0 || pid == my_pid {
+                continue;
+            }
+            if let Ok(p) = get_process_executable_path(pid) {
+                if p == me {
+                    return hwnd;
+                }
+            }
+        }
+    }
+}
+
 pub fn send_message_to_hnwd(
     class_name: &str,
     window_name: &str,
@@ -2676,7 +2720,25 @@ pub fn send_message_to_hnwd(
     unsafe {
         let class_name_utf16 = wide_string(class_name);
         let window_name_utf16 = wide_string(window_name);
-        let window = FindWindowW(class_name_utf16.as_ptr(), window_name_utf16.as_ptr());
+        let mut window = FindWindowW(class_name_utf16.as_ptr(), window_name_utf16.as_ptr());
+        // 🔴🔴 窓の名前で見つけられていなかった（2026-08-03 実機で確定）。
+        //
+        //   探していた名前   "remohelppro"
+        //   実際の窓の名前   "REMOHELP PRO"   ← 大文字・空白入り
+        //   FindWindowW は**題名を大小まで含めて厳密に**照合するため、
+        //   常に「見つからない」となり、既に動いている窓へ渡せなかった。
+        //
+        //   ＝ 相談員が「操作アプリで開く」を押すたびに**新しく起動**し、
+        //     窓がいくつも並ぶ。しかも接続は1つを共有しているので、
+        //     どれか1つを閉じると**全部が終わり、サポートまで終了**する。
+        //     実機で本体が4つ動いていた。
+        //
+        //   ★題名では探さない（NULL）。同じ種類の窓を順に見て、
+        //     **自分と同じ実行ファイルのもの**を選ぶ。
+        //     題名は製品名の表記ゆれで簡単に変わるが、実行ファイルは変わらない。
+        if window.is_null() {
+            window = find_window_of_this_exe(class_name);
+        }
         if window.is_null() {
             log::warn!("no such window {}:{}", class_name, window_name);
             return false;
