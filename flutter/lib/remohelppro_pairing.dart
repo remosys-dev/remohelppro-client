@@ -334,7 +334,14 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     if (kRlSupportShowWindow) {
       // Mac は自己展開ランナーが無いので、アプリが自分で後始末する。
       await _selfDeleteMacApp();
-      Future.delayed(const Duration(seconds: 4), () => exit(0));
+      // 🔴 4秒 → 20秒（2026-08-02 実機指摘）。
+      //   「サポートを終了しました」を出しているのに、4秒で消えるため
+      //   **お客様が読む前に画面ごと無くなっていた**。
+      //   ご高齢のお客様は、画面が変わったことに気づくまでに時間がかかる。
+      //   終わったことが伝わらないと「まだ繋がっているのでは」と不安が残る。
+      //   ⚠ 接続はこの時点で既に切れており、待っている間に何かできる状態ではない。
+      //     待つのは**読んでいただくため**だけなので、危険は増えない。
+      Future.delayed(const Duration(seconds: 20), () => exit(0));
     }
   }
 
