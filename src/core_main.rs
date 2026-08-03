@@ -281,7 +281,14 @@ pub fn core_main() -> Option<Vec<String>> {
                 &crate::get_app_name(),
                 (WM_USER + 2) as _,
                 &args[0],
-                true, // 既にある窓を前面に出す（相談員が探さずに済む）
+                // 🔴 ここは必ず false（2026-08-03 実機で確定・私の入れた不具合）。
+                //   最後の引数を true にすると ShowWindow + SetForegroundWindow が走る。
+                //   ところが見つかる窓は**本体の「あなたのコンピューター」の画面**で、
+                //   操作の画面ではない。＝ ずっと隠してきた画面が前面に出てくる。
+                //   相談員には、自分のIDとパスワードが並んだ知らない画面が急に開く。
+                //   操作の画面は受け側が新しく開くので、こちらで前に出す必要はない。
+                //   （元からある転送＝下の方の同じ呼び出しも false にしてある）
+                false,
             );
             if passed {
                 log::info!("uni link passed to the running instance");
@@ -475,8 +482,9 @@ pub fn core_main() -> Option<Vec<String>> {
             return None;
         } else if args[0] == "--service" {
             log::info!("start --service");
-            // 一時サービスなら、まず自分の期限を見て、過ぎていれば自分を消す。
-            //   通信できなくても、電源を抜かれて翌日起動でも、ここで消える。
+            // 一時サービスなら、起動のたびに見張りを立て直す。
+            //   ⚠ 「届かない時間」の砂時計はここで0に戻る（＝再起動で止まっていた
+            //     時間を数えない）。詳しくは rl_prelogon.rs の頭。
             #[cfg(windows)]
             if let Some(m) = _rl_prelogon.take() {
                 crate::rl_prelogon::start_watchdog(m);
@@ -485,7 +493,9 @@ pub fn core_main() -> Option<Vec<String>> {
             return None;
         } else if args[0] == "--rl-prelogon-install" {
             // 一時サービスを作る（昇格済みで呼ばれる）。
-            //   使い方: --rl-prelogon-install <展開先> <短いID> <期限UNIX秒>
+            //   使い方: --rl-prelogon-install <展開先> <短いID> <打ち切りUNIX秒>
+            //   ⚠ 4つ目は「サポートの制限時間」ではなく**最後の歯止め**（既定12時間）。
+            //     普段はサーバーの「サポート終了」で消える。詳しくは rl_prelogon.rs の頭。
             //   ⚠ 結果は**終了コード**で返す。0=成功／2=権限が無い／1=その他の失敗。
             //     顧客アプリはこれを見て、相談員に理由を伝える。
             #[cfg(windows)]
@@ -494,8 +504,8 @@ pub fn core_main() -> Option<Vec<String>> {
                     return None;
                 }
                 let src = std::path::PathBuf::from(&args[1]);
-                let deadline = args[3].parse::<u64>().unwrap_or(0);
-                match crate::rl_prelogon::install(&src, &args[2], deadline) {
+                let hard_limit = args[3].parse::<u64>().unwrap_or(0);
+                match crate::rl_prelogon::install(&src, &args[2], hard_limit) {
                     Ok(_) => std::process::exit(0),
                     Err(e) => {
                         log::error!("RL prelogon install failed: {e}");

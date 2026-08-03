@@ -37,8 +37,16 @@ import 'package:http/http.dart' as http;
 // ⚠ 消すのは**サービス自身**（期限とサポート終了を自分で見る）。
 //   ここから消しに行くと、そのたびに管理者の確認が出てしまう。
 
-/// 一時サービスが自分を消すまでの時間。復帰の窓（サーバー側30分）と揃える。
-const int kPrelogonMinutes = 30;
+/// 一時サービスの**最後の歯止め**。ここまで来たら、何があっても消す。
+///
+/// 🔴 これは「サポートの制限時間」ではない（2026-08-03 に作り直した）。
+///   当初は「作った時刻＋30分」を期限として渡していたが、一時サービスを作るのは
+///   **再起動する前**なので、砂時計は再起動中も、戻ってきて相談員が作業して
+///   いる間も進む。＝ **30分を超えるサポートは作業の途中で必ず切れていた。**
+///   普段の終わり方は「サーバーがサポート終了と答えたら消える」で、
+///   そちらは一時サービス側が20秒ごとに自分で確かめている。
+///   ここに渡すのは、その道が全部塞がったときのための最後の歯止め。
+const int kPrelogonHardLimitHours = 12;
 
 /// 結果。相談員にそのまま伝えられる粒度にする。
 enum PrelogonResult { ok, noAdmin, failed }
@@ -56,15 +64,15 @@ Future<PrelogonResult> preparePrelogonResume(String shortId) async {
     final appDir = Platform.environment['RL_APP_DIR'] ?? '';
     if (appDir.isEmpty) return PrelogonResult.failed;
     final exe = Platform.resolvedExecutable;
-    final deadline = (DateTime.now().millisecondsSinceEpoch ~/ 1000) +
-        kPrelogonMinutes * 60;
+    final hardLimit = (DateTime.now().millisecondsSinceEpoch ~/ 1000) +
+        kPrelogonHardLimitHours * 3600;
 
     // 昇格して実行する。終了コードで結果を受け取る（0=成功 2=権限なし）。
     //   ⚠ お客様が UAC で「いいえ」を押すと Start-Process が例外を投げる。
     //     それは「権限が無い」と同じ扱いにする（相談員への伝え方が同じため）。
     final ps = "\$ErrorActionPreference='Stop';"
         "\$p=Start-Process -FilePath '${exe.replaceAll("'", "''")}'"
-        " -ArgumentList '--rl-prelogon-install','${appDir.replaceAll("'", "''")}','$shortId','$deadline'"
+        " -ArgumentList '--rl-prelogon-install','${appDir.replaceAll("'", "''")}','$shortId','$hardLimit'"
         " -Verb RunAs -Wait -PassThru;"
         "exit \$p.ExitCode";
     final r = await Process.run(
