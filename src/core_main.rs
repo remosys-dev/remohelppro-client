@@ -259,6 +259,35 @@ pub fn core_main() -> Option<Vec<String>> {
         }
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
+        // 🔴🔴 `remohelppro://` で呼ばれたとき、既に動いていればそちらへ渡す
+        //   （2026-08-03 実機で確定）。
+        //
+        //   転送の仕組みは元からあるが、見ているのは `--connect <ID>` の形だけで、
+        //   **URL の形はここを通っていなかった**。相談員が
+        //   「操作アプリで開く」を押すたびに新しく起動し、実機で本体が
+        //   5つ動いていた。しかも接続は1つを共有しているので、
+        //   どれか1つを閉じると**全部が終わり、サポートまで終了**する。
+        //
+        //   ⚠ 渡せたときだけ終わる。渡せなければ（まだ誰も動いていない等）
+        //     今までどおり起動する。ここで止めると、相談員は
+        //     「押しても何も起きない」になる。
+        //   ⚠ 送り先は uni_links_desktop の受け口（WM_USER+2）。
+        //     受け側の作りは pub の uni_links_desktop_plugin.cpp で確認済み。
+        #[cfg(windows)]
+        if args[0].starts_with(&crate::get_uri_prefix()) {
+            use winapi::um::winuser::WM_USER;
+            let passed = crate::platform::send_message_to_hnwd(
+                &crate::platform::FLUTTER_RUNNER_WIN32_WINDOW_CLASS,
+                &crate::get_app_name(),
+                (WM_USER + 2) as _,
+                &args[0],
+                true, // 既にある窓を前面に出す（相談員が探さずに済む）
+            );
+            if passed {
+                log::info!("uni link passed to the running instance");
+                return None;
+            }
+        }
         #[cfg(windows)]
         {
             use crate::platform;

@@ -938,12 +938,26 @@ class FfiModel with ChangeNotifier {
     } else if (type == 'relay-hint' || type == 'relay-hint2') {
       // 🔴 まず「待つべきか」を確かめる（2026-08-03 実機指摘）。
       //   切れた1回目はここへ来ており、通常のエラー画面を通っていなかった。
-      //   お客様が再起動しているだけなら、中継の案内は見当違い。
-      //   showMsgBox の中で待機の判断をしているので、そちらへ回す。
-      //   ⚠ 待つ必要が無ければ showMsgBox が普通に出すので、
-      //     中継の案内が要る場面（回線の都合で直接つながらない）でも
-      //     相談員は「再試行」で従来どおり進める。
-      showMsgBox(sessionId, type, title, text, link, true, dialogManager);
+      //   お客様が再起動しているだけなら、中継の案内は見当違いで、
+      //   しかも赤いエラーに見えるので相談員を無用に慌てさせる。
+      //
+      // ⚠ **中継の案内そのものは残す**（2026-08-03 ご指摘）。
+      //   中継サーバーを立てれば、回線の都合で直接つながらないお客様には
+      //   これが正しい案内になる。待つべきときだけ横取りし、
+      //   それ以外は今までどおり中継の案内を出す。
+      //   （一度、丸ごと通常のエラー画面へ回してしまい、中継の案内が
+      //    出なくなる形にしていた。乱暴な直しだった）
+      () async {
+        if (parent.target != null) {
+          final (st, _) = await rlWatchReconnect(parent.target!);
+          if (st == 'waiting' || st == 'alive') {
+            // 再起動中／一時的に切れているだけ。こちらの案内に任せる。
+            showMsgBox(sessionId, type, title, text, link, true, dialogManager);
+            return;
+          }
+        }
+        showRelayHintDialog(sessionId, type, title, text, dialogManager, peerId);
+      }();
     } else if (text == kMsgboxTextWaitingForImage) {
       showConnectedWaitingForImage(dialogManager, sessionId, type, title, text);
     } else if (title == 'Privacy mode') {
