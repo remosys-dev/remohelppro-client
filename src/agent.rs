@@ -147,10 +147,33 @@ mod imp {
             }
         }
         if enroll.is_empty() {
-            return; // 会社の登録トークン未設定なら何もしない
+            // 🔴 ここで黙って帰らない（2026-08-04 実機調査）。
+            //
+            //   本番の記録を見たところ、**端末は1台も登録されたことが無かった**
+            //   （devices 0件／/api/agent/register への通信は手動テストのみ）。
+            //   ところが入れた側には**何のしるしも出ない**。
+            //   「入れて、管理者の確認まで押したのに何も起こらない」という、
+            //   いちばん分かりにくい壊れ方をする。
+            //
+            //   登録トークンは次のどれかで届く。全部空なら、この端末は
+            //   **永久に登録されない**ので、その事実だけは必ず残す。
+            //     ① 自己展開のランナーが渡す RL_ENROLL_TOKEN（正規の道）
+            //     ② 実行ファイル名の __t-<トークン>
+            //     ③ 設定の enroll-token
+            //   ⚠ トークンそのものは書かない（記録から接続の手掛かりを与えない）。
+            log::warn!(
+                "REMOHELP PRO agent: 登録トークンが無いので登録できません。\
+                 会社の登録トークン付きの入手先から入れ直してください \
+                 (env={} name={} option={})",
+                if std::env::var("RL_ENROLL_TOKEN").unwrap_or_default().is_empty() { "無" } else { "有" },
+                if enroll_token_from_filename().is_empty() { "無" } else { "有" },
+                if Config::get_option("enroll-token").is_empty() { "無" } else { "有" },
+            );
+            return;
         }
         let id = Config::get_id();
         if id.is_empty() {
+            log::warn!("REMOHELP PRO agent: 端末IDがまだ決まっていないので登録を見送ります");
             return;
         }
 
