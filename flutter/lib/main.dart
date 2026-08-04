@@ -341,7 +341,23 @@ void runConnectionManagerScreen() async {
     const DesktopServerPage(),
     MyTheme.currentThemeMode(),
   );
-  final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
+  // 🔴 お客様の画面にメニューを2つ出さない（2026-08-04 ご指摘）。
+  //
+  //   顧客用のワンタイム版では、当社の画面（接続コード・接続時間・終了する）が
+  //   必ず出ている。そこへ RustDesk 由来の接続管理の窓が並ぶと、
+  //   **お客様には「終了」の場所が2つ**あるように見える。
+  //
+  //   隠してよいと言える理由は1つだけ：**止める手段が減らないこと**。
+  //     接続管理の「切断」  … 接続を切る
+  //     当社の「終了する」  … 接続を切る＋被操作を止める＋合言葉を無効化
+  //                           ＋再起動時の自動起動を消す＋サーバーへ終了を伝える
+  //   当社の画面のほうが確実に止まる。だから消してよい。
+  //
+  //   ⚠ ここを**ワンタイム版だけ**に限ること。相談員のPCには当社の画面が無いので、
+  //     隠すと「顧客に操作されても止められない」という最悪の事故に戻る
+  //     （2026-07-26 に実際に起こしている。password_security.rs の hide_cm も参照）。
+  final hide = kRlSupportShowWindow ||
+      await bind.cmGetConfig(name: "hide_cm") == 'true';
   gFFI.serverModel.hideCm = hide;
   if (hide) {
     await hideCmWindow(isStartup: true);

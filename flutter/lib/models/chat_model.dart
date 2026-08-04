@@ -351,7 +351,10 @@ class ChatModel with ChangeNotifier {
       return;
     }
     if (text.isEmpty) return;
-    if (desktopType == DesktopType.cm) {
+    // ⚠ 隠す設定のときは、チャットが来ても出さない（2026-08-04）。
+    //   他の呼び出し箇所は既に !hideCm で守られているが、ここだけ素通しだった。
+    //   ワンタイム版では当社の画面が出ているので、ここで出すと窓が2つになる。
+    if (desktopType == DesktopType.cm && !gFFI.serverModel.hideCm) {
       await showCmWindow();
     }
     String? peerId;
