@@ -74,6 +74,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   bool _terminated = false;
   /// ログオン前の再接続の用意が走っている最中か（二重起動を防ぐ）。
   bool _prelogonBusy = false;
+  /// 常駐が入っているせいで繋がらない状態か（逃げ道のボタンを出すため）。
+  bool _residentBlocking = false;
+  /// 常駐を一時停止する処理の最中か。
+  bool _pausing = false;
+  /// このサポートのために常駐を止めたか（終わるときに戻す）。
+  bool _residentPaused = false;
   /// 直前に「操作を許可した」状態だったか。view_only へ戻ったことを検知するために持つ。
   bool _wasFullControl = false;
 
@@ -322,6 +328,11 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     try {
       await clearRebootResume();
     } catch (_) {}
+    // サポートのために常駐を止めていたら、元に戻す。
+    //   ⚠ 戻せなくても、次にパソコンを起動すれば自動で戻る。
+    try {
+      await _resumeResidentIfPaused();
+    } catch (_) {}
     // 一時パスワードをランダム化して無効化（同じIDへ再接続できないように）
     try {
       final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
@@ -504,6 +515,76 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       } catch (_) {/* 通信失敗でもローカル停止は行う */}
     }
     await _terminateBySupportEnd();
+  }
+
+  /// 常駐を一時停止してから、もう一度つなぎ直す。
+  ///
+  /// 🔴 ここは「今すぐサポートを受けられるようにする」ための逃げ道。
+  ///   常駐が入っているPCでは、ワンタイム版が自分の接続を登録できず必ず失敗する。
+  ///   常駐が承認前だと常駐からも繋げないので、**どこからも繋げない**状態になる。
+  ///
+  /// ⚠ サービスを**止めるだけ**にする。自動起動の設定は触らない。
+  ///   触ると「戻し忘れ」で常駐が二度と動かなくなる。
+  ///   止めるだけなら、次にパソコンを起動したときに自動で戻る＝最悪でも自己修復する。
+  /// ⚠ 管理者の確認（UAC）は Windows の仕組みなので避けられない。
+  ///   押していただけなければ、何も変えずに元の案内へ戻す。
+  Future<void> _pauseResidentAndRetry() async {
+    if (!Platform.isWindows) return;
+    setState(() {
+      _pausing = true;
+      _error = null;
+    });
+    try {
+      // サービス名は製品名と同じ（APP_NAME）。止めるだけ。
+      const ps = "\$ErrorActionPreference='Stop';"
+          "\$p=Start-Process -FilePath 'sc.exe'"
+          " -ArgumentList 'stop','remohelppro'"
+          " -Verb RunAs -Wait -PassThru;"
+          "exit \$p.ExitCode";
+      final r = await Process.run(
+          'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+      // sc stop は「既に止まっている」でも 0 以外を返すことがある。
+      // 成否は次の登録確認で判断する（止まっていれば通る）。
+      debugPrint('RL pause resident: exit=${r.exitCode}');
+      _residentPaused = true;
+    } catch (e) {
+      debugPrint('RL pause resident failed: $e');
+      if (mounted) {
+        setState(() {
+          _pausing = false;
+          _error = '一時停止できませんでした。\n'
+              '管理者の確認で「はい」を押していただく必要があります。';
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _pausing = false;
+      _residentBlocking = false;
+    });
+    // 入力済みの認証コードがあれば、そのまま繋ぎ直す。
+    if (_codeReady) {
+      await _connect();
+    }
+  }
+
+  /// 一時停止した常駐を元に戻す。サポートが終わるときに呼ぶ。
+  ///
+  /// ⚠ 戻せなくても、次にパソコンを起動すれば自動で戻る（自動起動のまま）。
+  ///   ここで失敗しても、常駐が永久に止まったままにはならない。
+  Future<void> _resumeResidentIfPaused() async {
+    if (!_residentPaused || !Platform.isWindows) return;
+    _residentPaused = false;
+    try {
+      const ps = "\$p=Start-Process -FilePath 'sc.exe'"
+          " -ArgumentList 'start','remohelppro'"
+          " -Verb RunAs -Wait -PassThru; exit \$p.ExitCode";
+      await Process.run(
+          'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+    } catch (e) {
+      debugPrint('RL resume resident failed: $e');
+    }
   }
 
   Future<void> _connect() async {
@@ -741,12 +822,17 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       /* 判定できなければ、下の一般的な案内にする */
     }
     if (installed) {
-      throw Exception('このパソコンには REMOHELP PRO が入っています。\n'
+      // 🔴 行き止まりにしない（2026-08-05 ご指示）。
+      //   「常駐が入っているせいで繋がりません」で終わらせると、
+      //   **お客様は今この瞬間サポートを受けられない**。
+      //   常駐が半端に入って登録もできていない状態だと、常駐からも繋げず、
+      //   逃げ道が「アンインストールして再起動」しか無くなる。
+      //   電話口のお客様にそれを頼むのは無理がある。
+      //   → その場で常駐を一時停止して繋げるようにする（下のボタン）。
+      if (mounted) setState(() => _residentBlocking = true);
+      throw Exception('このパソコンには REMOHELP PRO の常駐版が入っています。\n'
           'その常駐版が動いている間は、この方法では接続できません。\n\n'
-          '・相談員の方は「常駐端末」からお繋ぎください\n'
-          '・この方法で繋ぐ場合は、常駐版をアンインストールしたうえで\n'
-          '　**パソコンを再起動**してからお試しください\n'
-          '　（消しただけでは動いたまま残ります）');
+          '下の「常駐を一時停止して接続する」を押すと、そのまま繋げます。');
     }
     throw Exception('サーバーに接続できませんでした。\n'
         'Wi-Fi／モバイル通信の状態を確認して、もう一度お試しください。');
@@ -1170,6 +1256,25 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                   color: _error != null ? _danger : _faint),
             ),
           ),
+          // 常駐が邪魔をしているときだけ出す逃げ道。普段は出さない。
+          if (_residentBlocking) ...[
+            const SizedBox(height: 12),
+            _outlineButton(
+              _pausing ? '一時停止しています…' : '常駐を一時停止して接続する',
+              Icons.pause_circle_outline,
+              // 押している最中は何もしない（二重に走らせない）。
+              _pausing ? () {} : _pauseResidentAndRetry,
+              color: _accentDeep,
+              border: _accentLine,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '管理者の確認が一度出ます。\n'
+              '常駐は次にパソコンを起動したときに自動で戻ります。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11.5, color: _muted, height: 1.5),
+            ),
+          ],
           const SizedBox(height: 14),
           _primaryButton(
             '接続する',
