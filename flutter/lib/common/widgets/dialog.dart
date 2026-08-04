@@ -1321,35 +1321,171 @@ void showWaitAcceptDialog(SessionID sessionId, String type, String title,
   });
 }
 
+/// お客様のPCを再起動して、そのまま繋ぎ直す。
+///
+/// 🔴 ここだけで完結させる（2026-08-04 ユーザーご指摘）。
+///   「再起動再接続はビュアーのメニューで実行するだけではだめですか？」
+///   ごもっともで、それまでは**ログオン前から繋ぐ準備だけコンソール側**にあり、
+///   相談員は画面を行き来していた。作業しているのはビュアーなので、ここに寄せる。
+///
+/// ■ 2通りある
+///   ログオン後の復帰 … 何も要らない。控えは接続した時点で自動的にできている
+///   ログオン前の接続 … お客様のPCに一時的なサービスを入れる。
+///                      **管理者の確認（UAC）がお客様の画面に出る**
+///                      （Windows の仕組みなので消せない）
+///
+/// ⚠ 準備の成否は必ず相談員に見せる。黙って失敗すると、相談員は
+///   用意できたと信じて再起動し、**戻ってこないPCを待ち続ける**。
 void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
-    OverlayDialogManager dialogManager) async {
-  final res = await dialogManager
-      .show<bool>((setState, close, context) => CustomAlertDialog(
+    OverlayDialogManager dialogManager,
+    {FFI? ffi}) async {
+  // 1) どちらでいくかを選んでいただく。
+  final choice = await dialogManager
+      .show<String>((setState, close, context) => CustomAlertDialog(
             title: Row(children: [
-              Icon(Icons.warning_rounded, color: Colors.redAccent, size: 28),
+              Icon(Icons.restart_alt_rounded, color: Colors.blueAccent, size: 28),
               Flexible(
-                  child: Text(translate("Restart remote device"))
+                  child: Text('再起動して、そのまま続ける')
                       .paddingOnly(left: 10)),
             ]),
-            content: Text(
-                "${translate('Are you sure you want to restart')} \n${pi.username}@${pi.hostname}($id) ?"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${pi.username}@${pi.hostname}（$id）を再起動します。'),
+                const SizedBox(height: 10),
+                Text('戻ってきたら自動でつなぎ直します。',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 14),
+                Text(
+                  'お客様が席を外していて、ログインできない場合は、\n'
+                  '「ログイン前から繋ぐ」をお選びください。\n'
+                  'お客様の画面に管理者の確認が一度だけ出ます。',
+                ),
+              ],
+            ),
             actions: [
-              dialogButton(
-                "Cancel",
-                icon: Icon(Icons.close_rounded),
-                onPressed: close,
-                isOutline: true,
-              ),
-              dialogButton(
-                "OK",
-                icon: Icon(Icons.done_rounded),
-                onPressed: () => close(true),
-              ),
+              dialogButton('やめる',
+                  onPressed: () => close('cancel'), isOutline: true),
+              dialogButton('ログイン前から繋ぐ',
+                  onPressed: () => close('prelogon'), isOutline: true),
+              dialogButton('再起動する', onPressed: () => close('plain')),
             ],
-            onCancel: close,
-            onSubmit: () => close(true),
+            onCancel: () => close('cancel'),
+            onSubmit: () => close('plain'),
           ));
-  if (res == true) bind.sessionRestartRemoteDevice(sessionId: sessionId);
+
+  if (choice == null || choice == 'cancel') return;
+
+  // 2) ログイン前から繋ぐなら、先にお客様のPCへ準備を頼む。
+  if (choice == 'prelogon') {
+    final ok = await _rlPreparePrelogon(ffi, dialogManager);
+    if (!ok) return; // 理由は _rlPreparePrelogon が画面に出している
+  }
+
+  bind.sessionRestartRemoteDevice(sessionId: sessionId);
+}
+
+/// ログオン前の接続の準備を、お客様のPCに頼んで、結果が返るまで待つ。
+///
+/// 戻り値: true=再起動してよい / false=やめる（理由は画面に出す）
+///
+/// ⚠ お客様が管理者の確認を押すまでの時間があるので、気長に（最大2分）待つ。
+///   返ってこなければ「分からない」と正直に出す。
+Future<bool> _rlPreparePrelogon(
+    FFI? ffi, OverlayDialogManager dialogManager) async {
+  final rid = ffi?.id ?? '';
+  final token = ffi?.presetPassword ?? '';
+  if (rid.isEmpty || token.isEmpty) {
+    await _rlPrelogonMsg(dialogManager, '準備を頼めませんでした',
+        'この接続からは依頼できません。\n'
+        'コンソールの「再起動して続ける」からお試しください。');
+    return false;
+  }
+
+  const url = 'https://svr.remohelppro.jp/api/customer/prelogon-by-viewer';
+  Future<Map?> post(Map<String, dynamic> body) async {
+    try {
+      final r = await http
+          .post(Uri.parse(url),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body))
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return null;
+      return jsonDecode(r.body) as Map;
+    } catch (e) {
+      debugPrint('RL prelogon-by-viewer: $e');
+      return null;
+    }
+  }
+
+  final first = await post({'rustdeskId': rid, 'token': token});
+  if (first == null || first['ok'] != true) {
+    await _rlPrelogonMsg(dialogManager, '準備を頼めませんでした',
+        'もう一度お試しください。\n'
+        '続くようであれば、そのまま「再起動する」でも\n'
+        'お客様がログインすればつながります。');
+    return false;
+  }
+
+  // お待ちいただく表示。押した本人が何を待っているのか分かるようにする。
+  final tag = dialogManager.showLoading(
+      'お客様の画面に出ている確認を、押していただいてください');
+
+  String? result;
+  for (var i = 0; i < 40; i++) {
+    await Future.delayed(const Duration(seconds: 3));
+    final r = await post({'rustdeskId': rid, 'token': token, 'poll': true});
+    final v = r?['result'];
+    if (v is String && v.isNotEmpty) {
+      result = v;
+      break;
+    }
+  }
+  dialogManager.dismissByTag(tag);
+
+  if (result == 'ok') return true;
+
+  // ⚠ 失敗しても再起動そのものは止めない。決めるのは相談員。
+  //   ただし「ログイン前からは繋がらない」ことは必ず伝える。
+  final reason = result == 'noAdmin'
+      ? '管理者権限が無いため、実行できませんでした。'
+      : result == 'failed'
+          ? 'お客様のPCで準備できませんでした。'
+          : 'お客様のPCから返事がありませんでした。';
+  final go = await dialogManager.show<bool>(
+      (setState, close, context) => CustomAlertDialog(
+            title: Text('ログイン前からは繋げません'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(reason),
+                const SizedBox(height: 10),
+                Text('このまま再起動すると、'
+                    'お客様がログインしてからつながります。'),
+              ],
+            ),
+            actions: [
+              dialogButton('やめる',
+                  onPressed: () => close(false), isOutline: true),
+              dialogButton('このまま再起動する', onPressed: () => close(true)),
+            ],
+            onCancel: () => close(false),
+            onSubmit: () => close(false), // 既定は「やめる」
+          ));
+  return go == true;
+}
+
+Future<void> _rlPrelogonMsg(
+    OverlayDialogManager dialogManager, String title, String body) async {
+  await dialogManager.show<void>((setState, close, context) => CustomAlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [dialogButton('閉じる', onPressed: () => close())],
+        onCancel: () => close(),
+        onSubmit: () => close(),
+      ));
 }
 
 showSetOSPassword(

@@ -304,7 +304,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           style: style,
         ),
         proc: () => showRestartRemoteDevice(
-            pi, peerId ?? '', sessionId, ffi.dialogManager),
+            pi, peerId ?? '', sessionId, ffi.dialogManager,
+            ffi: ffi),
         padding: padding,
         dismissOnClicked: true,
         dismissCallback: cancelFunc,
