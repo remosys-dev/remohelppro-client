@@ -1564,7 +1564,12 @@ class _DisplayMenuState extends State<_DisplayMenu> {
     }
 
     return _IconSubmenuButton(
-      tooltip: 'Display Settings',
+      // ⚠ ここは帯のラベルにもなる（2026-08-04 ご指摘）。
+      //   「ディスプレイの設定」は 56px の枠に入りきらず**途中で切れて**いて、
+      //   探しても見つけられなかった。短く言い切る。
+      //   ⚠ 翻訳表の "Display Settings" は携帯の設定画面でも使っているので触らない。
+      //     ここだけ日本語を直に置く（描き・レーザーと同じやり方）。
+      tooltip: '表示',
       svg: "assets/display.svg",
       ffi: widget.ffi,
       color: _ToolbarTheme.blueColor,
