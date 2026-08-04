@@ -100,6 +100,24 @@ Future<void> main(List<String> args) async {
           kAppTypeDesktopTerminal,
         );
       default:
+        // 🔴 種類の分からない子ウィンドウを、そのまま残さない（2026-08-04 実機で確認）。
+        //
+        //   ここへ来ると **runApp を一度も呼ばない**。Flutter は何も描かないので、
+        //   窓は「New Window」という題名のまま
+        //   **「Loading...」を出したまま永久に残る**。
+        //   お客様の画面に、閉じ方の分からない窓が居座ることになる。
+        //   実機では2つ出ていて、どちらも消えなかった。
+        //
+        //   ⚠ 起きる条件は、渡された合図に種類が入っていないとき（`type` が無い＝-1）
+        //     と、あり得ない種類（Main）のとき。どちらも**この窓に用は無い**。
+        //     用の無い窓は、黙って残すより閉じるほうが安全。
+        //   ⚠ 原因そのものは別に追う。これは「残さない」ための歯止め。
+        try {
+          debugPrint('unknown multi_window type=$type, closing window $kWindowId');
+          await WindowController.fromWindowId(kWindowId!).close();
+        } catch (e) {
+          debugPrint('failed to close unknown window: $e');
+        }
         break;
     }
   } else if (args.isNotEmpty && args.first == '--cm') {
