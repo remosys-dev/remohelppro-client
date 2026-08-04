@@ -255,6 +255,11 @@ jobs:
         run: |
           sed -i 's/const bool kRlSupportShowWindow = false;/const bool kRlSupportShowWindow = true;/' flutter/lib/rl_support.dart
           echo "--- rl_support.dart after sed ---"; cat flutter/lib/rl_support.dart
+          # ⚠ 立ったことを必ず確かめる（2026-08-04）。
+          #   立たないまま通すと、お客様に相談員向けの画面が出る。
+          #   Mac では実際にそれが起きていて、誰も気づかなかった。
+          grep -q 'kRlSupportShowWindow = true;' flutter/lib/rl_support.dart || {
+            echo "RL: 顧客版フラグを立てられませんでした。中止します"; exit 1; }
 
       # REMOHELP PRO: 常駐版は sed で IS_RESIDENT_BUILD を true 化（無人アクセス＋電源エージェント有効）
       - name: Resident build flag (sed)
@@ -961,10 +966,23 @@ jobs:
           sed -i -e 's/com\.carriez\.rustdesk/jp.remohelppro.desktop/g' flutter/macos/Runner.xcodeproj/project.pbxproj
           echo "--- bundle identifier after patch ---"
           grep -n 'PRODUCT_BUNDLE_IDENTIFIER' flutter/macos/Runner.xcodeproj/project.pbxproj | head -5
-          # 🔴 顧客版（簡単な画面＋自己削除）の指定は Windows のジョブにしか無く、
-          #   **Mac には渡っていなかった**（2026-07-29）。そのため Mac のお客様には
-          #   相談員向けのフル画面が出ていた。ここで同じものを渡す。
+          # 🔴🔴 Mac の顧客版が、ずっと相談員向けのフル画面のままだった
+          #   （2026-08-04 検証で確定。2026-07-29 に直したつもりが効いていなかった）。
+          #
+          #   顧客版かどうかを決めているのは `flutter/lib/rl_support.dart` の
+          #   **コンパイル時の定数**で、それを書き換える sed は
+          #   `build-for-windows-flutter` のジョブにしか無い。
+          #   そのジョブは mac_only のとき丸ごと飛ばされるので、一度も走らない。
+          #
+          #   ⚠ 下の RL_EXTRA_DART_DEFINE は**効かない**。
+          #     ① build.py で読んでいるのは build_flutter_windows だけ（Mac 側は素通し）
+          #     ② そもそも Dart 側に RL_SUPPORT_SHOW_WINDOW を読むコードが無い
+          #     残してあるのは Windows 側との対称のためで、判定はここの sed が正。
           if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            sed -i -e 's/const bool kRlSupportShowWindow = false;/const bool kRlSupportShowWindow = true;/' flutter/lib/rl_support.dart
+            echo "--- rl_support.dart after sed (mac) ---"; cat flutter/lib/rl_support.dart
+            grep -q 'kRlSupportShowWindow = true;' flutter/lib/rl_support.dart || {
+              echo "RL: 顧客版フラグを立てられませんでした。相談員向けの画面が出てしまうので中止します"; exit 1; }
             export RL_EXTRA_DART_DEFINE="--dart-define=RL_SUPPORT_SHOW_WINDOW=true"
             echo "RL: mac customer build (simple screen + self delete) ON"
             # 期限を焼き込む。残った古いアプリを開いても認証コード画面を出さない。

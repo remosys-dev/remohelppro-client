@@ -846,8 +846,12 @@ class ServerModel with ChangeNotifier {
         if (client.incomingVoiceCall) {
           if (isAndroid) {
             showVoiceCallDialog(client);
-          } else {
+          } else if (!hideCm) {
             // Has incoming phone call, let's set the window on top.
+            // ⚠ 隠す設定のときは前に出さない（2026-08-04 検証の指摘）。
+            //   ここだけ showCmWindow を通らず直接 windowOnTop していたため、
+            //   守りが効いていなかった。ワンタイム版では当社の画面が出ているので、
+            //   音声通話がかかってきた拍子に**窓が2つ**になる。
             Future.delayed(Duration.zero, () {
               windowOnTop(null);
             });
