@@ -62,6 +62,31 @@ pub fn core_main() -> Option<Vec<String>> {
         return None;
     }
     crate::load_custom_client();
+    // 🔴🔴 常駐の登録トークンを、**見えた瞬間に設定へ残す**（2026-08-04 実機調査）。
+    //
+    //   これまで RL_ENROLL_TOKEN を読んでいたのは agent.rs の中だけだった。
+    //   ところが agent が動くのは **Windows サービスの中**で、
+    //   環境変数を渡されているのは**自己展開のランナーが起動したプロセス**。
+    //   つまり ①ランナーが渡す → ②そのプロセスがインストールして終わる
+    //         → ③サービスが別に起動する（環境変数は無い）
+    //   となり、**agent は一度もトークンを見られない**。
+    //   ＝ 入れても端末が登録されない。本番の登録は今日まで0件だった。
+    //
+    //   ここは全プロセス共通の入口なので、渡された側が誰であれ設定に残せる。
+    //   設定はインストール先へ引き継がれるので、あとから起動するサービスも読める。
+    //   ⚠ 既に入っていれば上書きしない（会社を移した端末の値を壊さない）。
+    //   ⚠ 値そのものは記録に書かない。
+    if let Ok(t) = std::env::var("RL_ENROLL_TOKEN") {
+        let t = t.trim().to_string();
+        let ok_len = (8..=64).contains(&t.len());
+        let ok_chars = t
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if ok_len && ok_chars && hbb_common::config::Config::get_option("enroll-token").is_empty() {
+            hbb_common::config::Config::set_option("enroll-token".to_owned(), t);
+            log::info!("RL: 常駐の登録トークンを設定に保存しました");
+        }
+    }
     #[cfg(windows)]
     if !crate::platform::windows::bootstrap() {
         // return None to terminate the process
