@@ -139,6 +139,17 @@ mod imp {
             }
         }
         if enroll.is_empty() {
+            // 🔴 インストール先の登録簿を見る（2026-08-05 追加）。
+            //   サービスは、インストールのときに動いていたプロセスとは別物で、
+            //   環境変数も一時フォルダの設定も引き継がない。
+            //   **消えない場所に置いたものだけ**が、ここまで届く。
+            enroll = crate::platform::windows::get_enroll_token_reg();
+            if !enroll.is_empty() {
+                log::info!("REMOHELP PRO agent: enroll token from registry");
+                Config::set_option("enroll-token".to_owned(), enroll.clone());
+            }
+        }
+        if enroll.is_empty() {
             // ランナーを経由しない配り方（展開済みを直接置く等）への保険。
             enroll = enroll_token_from_filename();
             if !enroll.is_empty() {
@@ -159,15 +170,16 @@ mod imp {
             //   **永久に登録されない**ので、その事実だけは必ず残す。
             //     ① 自己展開のランナーが渡す RL_ENROLL_TOKEN（正規の道）
             //     ② 実行ファイル名の __t-<トークン>
-            //     ③ 設定の enroll-token
+            //     ③ 設定の enroll-token ④ インストール先の登録簿
             //   ⚠ トークンそのものは書かない（記録から接続の手掛かりを与えない）。
             log::warn!(
                 "REMOHELP PRO agent: 登録トークンが無いので登録できません。\
                  会社の登録トークン付きの入手先から入れ直してください \
-                 (env={} name={} option={})",
+                 (env={} name={} option={} reg={})",
                 if std::env::var("RL_ENROLL_TOKEN").unwrap_or_default().is_empty() { "無" } else { "有" },
                 if enroll_token_from_filename().is_empty() { "無" } else { "有" },
                 if Config::get_option("enroll-token").is_empty() { "無" } else { "有" },
+                if crate::platform::windows::get_enroll_token_reg().is_empty() { "無" } else { "有" },
             );
             return;
         }

@@ -94,7 +94,25 @@ fn main() {
             //   （2026-07-31 ユーザー判断）。
             //   ⚠ 知らせても**必ず起動する**。相談員の仕事を止めない。
             eprintln!("installed layout: launch without update");
-            notify_if_newer();
+            // 🔴 サポートを始める瞬間に割り込まない（2026-08-05 ご指摘）。
+            //
+            //   ここは「操作アプリで開く」を押したときにも通る。つまり
+            //   **お客様と繋ごうとした瞬間に**「新しい版があります」の窓が出る。
+            //   相談員は電話中で、お客様を待たせている。いちばん邪魔な時。
+            //
+            //   ★引数（remohelppro://…）が付いている＝これから接続する、の合図。
+            //     そのときは黙って起動する。
+            //     引数なしで起動された＝仕事の前にアプリを開いた、なので知らせる。
+            //   ⚠ お知らせが一度も出なくならないよう、相談員コンソール側でも
+            //     ログイン後に知らせる（そちらが本命の導線）。
+            let starting_support = std::env::args().skip(1).any(|a| {
+                a.to_lowercase().starts_with("remohelppro:")
+            });
+            if starting_support {
+                eprintln!("skip update notice: starting a support session");
+            } else {
+                notify_if_newer();
+            }
             launch_app(&app);
         }
         AppKind::Missing => not_found(),

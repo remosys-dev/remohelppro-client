@@ -1940,6 +1940,33 @@ pub fn get_reg(name: &str) -> String {
     get_reg_of(&subkey, name)
 }
 
+/// 常駐の登録トークンを、インストール先の登録簿（HKLM）に書く。
+///
+/// 🔴 設定ファイルには残せない（2026-08-05 実機で判明）。
+///   自己展開のランナーは、設定の置き場所を**展開先の一時フォルダ**に
+///   固定して子プロセスを起動する（RL_APP_DIR）。インストール済みPCの設定を
+///   壊さないための正しい仕組みだが、そこへ書いたトークンは
+///   **インストールが終わると一緒に消える**。
+///   あとから動く Windows サービスは別の場所を読むので、永久に見つけられない。
+///   ＝ 常駐が一度も登録できなかった原因の1つ。
+///
+/// ⚠ 呼べるのは昇格しているときだけ（インストールの最中）。
+///   書けなくても止めない。失敗は呼び出し側が記録する。
+pub fn set_enroll_token_reg(token: &str) -> bool {
+    let (subkey, _, _, _) = get_install_info();
+    let path = subkey.replace("HKEY_LOCAL_MACHINE\\", "");
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    match hklm.create_subkey(&path) {
+        Ok((key, _)) => key.set_value("EnrollToken", &token.to_owned()).is_ok(),
+        Err(_) => false,
+    }
+}
+
+/// 登録簿から常駐の登録トークンを読む（無ければ空）。
+pub fn get_enroll_token_reg() -> String {
+    get_reg("EnrollToken")
+}
+
 fn get_reg_of(subkey: &str, name: &str) -> String {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok(tmp) = hklm.open_subkey(subkey.replace("HKEY_LOCAL_MACHINE\\", "")) {

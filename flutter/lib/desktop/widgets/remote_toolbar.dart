@@ -2967,11 +2967,22 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
     //   ⚠ MenuBar で包まない。包むと面の中に横並びの帯が生まれる。
     if (_ToolbarLayoutScope.verticalOf(context)) {
       return SubmenuButton(
-        // ⚠ 押した行のすぐ隣から開くようにする（2026-08-04 ご指摘）。
-        //   指定しないと面の外側の遠い所に出て、どの行を開いたのか分からない。
-        //   縦に少しだけ上へ寄せて、行と頭が揃うようにする。
-        alignmentOffset: const Offset(4, -6),
-        menuStyle: _ToolbarTheme.defaultMenuStyle(context),
+        // 🔴 押した行の**すぐ隣**から開く（2026-08-05 スクリーンショットで確定）。
+        //
+        //   ずれかたに手掛かりがあった：
+        //   「画面が小さいときは離れないが、大きくすると離れる」。
+        //   ＝ 位置の基準が**押した行ではなく、もっと広いもの**になっていて、
+        //     窓が広いほど遠くへ飛んでいた。実機では画面の右端に貼り付き、
+        //     その子（画質など）は場所が無くて左へ回り込んでいた。
+        //
+        //   ★基準を自分で決める。`alignment: topRight` ＝
+        //     「押した行の右上に、面の左上を合わせる」。
+        //     こう書けば窓の広さに関係なく、必ず行の隣に出る。
+        //   ⚠ ずらし量は 0 にする。基準を決めたうえで足すと、また離れる。
+        alignmentOffset: const Offset(0, -6),
+        menuStyle: _ToolbarTheme.defaultMenuStyle(context).copyWith(
+          alignment: Alignment.topRight,
+        ),
         child: _ToolbarTheme.verticalRow(
           context,
           svg: widget.svg,

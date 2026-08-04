@@ -82,9 +82,30 @@ pub fn core_main() -> Option<Vec<String>> {
         let ok_chars = t
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-        if ok_len && ok_chars && hbb_common::config::Config::get_option("enroll-token").is_empty() {
-            hbb_common::config::Config::set_option("enroll-token".to_owned(), t);
-            log::info!("RL: 常駐の登録トークンを設定に保存しました");
+        if ok_len && ok_chars {
+            // 🔴🔴 設定ファイルだけでは足りない（2026-08-05 実機で判明）。
+            //   自己展開のランナーは、設定の置き場所を**展開先の一時フォルダ**に
+            //   固定して起動する（RL_APP_DIR）。インストール済みPCの設定を壊さない
+            //   ための正しい仕組みだが、そこへ書いたトークンは
+            //   **インストールが終わると一緒に消える**。
+            //   あとから動く Windows サービスは別の場所を読むので永久に見つからない。
+            //   ＝ 常駐が一度も登録できなかった原因の1つ。
+            //   → 消えない場所（インストール先の登録簿）にも必ず残す。
+            #[cfg(windows)]
+            {
+                if crate::platform::windows::get_enroll_token_reg().is_empty() {
+                    if crate::platform::windows::set_enroll_token_reg(&t) {
+                        log::info!("RL: 常駐の登録トークンを登録簿に保存しました");
+                    } else {
+                        // 昇格していないと書けない。インストールの最中なら書ける。
+                        log::warn!("RL: 登録トークンを登録簿に保存できませんでした（権限）");
+                    }
+                }
+            }
+            if hbb_common::config::Config::get_option("enroll-token").is_empty() {
+                hbb_common::config::Config::set_option("enroll-token".to_owned(), t);
+                log::info!("RL: 常駐の登録トークンを設定に保存しました");
+            }
         }
     }
     #[cfg(windows)]
