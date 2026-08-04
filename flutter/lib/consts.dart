@@ -141,6 +141,9 @@ const String kOptionI444 = "i444";
 const String kOptionSwapLeftRightMouse = "swap-left-right-mouse";
 const String kOptionCodecPreference = "codec-preference";
 const String kOptionRemoteMenubarDragLeft = "remote-menubar-drag-left";
+/// ビュアーのメニューの形。"Y"=縦にまとめる／それ以外=横に並べる。
+///   ⚠ この端末に保存する（相談員ごとの好み。会社で揃える必要は無い）
+const String kOptionToolbarVertical = "rl-toolbar-vertical";
 const String kOptionRemoteMenubarDragRight = "remote-menubar-drag-right";
 const String kOptionHideAbTagsPanel = "hideAbTagsPanel";
 const String kOptionRemoteMenubarState = "remoteMenubarState";

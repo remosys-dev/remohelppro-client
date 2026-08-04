@@ -116,6 +116,65 @@ class ToolbarState {
   }
 }
 
+/// メニューの形（false=横に並べる／true=縦にまとめる）。
+///
+/// 🔴 1つの値をみんなで見る形にする（2026-08-04）。
+///   切り替えるボタンは「表示」の中＝ツールバーとは別の部品にあるので、
+///   ツールバー側の持ち物にすると届かない。窓が複数あっても揃う。
+///
+/// ⚠ 保存先はこの端末（`kOptionToolbarVertical`）。会社で揃える必要は無い。
+///   好みも作業の内容も人によって違い、**中身は同じで見せ方だけの差**なので、
+///   相談員がそれぞれ決めればよい。
+final rlToolbarVertical = false.obs;
+
+Future<void> rlLoadToolbarVertical() async {
+  try {
+    rlToolbarVertical.value =
+        (await bind.mainGetLocalOption(key: kOptionToolbarVertical)) == 'Y';
+  } catch (_) {
+    /* 読めなくても横帯で動く */
+  }
+}
+
+Future<void> rlSetToolbarVertical(bool v) async {
+  rlToolbarVertical.value = v;
+  try {
+    await bind.mainSetLocalOption(
+        key: kOptionToolbarVertical, value: v ? 'Y' : 'N');
+  } catch (_) {
+    /* 保存できなくても、この回は切り替わっている */
+  }
+}
+
+/// ツールバーの並べ方（横帯か、縦メニューか）を、**開いたメニューの中まで**伝える。
+///
+/// 🔴 ただの InheritedWidget では中まで届かない。
+///   メニューは別の層（Overlay）に描かれ、そこへ持ち込まれるのは
+///   **InheritedTheme だけ**なので、InheritedTheme として作る必要がある。
+///   （ここを普通の InheritedWidget にすると、面の中の項目だけ横並びのまま残る）
+class _ToolbarLayoutScope extends InheritedTheme {
+  final bool vertical;
+  const _ToolbarLayoutScope({
+    Key? key,
+    required this.vertical,
+    required Widget child,
+  }) : super(key: key, child: child);
+
+  static bool verticalOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<_ToolbarLayoutScope>()
+          ?.vertical ??
+      false;
+
+  @override
+  Widget wrap(BuildContext context, Widget child) =>
+      _ToolbarLayoutScope(vertical: vertical, child: child);
+
+  @override
+  bool updateShouldNotify(_ToolbarLayoutScope oldWidget) =>
+      oldWidget.vertical != vertical;
+}
+
 class _ToolbarTheme {
   static const Color blueColor = MyTheme.button;
   static const Color hoverBlueColor = MyTheme.accent;
@@ -154,6 +213,76 @@ class _ToolbarTheme {
   /// ⚠ 決め打ちにしないこと。面の色を後から変えても、ここが付いてくるようにする。
   ///   決め打ちにしていたせいで、実際に読めなくなった。
   static Color menuTextColor(BuildContext context) => iconOn(menuSurface(context));
+
+  // ───────────────────────────── 縦メニュー（案B）
+  // 寸法と色は設計モック（docs/remohelppro_viewer_menu_mock_20260804.html）の値。
+  //   ⚠ モックと数字を合わせること。目分量で寄せると、
+  //     見比べたときに「別物」に見える。
+  static const double vMenuWidth = 212;
+  static const double vRowFontSize = 13.5;
+  static const double vIconBox = 19;
+  static const double vIconSize = 17;
+  static const double vRowGap = 11;
+  static const double vLauncherSize = 46;
+  static const Color vArrow = Color(0xFF94A3B8);
+  static const Color vDanger = Color(0xFFB91C1C);
+
+  /// 縦メニューの1行。押せる項目も、下に開く項目も、同じ形にする。
+  ///
+  /// ⚠ 文字と印の色は面の明るさから決める（黒地に黒文字を作らない）。
+  static Widget verticalRow(
+    BuildContext context, {
+    String? svg,
+    Widget? icon,
+    required String label,
+    bool danger = false,
+    bool hasSubmenu = false,
+    bool active = false,
+  }) {
+    final ink = danger
+        ? vDanger
+        : (active ? blueColor : menuTextColor(context));
+    final Widget mark = svg != null
+        ? SvgPicture.asset(svg,
+            colorFilter: ColorFilter.mode(ink, BlendMode.srcIn),
+            width: vIconSize,
+            height: vIconSize)
+        : IconTheme(
+            data: IconThemeData(color: ink, size: vIconSize),
+            child: icon ?? const SizedBox.shrink());
+    return SizedBox(
+      width: vMenuWidth - 30,
+      child: Row(children: [
+        SizedBox(width: vIconBox, child: Center(child: mark)),
+        const SizedBox(width: vRowGap),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+                fontSize: vRowFontSize,
+                color: ink,
+                fontWeight: active ? FontWeight.w600 : FontWeight.normal),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (hasSubmenu)
+          Text('›', style: TextStyle(fontSize: 16, color: vArrow)),
+      ]),
+    );
+  }
+
+  /// 縦メニューの面。幅を固定して、行の長さで幅が動かないようにする。
+  static MenuStyle verticalMenuStyle(BuildContext context) => MenuStyle(
+        backgroundColor: MaterialStatePropertyAll(menuSurface(context)),
+        side: MaterialStatePropertyAll(
+            BorderSide(width: 1, color: borderColor(context))),
+        shape: MaterialStatePropertyAll(RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10))),
+        padding: MaterialStatePropertyAll(const EdgeInsets.all(6)),
+        minimumSize: MaterialStatePropertyAll(Size(vMenuWidth, 0)),
+        maximumSize: MaterialStatePropertyAll(Size(vMenuWidth, double.infinity)),
+      );
 
   static const Color redColor = Colors.redAccent;
   static const Color hoverRedColor = Colors.red;
@@ -301,6 +430,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
   final _fractionX = 0.5.obs;
   final _dragging = false.obs;
 
+
   int get windowId => stateGlobal.windowId;
 
   // v1.4.6-16: Phase 4 案 D の build() で参照するため getter を明示。
@@ -337,6 +467,8 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
           0.5;
       // Initialize toolbar states (collapse, hide) from session options
       widget.state.init(widget.ffi.sessionId);
+      // メニューの形を読み出す。読めなければ横帯（今までどおり）。
+      await rlLoadToolbarVertical();
     });
 
     _debouncerHide = Debouncer<int>(
@@ -485,6 +617,12 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (!isWeb) toolbarItems.add(_RecordMenu());
     toolbarItems.add(_CloseMenu(id: widget.id, ffi: widget.ffi));
     final toolbarBorderRadius = BorderRadius.all(Radius.circular(4.0));
+    // 縦メニュー（案B）を選んでいるなら、そちらで描く。
+    //   ⚠ 中身（toolbarItems）は**まったく同じ**。見せ方だけを変える。
+    //     別々に作ると、片方にだけ機能が足される、が必ず起きる。
+    if (rlToolbarVertical.value) {
+      return _buildVerticalMenu(context, toolbarItems);
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -517,13 +655,70 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     );
   }
 
+  /// 縦メニュー（案B）。丸いボタン1つを置き、押すと縦に開く。
+  ///
+  /// 設計モック: docs/remohelppro_viewer_menu_mock_20260804.html
+  ///   閉じているあいだ、お客様の画面を隠すのは**この丸1つ分だけ**。
+  ///
+  /// ⚠ 項目は横帯とまったく同じものを使う。並べ方だけ変える。
+  Widget _buildVerticalMenu(BuildContext context, List<Widget> toolbarItems) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Theme(
+          data: themeData(),
+          child: _ToolbarLayoutScope(
+            vertical: true,
+            child: MenuAnchor(
+              // 接続先・操作権・通信は、開いたときだけ見える見出しとして上に置く。
+              menuChildren: [
+                _buildSessionInfoBar(context, inMenu: true),
+                const Divider(height: 9),
+                ...toolbarItems,
+              ],
+              style: _ToolbarTheme.verticalMenuStyle(context),
+              builder: (context, controller, child) => Material(
+                color: _ToolbarTheme.blueColor,
+                shape: const CircleBorder(
+                    side: BorderSide(color: Colors.white, width: 3)),
+                elevation: _ToolbarTheme.elevation,
+                shadowColor: MyTheme.color(context).shadow,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () =>
+                      controller.isOpen ? controller.close() : controller.open(),
+                  child: SizedBox(
+                    width: _ToolbarTheme.vLauncherSize,
+                    height: _ToolbarTheme.vLauncherSize,
+                    child: Icon(Icons.menu_rounded,
+                        color: _ToolbarTheme.iconOn(_ToolbarTheme.blueColor),
+                        size: 22),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        // ⚠ ここに横長の帯は置かない。案Bの値打ち（顧客画面を隠さない）が消える。
+        _buildDraggableCollapse(context),
+      ],
+    );
+  }
+
   /// REMOHELP PRO Phase2(モック準拠): セッション情報バー。
   ///   ツールバーを開いた時だけ出る（既定は畳まれているので顧客画面はそのまま）。
   ///   ※顧客名・接続コードは REMOHELP PRO バックエンド側の情報のため未表示（次段階で連携）。
   ///     ここではビュアーが持つ情報＝接続先ID／操作権／通信経路 を出す。
-  Widget _buildSessionInfoBar(BuildContext context) {
+  /// 接続先・操作権・通信経路。
+  ///
+  /// ⚠ 縦メニュー（案B）では **メニューの中の見出し** として出す（`inMenu: true`）。
+  ///   案Bの値打ちは「閉じているあいだ顧客画面を隠さない」ことなので、
+  ///   丸の下に横長の帯を出したら台無しになる。
+  ///   かといって消すと、相談員が今の状態を確かめる場所が無くなる。
+  ///   だから**開いたときだけ見える場所**へ移す。
+  Widget _buildSessionInfoBar(BuildContext context, {bool inMenu = false}) {
     Widget item(String label, String value, {Color? color}) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 7),
+          padding: EdgeInsets.symmetric(horizontal: inMenu ? 0 : 7),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Text('$label ',
                 style:
@@ -548,6 +743,25 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       } catch (_) {
         /* 未初期化時は「確認中」のまま */
       }
+      final entries = [
+        item('接続先', widget.id),
+        item('操作権', viewOnly ? '閲覧のみ' : '操作可能',
+            color: viewOnly
+                ? const Color(0xFFB45309)
+                : const Color(0xFF15803D)),
+        item('通信', conn),
+      ];
+      // メニューの中では縦に積む（面の幅が狭いので横には収まらない）。
+      if (inMenu) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(9, 4, 9, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: entries,
+          ),
+        );
+      }
       return Container(
         margin: const EdgeInsets.only(top: 3),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -556,14 +770,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
           borderRadius: BorderRadius.circular(4),
           border: Border.all(color: _ToolbarTheme.barBorder),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          item('接続先', widget.id),
-          item('操作権', viewOnly ? '閲覧のみ' : '操作可能',
-              color: viewOnly
-                  ? const Color(0xFFB45309)
-                  : const Color(0xFF15803D)),
-          item('通信', conn),
-        ]),
+        child: Row(mainAxisSize: MainAxisSize.min, children: entries),
       );
     });
   }
@@ -1308,6 +1515,16 @@ class _DisplayMenuState extends State<_DisplayMenu> {
             child: Text(translate("Virtual display")),
           ),
         if (ffi.connType == ConnType.defaultConn) cursorToggles(),
+        Divider(),
+        // メニューの形を切り替える（2026-08-04 ご要望「両方作って選べるように」）。
+        //   ⚠ 中身は同じで見せ方だけの差なので、相談員ごとに選べる形にする。
+        //     この端末に保存する。
+        Obx(() => CkbMenuButton(
+              value: rlToolbarVertical.value,
+              onChanged: (v) => rlSetToolbarVertical(v == true),
+              ffi: ffi,
+              child: Text('メニューを縦にまとめる'),
+            )),
         Divider(),
         toggles(),
       ];
@@ -2596,6 +2813,20 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
   @override
   Widget build(BuildContext context) {
     assert(widget.assetName != null || widget.icon != null);
+    // 縦メニュー（案B）のときは1行として描く。中身は同じ、見せ方だけ変える。
+    if (_ToolbarLayoutScope.verticalOf(context)) {
+      return MenuItemButton(
+        onPressed: widget.onPressed,
+        child: _ToolbarTheme.verticalRow(
+          context,
+          svg: widget.assetName,
+          icon: widget.icon,
+          label: translate(widget.tooltip),
+          danger: widget.color == _ToolbarTheme.redColor,
+          active: widget.color == _ToolbarTheme.blueColor,
+        ),
+      );
+    }
     // REMOHELP PRO Phase2: 明るいテーマ対応。地の色に応じてアイコン色を自動調整。
     // ⚠ 色を持たない Icon を渡している所がある（描き の「消す」「残す」等）。
     //   そのままだと周りのテーマの色をもらってしまい、
@@ -2720,6 +2951,25 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
   @override
   Widget build(BuildContext context) {
     assert(widget.svg != null || widget.icon != null);
+    // 縦メニュー（案B）のときは1行として描き、右に「›」を出して下に開く。
+    //   ⚠ MenuBar で包まない。包むと面の中に横並びの帯が生まれる。
+    if (_ToolbarLayoutScope.verticalOf(context)) {
+      return SubmenuButton(
+        menuStyle: _ToolbarTheme.defaultMenuStyle(context),
+        child: _ToolbarTheme.verticalRow(
+          context,
+          svg: widget.svg,
+          icon: widget.icon,
+          label: translate(widget.tooltip),
+          hasSubmenu: true,
+          active: widget.color == _ToolbarTheme.blueColor,
+        ),
+        menuChildren: widget
+            .menuChildrenGetter(this)
+            .map((e) => _buildPointerTrackWidget(e, widget.ffi))
+            .toList(),
+      );
+    }
     // REMOHELP PRO Phase2: 明るいテーマ対応。地の色に応じてアイコン色を自動調整。
     // ⚠ 色を持たない Icon を渡している所がある（描き の「消す」「残す」等）。
     //   そのままだと周りのテーマの色をもらってしまい、
