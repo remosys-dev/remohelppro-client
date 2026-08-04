@@ -515,8 +515,15 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       // 元: フルスクリーン中も _buildDraggableCollapse() が薄いハンドルを表示していた
       // 現: フルスクリーン + 折りたたみ時は透明 MouseRegion で上端 4px を覆い、ホバー検知のみ
       // 非フルスクリーン時は従来通り drag handle で操作可能
+      // 🔴 縦メニューのときは**左上**に置く（2026-08-04 ご指摘・スクリーンショットで確認）。
+      //   真ん中に置くと、面が画面中央に開き、その中の項目を開いたときに
+      //   右に場所が足りず、**左へ大きく飛んで**しまう。
+      //   親の行とサブメニューが離れて出るのはこれが原因。
+      //   左上なら右側が丸ごと空くので、順に右へ伸びていく（モックもこの形）。
       return Align(
-        alignment: Alignment.topCenter,
+        alignment: (collapse.isFalse && rlToolbarVertical.value)
+            ? Alignment.topLeft
+            : Alignment.topCenter,
         child: collapse.isFalse
             ? _buildToolbar(context)
             : (isFullscreen
@@ -2960,6 +2967,10 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
     //   ⚠ MenuBar で包まない。包むと面の中に横並びの帯が生まれる。
     if (_ToolbarLayoutScope.verticalOf(context)) {
       return SubmenuButton(
+        // ⚠ 押した行のすぐ隣から開くようにする（2026-08-04 ご指摘）。
+        //   指定しないと面の外側の遠い所に出て、どの行を開いたのか分からない。
+        //   縦に少しだけ上へ寄せて、行と頭が揃うようにする。
+        alignmentOffset: const Offset(4, -6),
         menuStyle: _ToolbarTheme.defaultMenuStyle(context),
         child: _ToolbarTheme.verticalRow(
           context,

@@ -947,11 +947,22 @@ class FfiModel with ChangeNotifier {
       //   それ以外は今までどおり中継の案内を出す。
       //   （一度、丸ごと通常のエラー画面へ回してしまい、中継の案内が
       //    出なくなる形にしていた。乱暴な直しだった）
+      // 🔴 **終わっているときも中継を勧めない**（2026-08-05 実機指摘）。
+      //   お客様が「終了する」を押すと、相談員の画面には
+      //   「接続エラー／既存の接続はリモートホストに強制的に切断されました」と
+      //   出て、**「中継サーバー経由で接続」まで勧めて**いた。
+      //   終わったものに中継は関係なく、相談員は何度も試すことになる。
+      //   ＝ お客様が正しく終了したのに、相談員には障害にしか見えない。
+      //   中継の案内が意味を持つのは「まだ繋がるはずなのに繋がらない」ときだけ。
       () async {
         if (parent.target != null) {
           final (st, _) = await rlWatchReconnect(parent.target!);
-          if (st == 'waiting' || st == 'alive') {
-            // 再起動中／一時的に切れているだけ。こちらの案内に任せる。
+          // waiting/alive … 再起動中／一時的に切れているだけ
+          // ended/expired … もう終わっている。どちらもこちらの案内に任せる
+          if (st == 'waiting' ||
+              st == 'alive' ||
+              st == 'ended' ||
+              st == 'expired') {
             showMsgBox(sessionId, type, title, text, link, true, dialogManager);
             return;
           }
