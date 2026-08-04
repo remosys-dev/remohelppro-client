@@ -3300,6 +3300,38 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _buildDraggable(context),
+        // 🔴 メニューの形の切り替えは**ここに置く**（2026-08-04 ご指示）。
+        //
+        //   はじめは「表示」の中に入れていたが、
+        //   ①名前が枠に入りきらず切れていて見つけられない
+        //   ②毎回2クリック
+        //   で使いづらかった。取っ手なら常に見えていて、帯の幅も増えない。
+        //   縦メニューにしても同じ場所に出るので、**戻す道を見失わない**。
+        //
+        //   ⚠ 左端に置き、⛶（全画面）や －（最小化）とは離す。
+        //     あちらは「窓の操作」で、Windows では右側に並ぶのが慣習。
+        //     性質の違うものを混ぜると、押し間違えるし覚えられない。
+        Obx(() => buttonWrapper(
+              () => rlSetToolbarVertical(!rlToolbarVertical.value),
+              Tooltip(
+                message: rlToolbarVertical.value
+                    ? 'メニューを横に並べる'
+                    : 'メニューを縦にまとめる',
+                child: Icon(
+                  rlToolbarVertical.value
+                      ? Icons.view_headline_rounded
+                      : Icons.view_agenda_outlined,
+                  size: iconSize,
+                ),
+              ),
+            )),
+        // 仕切り。ここから右は「窓の操作」。
+        Container(
+          width: 1,
+          height: iconSize,
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          color: _ToolbarTheme.barBorder,
+        ),
         Obx(() => buttonWrapper(
               () {
                 widget.setFullscreen(!isFullscreen.value);
