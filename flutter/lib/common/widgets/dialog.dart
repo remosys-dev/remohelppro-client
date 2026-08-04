@@ -1949,8 +1949,10 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
         ],
       ),
       actions: [
-        dialogButton('つづける', onPressed: () => close(false), isOutline: true),
-        dialogButton('サポートを終了する', onPressed: () => close(true)),
+        // ⚠ 短く言い切る（2026-08-04 ご指示）。ここは電話をしながら押す場所なので、
+        //   読ませずに形で選べるほうがよい。
+        dialogButton('続ける', onPressed: () => close(false), isOutline: true),
+        dialogButton('終了', onPressed: () => close(true)),
       ],
       onSubmit: () => close(true),
       onCancel: () => close(false),

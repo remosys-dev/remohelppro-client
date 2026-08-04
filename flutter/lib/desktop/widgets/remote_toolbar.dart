@@ -133,6 +133,28 @@ class _ToolbarTheme {
           ? const Color(0xFF334155)
           : Colors.white;
 
+  /// 開いたメニューの「面」の色。
+  ///
+  /// 🔴 ここを決めずにおくと、**黒地に黒文字**になって読めなくなる
+  ///   （2026-08-04 ご指摘）。原因は2つあり、どちらも起こりうる。
+  ///     ① アプリのテーマを暗くしていると、面が `#121212` の黒になる
+  ///     ② 面の色が決まっていないと、後ろの顧客画面が透けることがある。
+  ///        お客様が壁紙を黒にしていれば、そのまま黒地になる
+  ///   帯（ツールバー本体）は常に明るい色に固定してあるので、
+  ///   **面も同じ考えで自分で決める**。後ろの画面に左右されないようにする。
+  static Color menuSurface(BuildContext context) {
+    final c = Theme.of(context).menuBarTheme.style?.backgroundColor?.resolve({});
+    // 未指定・半透明なら帯と同じ色にする（透かさない）
+    if (c == null || c.alpha < 0xFF) return barColor;
+    return c;
+  }
+
+  /// 開いたメニューの文字色。**面の明るさから自動で決める**（暗い面なら白字）。
+  ///
+  /// ⚠ 決め打ちにしないこと。面の色を後から変えても、ここが付いてくるようにする。
+  ///   決め打ちにしていたせいで、実際に読めなくなった。
+  static Color menuTextColor(BuildContext context) => iconOn(menuSurface(context));
+
   static const Color redColor = Colors.redAccent;
   static const Color hoverRedColor = Colors.red;
   // kMinInteractiveDimension
@@ -169,6 +191,8 @@ class _ToolbarTheme {
       MyTheme.color(context).divider;
 
   static MenuStyle defaultMenuStyle(BuildContext context) => MenuStyle(
+        // ⚠ 面の色は必ず指定する。省くと後ろの画面が透けて黒地になりうる。
+        backgroundColor: MaterialStatePropertyAll(menuSurface(context)),
         side: MaterialStateProperty.all(BorderSide(
           width: 1,
           color: borderColor(context),
@@ -552,6 +576,12 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
           textStyle: MaterialStatePropertyAll(
             TextStyle(fontWeight: FontWeight.normal),
           ),
+          // 🔴 メニューの文字と印を、面の明るさから自動で決める（2026-08-04 ご指摘）。
+          //   暗い面なら白字になる。決めずにおくと黒地に黒文字で読めなかった。
+          foregroundColor:
+              MaterialStatePropertyAll(_ToolbarTheme.menuTextColor(context)),
+          iconColor:
+              MaterialStatePropertyAll(_ToolbarTheme.menuTextColor(context)),
           shape: MaterialStatePropertyAll(RoundedRectangleBorder(
               borderRadius:
                   BorderRadius.circular(_ToolbarTheme.menuButtonBorderRadius))),
@@ -2567,8 +2597,17 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
   Widget build(BuildContext context) {
     assert(widget.assetName != null || widget.icon != null);
     // REMOHELP PRO Phase2: 明るいテーマ対応。地の色に応じてアイコン色を自動調整。
+    // ⚠ 色を持たない Icon を渡している所がある（描き の「消す」「残す」等）。
+    //   そのままだと周りのテーマの色をもらってしまい、
+    //   ボタンの地の色と関係なく決まる＝地と同じ色になって消えることがある。
+    //   絵文字と同じ扱いで、**ここでも地の明るさから決める**。
     final bgColor = hover ? widget.hoverColor : widget.color;
-    final icon = widget.icon ??
+    final icon = widget.icon != null
+        ? IconTheme(
+            data: IconThemeData(color: _ToolbarTheme.iconOn(bgColor)),
+            child: widget.icon!,
+          )
+        :
         SvgPicture.asset(
           widget.assetName!,
           colorFilter:
@@ -2682,8 +2721,17 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
   Widget build(BuildContext context) {
     assert(widget.svg != null || widget.icon != null);
     // REMOHELP PRO Phase2: 明るいテーマ対応。地の色に応じてアイコン色を自動調整。
+    // ⚠ 色を持たない Icon を渡している所がある（描き の「消す」「残す」等）。
+    //   そのままだと周りのテーマの色をもらってしまい、
+    //   ボタンの地の色と関係なく決まる＝地と同じ色になって消えることがある。
+    //   絵文字と同じ扱いで、**ここでも地の明るさから決める**。
     final bgColor = hover ? widget.hoverColor : widget.color;
-    final icon = widget.icon ??
+    final icon = widget.icon != null
+        ? IconTheme(
+            data: IconThemeData(color: _ToolbarTheme.iconOn(bgColor)),
+            child: widget.icon!,
+          )
+        :
         SvgPicture.asset(
           widget.svg!,
           colorFilter:
