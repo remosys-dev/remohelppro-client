@@ -169,6 +169,23 @@ pub const AGENT_API_BASE: &str = "https://svr.remohelppro.jp";
 // 常駐（無人アクセス＋電源エージェント）ビルドか。resident-build の CI が false→true に sed する。
 pub const IS_RESIDENT_BUILD: bool = false;
 
+/// 上流の「管理API」を当社は立てていない（2026-08-05 実機のログで確定）。
+///
+/// 🔴 立てていないのに、クライアントは**延々と呼び続けていた**。
+///   指定が無いと、中継サーバーの住所から `http://<中継>:21114` を組み立てて
+///   `/api/sysinfo` `/api/heartbeat` `/api/audit/conn` を投げる作りになっている。
+///   当社の中継サーバー（OSS版）は **21114 で待ち受けていない**ので、
+///   毎回タイムアウト（数十秒）→ 代替経路も失敗、を繰り返す。
+///
+///   実害:
+///     ・接続のたびに待たされる（応答が返らない相手を待つ時間）
+///     ・**記録が埋まる**。本当の問題が見えなくなる。
+///       実際、常駐が動かない原因を追うとき、この行だらけで読みにくかった
+///
+///   ⚠ 当社の管理サーバー（AGENT_API_BASE）とは**別物**。そちらは使う。
+///     ここで止めるのは上流の管理API（有償版の機能）だけ。
+pub const NO_UPSTREAM_API_SERVER: bool = true;
+
 #[inline]
 pub fn is_service_ipc_postfix(postfix: &str) -> bool {
     // `_service` is a protected cross-user IPC channel used by the root service.

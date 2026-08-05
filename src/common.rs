@@ -1063,6 +1063,14 @@ pub fn get_api_server(api: String, custom: String) -> String {
 }
 
 fn get_api_server_(api: String, custom: String) -> String {
+    // 🔴 上流の管理APIは当社では立てていない（2026-08-05 実機のログで確定）。
+    //   指定が無いと下で `http://<中継>:21114` を組み立ててしまい、
+    //   応答の無い相手に毎回タイムアウトするまで待つ。
+    //   接続のたびに待たされ、記録も埋まる（原因追跡の邪魔になっていた）。
+    //   ⚠ 当社の管理サーバー（config::AGENT_API_BASE）とは別物。そちらは使う。
+    if config::NO_UPSTREAM_API_SERVER && api.is_empty() {
+        return "".to_owned();
+    }
     #[cfg(windows)]
     if let Ok(lic) = crate::platform::windows::get_license_from_exe_name() {
         if !lic.api.is_empty() {
