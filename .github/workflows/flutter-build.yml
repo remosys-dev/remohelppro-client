@@ -283,6 +283,12 @@ jobs:
         run: |
           sed -i 's/pub const IS_RESIDENT_BUILD: bool = false;/pub const IS_RESIDENT_BUILD: bool = true;/' libs/hbb_common/src/config.rs
           echo "--- config.rs resident flag ---"; grep -n 'IS_RESIDENT_BUILD' libs/hbb_common/src/config.rs
+          # ⚠ 立ったことを必ず確かめる（2026-08-05）。
+          #   sed は**一致しなくても成功で終わる**ので、印刷するだけでは足りない。
+          #   ここが立たないと常駐エージェントは**一行も動かない**＝端末が
+          #   永久に登録されない。実際、常駐は一度も登録できていない。
+          grep -q 'IS_RESIDENT_BUILD: bool = true;' libs/hbb_common/src/config.rs || {
+            echo "RL: 常駐フラグを立てられませんでした。中止します"; exit 1; }
 
       - name: Build rustdesk
         run: |
