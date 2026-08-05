@@ -33,6 +33,13 @@ Future<void> Function()? rlNotifySupportEnded;
 
 const String _kSlug = 'remohelppro';
 
+/// 常駐を一時停止したときに置く「戻す予定」の名前。
+///
+/// 🔴 止めたら**必ず戻る**ようにするための仕掛け（2026-08-05）。
+///   止めた事実をアプリのメモリだけに置くと、アプリが消えた瞬間に
+///   誰も戻せなくなる。Windows 自身に予定を持たせて、外の誰かを当てにしない。
+const String _kResumeTask = 'REMOHELPPRO_RESUME';
+
 // REMOHELP PRO ブランド配色（ブルー系）。ここを変えれば一括で色が変わる。
 const Color _accent = Color(0xFF2563EB);
 const Color _accentDeep = Color(0xFF1E40AF);
@@ -535,10 +542,28 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       _error = null;
     });
     try {
-      // サービス名は製品名と同じ（APP_NAME）。止めるだけ。
-      const ps = "\$ErrorActionPreference='Stop';"
-          "\$p=Start-Process -FilePath 'sc.exe'"
-          " -ArgumentList 'stop','remohelppro'"
+      // 🔴🔴 止めたら、**必ず戻る仕掛けも同時に置く**（2026-08-05 検証の指摘）。
+      //
+      //   これまでは「止めた」という事実がこのアプリのメモリにしか無かった。
+      //   アプリが強制終了・電源断・通信断で終わると、
+      //   **それを知っている唯一の相手が消える**＝ 常駐は止まったまま、
+      //   誰も戻さない。「次にパソコンを起動すれば戻る」と書いていたが、
+      //   常駐の対象は**つけっぱなしのPC**なので、次の再起動がいつ来るか
+      //   分からない。実質「気づかれないまま止まり続ける」。
+      //
+      //   ★外の誰か（このアプリ）を当てにしない。
+      //     Windows 自身に「1時間ごとに開始する」予定を持たせる。
+      //     普通に終われば下で予定を消す。消せなくても最大1時間で戻る。
+      //   ⚠ 既に動いているサービスに開始をかけても害は無い（何も起きない）。
+      //   ⚠ 管理者の確認は1回で済ませる。止めるのと予定を置くのを1回にまとめる。
+      const cmd = 'sc stop remohelppro'
+          ' & schtasks /create /tn $_kResumeTask'
+          ' /sc minute /mo 60'
+          ' /tr "sc.exe start remohelppro"'
+          ' /ru SYSTEM /rl HIGHEST /f';
+      final ps = "\$ErrorActionPreference='Stop';"
+          "\$p=Start-Process -FilePath 'cmd.exe'"
+          " -ArgumentList '/c','$cmd'"
           " -Verb RunAs -Wait -PassThru;"
           "exit \$p.ExitCode";
       final r = await Process.run(
@@ -571,14 +596,19 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
   /// 一時停止した常駐を元に戻す。サポートが終わるときに呼ぶ。
   ///
-  /// ⚠ 戻せなくても、次にパソコンを起動すれば自動で戻る（自動起動のまま）。
-  ///   ここで失敗しても、常駐が永久に止まったままにはならない。
+  /// ⚠ ここが呼ばれなくても戻る。止めるときに Windows へ
+  ///   「1時間ごとに開始する」予定を置いてあるので、最大1時間で自動的に戻る。
+  ///   ここは「すぐ戻して、予定を片付ける」ための道。
+  /// ⚠ お客様に管理者の確認をもう一度出さないよう、静かに試すだけにする。
+  ///   断られても、上の予定が効くので困らない。
   Future<void> _resumeResidentIfPaused() async {
     if (!_residentPaused || !Platform.isWindows) return;
     _residentPaused = false;
     try {
-      const ps = "\$p=Start-Process -FilePath 'sc.exe'"
-          " -ArgumentList 'start','remohelppro'"
+      const cmd = 'sc start remohelppro'
+          ' & schtasks /delete /tn $_kResumeTask /f';
+      const ps = "\$p=Start-Process -FilePath 'cmd.exe'"
+          " -ArgumentList '/c','$cmd'"
           " -Verb RunAs -Wait -PassThru; exit \$p.ExitCode";
       await Process.run(
           'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
