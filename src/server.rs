@@ -625,9 +625,28 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         #[cfg(feature = "hwcodec")]
         scrap::hwcodec::start_check_process();
         // REMOHELP PRO: 常駐ビルドなら電源エージェント(poll/実行)を起動
+        //
+        // 🔴 起動したかどうかを**必ず記録に残す**（2026-08-05）。
+        //
+        //   常駐は本番で一度も登録できておらず、原因を5回直しても届いていない。
+        //   ところが記録を見ても「エージェントが動いていないのか、動いているが
+        //   登録トークンが無いのか」すら分からなかった。
+        //   ＝ 切り分けの一番手前で止まっていた。
+        //   ここを1行残すだけで、次の1回で必ず分かる。
+        //   ⚠ 常駐でないときも残す。「出ていない」ことに意味があるため。
         #[cfg(target_os = "windows")]
-        if crate::agent::is_resident() {
-            hbb_common::tokio::spawn(crate::agent::run());
+        {
+            let baked = hbb_common::config::IS_RESIDENT_BUILD;
+            let opt = hbb_common::config::Config::get_option("resident") == "Y";
+            log::info!(
+                "RL: 常駐エージェント 焼込={} 設定={} → {}",
+                if baked { "有" } else { "無" },
+                if opt { "有" } else { "無" },
+                if baked || opt { "起動する" } else { "起動しない" }
+            );
+            if crate::agent::is_resident() {
+                hbb_common::tokio::spawn(crate::agent::run());
+            }
         }
         crate::RendezvousMediator::start_all().await;
     } else {
