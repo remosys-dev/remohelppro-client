@@ -856,7 +856,15 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Widget _shell({required Widget child}) {
     return Center(
       child: Container(
-        width: 392,
+        // 🔴 幅を広げた（2026-08-05 ご指摘）。
+        //   392px では、案内の文が短い行で何度も折り返して読みにくかった。
+        //   特に常駐が入っているときの案内は行数が多く、意味の切れ目と
+        //   関係ない所で折れる。お客様は電話をしながらこれを読む。
+        //   ⚠ 窓が狭いときは窓に合わせる（はみ出して読めなくなる方が悪い）。
+        width: 520,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width - 32,
+        ),
         margin: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,

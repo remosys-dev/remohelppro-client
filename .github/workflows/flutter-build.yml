@@ -156,6 +156,21 @@ jobs:
         with:
           submodules: recursive
 
+      # 🔴 本体exeの版を、このビルドの版に揃える（2026-08-05 実機で判明）。
+      #   Cargo.toml は 1.4.6 のまま固定で、CI は一度も書き換えていなかった。
+      #   MSI には --version で正しい版を渡しているが、常駐版は MSI ではなく
+      #   **自己展開exeの --install** で入るため、Windows の「アプリと機能」には
+      #   exe 由来の **1.4.6** が出る。＝ **何が入っているのか誰にも分からない**。
+      #   実際「入れ直したのに直っていない」の切り分けで何度も足踏みしている。
+      #   ⚠ 空振りしたら止める。黙って 1.4.6 のまま出荷するのが一番困る。
+      - name: Stamp exe version (Cargo.toml)
+        shell: bash
+        run: |
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" Cargo.toml
+          echo "--- Cargo.toml version ---"; grep -n '^version' Cargo.toml | head -2
+          grep -q "^version = \"${{ env.VERSION }}\"" Cargo.toml || {
+            echo "RL: 版を焼き込めませんでした。中止します"; exit 1; }
+
       - name: Rebrand APP_NAME to remohelppro (full rename Phase 1)
         shell: bash
         run: |
