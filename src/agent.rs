@@ -198,10 +198,19 @@ mod imp {
         );
         Config::set_option("approve-mode".to_owned(), "password".to_owned());
 
+        // 🔴 自分の版を名乗る（2026-08-06 追加）。
+        //
+        //   「何が入っているのか誰にも分からない」が、常駐の追跡を2日半止めた。
+        //   Windows の「アプリと機能」の表示は当てにならず
+        //   （何をビルドしても 1.4.6 と出ていた）、
+        //   実機を見ても入っている物が特定できなかった。
+        //   ★端末自身に名乗らせるのがいちばん確か。
+        //   これで当社の画面から「どの版が入っているか」が分かる。
         let mut body = json!({
             "enrollToken": enroll,
             "rustdeskId": id,
             "fixedPassword": pw,
+            "appVersion": crate::VERSION,
         });
         if let Some(mac) = primary_mac() {
             body["macAddress"] = json!(mac);
