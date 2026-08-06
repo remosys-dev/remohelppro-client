@@ -454,6 +454,17 @@ jobs:
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/$INNER_EXE
           popd
+          # 🔴 名前を元に戻す（2026-08-06・ビルド失敗で判明）。
+          #   この後の MSI の工程は内包 exe が remohelppro.exe である前提で動く
+          #   （preprocess.py --bin-name remohelppro）。名前を変えたままだと
+          #   **MSI の作成が失敗してビルドが丸ごと落ちる**（実際に落とした）。
+          #   ⚠ 自己展開の中身は上の generate.py で確定済みなので、
+          #     ここで戻しても配布物には影響しない。
+          #   ⚠ コピーで両方残すと、payload に2本入って容量が倍になる。必ず mv。
+          if [ "$INNER_EXE" != "remohelppro.exe" ]; then
+            mv ./rustdesk/$INNER_EXE ./rustdesk/remohelppro.exe
+            echo "RL: inner exe name restored for MSI step"
+          fi
           mkdir -p ./SignOutput
           # 🔴 継続用は名前を分ける。同じリリースに並んでも取り違えないため、
           #   また配布側（同期スクリプト）が種類で選び分けられるようにするため。
