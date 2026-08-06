@@ -302,6 +302,36 @@ jobs:
           #   永久に登録されない。実際、常駐は一度も登録できていない。
           grep -q 'IS_RESIDENT_BUILD: bool = true;' libs/hbb_common/src/config.rs || {
             echo "RL: 常駐フラグを立てられませんでした。中止します"; exit 1; }
+          # 🔴🔴 常駐だけ「アプリの名前」を分ける（2026-08-06・ユーザーご指摘）。
+          #
+          #   ご指摘「ワンタイムと常駐はプログラム名、フォルダを分ければいい。
+          #   同然サーバーでの受け皿も分けて衝突しないようにすることだよね」。
+          #
+          #   ★衝突していたものは**ほぼ全部が APP_NAME 由来**だった:
+          #       サービス名 / C:\Program Files\<名前> / アンインストールの登録簿 /
+          #       設定の置き場所(%APPDATA%) / 名前付きパイプ / taskkill の対象
+          #     （windows.rs だけで app_name 由来が81箇所）
+          #   ＝ ここ1語を変えるだけで、上が**一度に**分かれる。
+          #
+          #   これで解ける具体的な詰まり:
+          #     ① sc create が「既に存在」で失敗する → 別名なので成功する
+          #     ② 使用中の Program Files に copy できない → 別フォルダなので書ける
+          #     ③ taskkill が顧客アプリを巻き添えで落とす → 名前が違うので当たらない
+          #     ④ 前回がMSIだと sc stop も taskkill も走らない(windows.rs 早期return)
+          #        → 探す登録簿が別キーになり、MSIの記録が無いので条件に当たらない
+          #     ★④のおかげで、危険領域(install_me/get_uninstall/taskkill)を
+          #       **1行も触らずに**無効化できる。
+          #
+          #   ⚠ 表示名も変わる（「アプリと機能」に remohelppro-agent と並ぶ）。
+          #     これは**利点**として受け入れる判断をいただいた。3日間いちばん困ったのが
+          #     「どちらが入っているのか分からない」ことだったため。
+          #   ⚠ 常駐は自分のIDを名乗るようになる（設定の置き場所が別になるため）。
+          #     サーバーの devices は ID で持つので受け皿も自然に分かれる＝サーバー側の変更は不要。
+          sed -i 's/RwLock::new("remohelppro".to_owned())/RwLock::new("remohelppro-agent".to_owned())/' libs/hbb_common/src/config.rs
+          echo "--- config.rs APP_NAME ---"; grep -n 'APP_NAME: RwLock' libs/hbb_common/src/config.rs
+          # ⚠ sed は一致しなくても成功で終わる。必ず確かめて、変わっていなければ止める。
+          grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-agent".to_owned());' libs/hbb_common/src/config.rs || {
+            echo "RL: 常駐のアプリ名を分けられませんでした。中止します"; exit 1; }
 
       - name: Build rustdesk
         run: |
@@ -463,10 +493,41 @@ jobs:
             export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ inputs.onetime_valid_days }} * 86400 ))
             echo "RL: onetime expires at ${RL_ONETIME_EXPIRES_AT} ($(date -u -d @${RL_ONETIME_EXPIRES_AT} '+%Y-%m-%d %H:%M UTC'))"
           fi
+          # 🔴🔴 展開先フォルダをビルドの種類ごとに分ける（2026-08-06・ユーザーご指摘）。
+          #
+          #   これまで全ビルドが %LOCALAPPDATA%\rustdesk を共有していた。
+          #   お客様がワンタイムで接続している最中に常駐を入れると、
+          #   ①同じフォルダを丸ごと消しにいって失敗し（失敗は捨てられる）
+          #   ②使用中のファイルを上書きできず（これも捨てられる）
+          #   ③それでも「成功」として**古いままの実行ファイル**に --install を渡し
+          #   ④**常駐版ではなく顧客版がインストールされる**。
+          #   実機に①の痕跡（DLLだけ18本・data\ が消えた96MBの残骸）が現存する。
+          #   ★場所を分ければ①〜④は構造的に起こり得なくなる。
+          #
+          #   ⚠ 必ず generate.py より**前**に export すること。
+          #     generate.py が中で cargo build を走らせ、option_env! はそのとき焼き込まれる。
+          #     （RL_ONETIME_EXPIRES_AT と同じ流儀。環境変数が変われば cargo は
+          #       確実に再コンパイルすることを実測で確認済み）
+          if [ "${{ inputs.resident }}" = "true" ]; then
+            export RL_APP_PREFIX="remohelppro-agent"
+          elif [ "${{ inputs.support_show_window }}" = "true" ]; then
+            export RL_APP_PREFIX="remohelppro-support"
+          else
+            export RL_APP_PREFIX="remohelppro"
+          fi
+          echo "RL: 展開先フォルダ = %LOCALAPPDATA%\\${RL_APP_PREFIX}"
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/$INNER_EXE
           popd
+          # 焼き込めたことを確かめる（空振りしていたら、また共有フォルダに戻ってしまう）。
+          #   ⚠ strings は Windows ランナーに無いことがあるので使わない。
+          #     grep -a なら実行ファイルでもそのまま探せる。
+          #   ⚠ 相談員版は値が "remohelppro" で、他の理由でも同じ文字列が入っているため
+          #     この確認は**弱い**。意味があるのは常駐版と顧客版（後ろに語が付く形）。
+          grep -qaF "$RL_APP_PREFIX" ./target/release/rustdesk-portable-packer.exe || {
+            echo "RL: 展開先フォルダ名を焼き込めませんでした。中止します"; exit 1; }
+          echo "RL: 展開先フォルダ名の焼き込みを確認しました (${RL_APP_PREFIX})"
           # 🔴 名前を元に戻す（2026-08-06・ビルド失敗で判明）。
           #   この後の MSI の工程は内包 exe が remohelppro.exe である前提で動く
           #   （preprocess.py --bin-name remohelppro）。名前を変えたままだと
@@ -507,8 +568,24 @@ jobs:
       #   相談員のインストーラが古いまま配られ続けていた（実際に起きた）。
       #   単一exeの取得は**この工程より前**で済んでいるので、ここで落としても
       #   失うものは無い。作られなかったことが分かる方が大事。
+      # 🔴🔴 常駐版は MSI を作らない（2026-08-06）。
+      #
+      #   ① 常駐だけ APP_NAME を remohelppro-agent に分けたが、MSI の名前は
+      #      preprocess.py の --app-name（既定 remohelppro）で決まり、CI は渡していない。
+      #      このままだと「MSI は remohelppro として C:\Program Files\remohelppro へ入れる」
+      #      のに「中身は自分を remohelppro-agent だと思っている」という**食い違った物**が
+      #      出来上がる。動かないものを配るより、作らない方がよい。
+      #   ② そもそも MSI で入れると、レジストリの UninstallString が MsiExec になり、
+      #      windows.rs の get_uninstall() が早期returnして
+      #      **sc stop も taskkill も実行されない**（今回の詰まりの一因）。
+      #      常駐から MSI を無くせば、この罠を踏む道自体が消える。
+      #   ③ 常駐の配布は自己展開の exe だけ
+      #      （/download/remohelppro-resident-setup.exe のハンドラが配るのは exe）。
+      #      画面から MSI へのリンクは svr-fork のどこにも無い（確認済み）。
+      #   ⚠ サーバーに残っている remohelppro-resident-setup.msi は、
+      #     別途こちらで取り下げること（同期スクリプトの 172 行目も併せて）。
       - name: Build msi
-        if: env.UPLOAD_ARTIFACT == 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && inputs.resident != true
         run: |
           pushd ./res/msi
           # remohelppro: bin-name=remohelppro(=内包exe remohelppro.exe と一致) ／ 日本語(ja-jp)UIでMSIをビルド

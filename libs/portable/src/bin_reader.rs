@@ -42,11 +42,19 @@ impl BinaryData {
         buf
     }
 
-    pub fn write_to_file(&self, prefix: &Path) {
+    /// 展開先へ1ファイル書き出す。
+    ///
+    /// 🔴 **失敗を捨てないこと**（2026-08-06 に返り値へ変更）。
+    ///    元は末尾が `let _ = fs::write(...)` で、書けなくても何も起きなかった。
+    ///    そのせいで「古いままの実行ファイルに --install を渡す」→
+    ///    **常駐のつもりで顧客版がインストールされる**が起き、原因に辿り着くまで
+    ///    3日かかった。痕跡がどこにも残らないのが最大の理由だった。
+    ///    呼び出し側（setup）が、インストール経路では止まる判断をする。
+    pub fn write_to_file(&self, prefix: &Path) -> std::io::Result<()> {
         let p = prefix.join(&self.path);
         if let Some(parent) = p.parent() {
             if !parent.exists() {
-                let _ = fs::create_dir_all(parent);
+                fs::create_dir_all(parent)?;
             }
         }
         if p.exists() {
@@ -57,13 +65,13 @@ impl BinaryData {
             if digest == md5_record {
                 // same, skip this file
                 println!("skip {}", &self.path);
-                return;
+                return Ok(());
             } else {
                 println!("writing {}", p.display());
                 println!("{} -> {}", md5_record, digest)
             }
         }
-        let _ = fs::write(p, self.decompress());
+        fs::write(p, self.decompress())
     }
 }
 

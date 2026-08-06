@@ -17,7 +17,27 @@ const APP_METADATA: &[u8] = include_bytes!("../app_metadata.toml");
 const APP_METADATA: &[u8] = &[];
 const APP_METADATA_CONFIG: &str = "meta.toml";
 const META_LINE_PREFIX_TIMESTAMP: &str = "timestamp = ";
-const APP_PREFIX: &str = "rustdesk";
+/// 展開先フォルダの名前。**ビルドの種類ごとに分ける**（2026-08-06）。
+///
+/// 🔴 これまでは全ビルドが `%LOCALAPPDATA%\rustdesk` を共有していた。
+///    そのため、お客様がワンタイムで接続している最中に常駐を入れると:
+///      ① 同じフォルダを丸ごと消しにいく（使用中なので途中で失敗し、しかも
+///         その失敗は捨てられる＝**一部だけ消えた壊れた状態**が残る）
+///      ② 使用中のファイルを上書きできない（この失敗も捨てられていた）
+///      ③ それでも「成功」として、**古いままの実行ファイル**に --install を渡す
+///      ④ 結果、常駐版ではなく**顧客版がインストールされる**
+///    実機に、①の痕跡（DLLだけ18本残り data\ が消えた 96MB の残骸）が現存する。
+///
+/// ★場所を分ければ、①〜④は**構造的に起こり得なくなる**。
+///
+/// ⚠ 渡されなければ従来どおり `rustdesk`。開発ビルドは影響を受けない。
+/// ⚠ `bin_reader.rs` と `generate.py` に出てくる `"rustdesk"` は**別物**
+///   （データの区切り記号）。あれを一緒に変えると
+///   `panic!("bin file is not valid!")` で起動しなくなる。
+fn app_prefix() -> &'static str {
+    option_env!("RL_APP_PREFIX").unwrap_or("rustdesk")
+}
+
 const APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
 
 /// ワンタイム版の有効期限（UNIX秒）。**CI がワンタイムのビルド時にだけ渡す**。
@@ -121,10 +141,55 @@ fn write_meta(dir: &Path, ts: u64) {
     }
 }
 
+/// 展開に失敗したことをお客様に伝える。
+///
+/// 🔴 ここで黙って進むと「入れたのに何も起こらない」になる。実際そうなっていて、
+///    原因に辿り着くまで3日かかった。**入らないなら、入らないと言う。**
+#[cfg(windows)]
+fn notify_extract_failed(detail: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    let text = format!(
+        "インストールの準備ができませんでした。\n\n\
+         必要なファイルを置けなかったため、中止しました。\n\
+         このまま進めると、古いものが入ってしまい、\n\
+         入れたのに何も起こらない状態になります。\n\n\
+         お手数ですが、次をお試しください。\n\
+         ・ REMOHELP PRO の画面をすべて閉じてから、もう一度実行する\n\
+         ・ それでも同じ場合は、パソコンを再起動してから実行する\n\n\
+         ―― 担当者にお伝えいただく情報 ――\n{}",
+        detail
+    );
+    let body = wide(&text);
+    let title = wide("REMOHELP PRO");
+    unsafe {
+        winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
+        );
+    }
+}
+
+/// `strict` = インストールとして起動された経路か。
+///
+/// 🔴 ここでの失敗の扱いは、経路によって**わざと変えている**（2026-08-06）:
+///   - インストール経路 … 1つでも書けなければ**起動せず、理由を出して終わる**。
+///       黙って古いものを入れるより、入らない方がまし。
+///   - ワンタイム経路 … 記録に残して**続行**する。
+///       ここで止めると、目の前で困っているお客様のサポートが始められない
+///       （ユーザーの大原則「接続・終了は信頼に関わる」より）。
 fn setup(
     reader: BinaryReader,
     dir: Option<PathBuf>,
     clear: bool,
+    strict: bool,
     _args: &Vec<String>,
     _ui: &mut bool,
 ) -> Option<PathBuf> {
@@ -133,7 +198,15 @@ fn setup(
     } else {
         // home dir
         if let Some(dir) = dirs::data_local_dir() {
-            dir.join(APP_PREFIX)
+            // 🔴 旧・共有フォルダ（%LOCALAPPDATA%\rustdesk）は**ここでは消さない**。
+            //
+            //   一度は「置き土産を片付ける」処理を書いたが、取り下げた。
+            //   移行の途中では、**旧フォルダから動いている古いアプリでお客様が
+            //   サポートを受けている最中**ということが起こり得る。そこを消しにいけば、
+            //   まさに今回直そうとしている事故（使用中のファイルを消して壊す）を
+            //   自分で起こすことになる。
+            //   残っても場所を取るだけなので、掃除は別途（専用の片付け手段）で行う。
+            dir.join(app_prefix())
         } else {
             eprintln!("not found data local dir");
             return None;
@@ -149,8 +222,34 @@ fn setup(
         }
         std::fs::remove_dir_all(&dir).ok();
     }
+    let mut failed: Vec<String> = Vec::new();
     for file in reader.files.iter() {
-        file.write_to_file(&dir);
+        if let Err(e) = file.write_to_file(&dir) {
+            eprintln!("RL: 展開に失敗 {} : {}", &file.path, e);
+            failed.push(format!("{} ({})", &file.path, e));
+        }
+    }
+    if !failed.is_empty() {
+        // 何件失敗したかと、最初の3件だけ伝える（全部並べても読めない）
+        let detail = format!(
+            "展開先: {}\n失敗 {} 件:\n{}",
+            dir.display(),
+            failed.len(),
+            failed
+                .iter()
+                .take(3)
+                .map(|s| format!("  - {}", s))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        if strict {
+            eprintln!("RL: インストールを中止します\n{}", detail);
+            #[cfg(windows)]
+            notify_extract_failed(&detail);
+            return None;
+        }
+        // ワンタイム経路は続行する（理由は setup のコメント）
+        eprintln!("RL: 展開に失敗したが、サポートを優先して続行します\n{}", detail);
     }
     write_meta(&dir, ts);
     #[cfg(windows)]
@@ -607,13 +706,10 @@ fn main() {
 
     let mut ui = false;
     let reader = BinaryReader::default();
-    if let Some(exe) = setup(
-        reader,
-        None,
-        click_setup || args.contains(&"--silent-install".to_owned()),
-        &args,
-        &mut ui,
-    ) {
+    // インストールとして起動された経路か。展開に失敗したとき、
+    // 黙って古いものを起動しないための判断に使う（setup の説明を参照）。
+    let is_install = click_setup || args.contains(&"--silent-install".to_owned());
+    if let Some(exe) = setup(reader, None, is_install, is_install, &args, &mut ui) {
         if click_setup {
             args = vec!["--install".to_owned()];
         } else if quick_support {
