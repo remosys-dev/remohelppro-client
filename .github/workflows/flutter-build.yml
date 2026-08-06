@@ -170,6 +170,19 @@ jobs:
           echo "--- Cargo.toml version ---"; grep -n '^version' Cargo.toml | head -2
           grep -q "^version = \"${{ env.VERSION }}\"" Cargo.toml || {
             echo "RL: 版を焼き込めませんでした。中止します"; exit 1; }
+          # 🔴 exe の「ファイルバージョン」も揃える（2026-08-06 実機で判明）。
+          #   Windows のプロパティに出る版は flutter/pubspec.yaml から来ており、
+          #   CI は一度も書き換えていなかった（1.4.9+77 のまま固定）。
+          #   ＝ 実行ファイルを見ても、どの版か分からない。
+          #   Cargo.toml だけ直しても「アプリと機能」しか合わず、
+          #   **見る場所によって違う数字が出る**ので、かえって混乱する。
+          #   ⚠ pubspec の版は x.y.z+n の形。ビルド番号(+n)は残す。
+          BUILDNO=$(grep -m1 '^version:' flutter/pubspec.yaml | sed 's/.*+//' | tr -d ' \r')
+          test -n "$BUILDNO" || { echo "RL: pubspec のビルド番号を読めませんでした"; exit 1; }
+          sed -i "0,/^version: .*/s//version: ${{ env.VERSION }}+${BUILDNO}/" flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -n '^version:' flutter/pubspec.yaml | head -2
+          grep -q "^version: ${{ env.VERSION }}+" flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
 
       - name: Rebrand APP_NAME to remohelppro (full rename Phase 1)
         shell: bash
