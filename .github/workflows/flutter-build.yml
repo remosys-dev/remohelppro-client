@@ -412,6 +412,29 @@ jobs:
           mv ./rustdesk/rustdesk.exe ./rustdesk/remohelppro.exe || cp ./rustdesk/rustdesk.exe ./rustdesk/remohelppro.exe
           INNER_EXE="remohelppro.exe"
           echo "RL: inner exe renamed to remohelppro.exe (all builds)"
+          # 🔴🔴 お客様用（ワンタイム・継続用）だけ、実行ファイルの名前を分ける
+          #   （2026-08-06 ご指摘「場所もファイル名も変えないと衝突するよね」）。
+          #
+          #   常駐をインストールすると、その処理の中で
+          #     taskkill /F /IM remohelppro.exe
+          #   が走る。お客様用アプリも同じ名前なので**巻き添えで落ち**、
+          #   ＝ 常駐を入れようとした瞬間に、入れている本人の接続が切れていた。
+          #   名前が違えばこの命令に当たらない。
+          #
+          #   ⚠ 安全であることを確認済み: 名前を使う処理（サービス名・登録簿・
+          #     設定の置き場所・アンインストール）は**すべて「アプリ名」という定数**
+          #     から組み立てており、実際のファイル名を見ていない。
+          #     さらに RustDesk は、インストール時に名前を強制的に
+          #     remohelppro.exe へ戻す作りなので、**違う名前の元ファイルは想定内**。
+          #   ⚠ 変えるのはお客様用だけ。常駐版・相談員版は
+          #     remohelppro.exe のまま（インストールで戻されるので変えても無意味）。
+          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            mv ./rustdesk/remohelppro.exe ./rustdesk/remohelppro-support.exe
+            INNER_EXE="remohelppro-support.exe"
+            echo "RL: customer build inner exe = remohelppro-support.exe (常駐の taskkill に当たらないように)"
+            test -f ./rustdesk/remohelppro-support.exe || {
+              echo "RL: お客様用の名前に変えられませんでした。中止します"; exit 1; }
+          fi
           # 🔴 ワンタイム版の目印。ランナー(libs/portable)がこれを見て
           #   「使い終わったら自分ごと消す」動作に入る。
           #   ファイル名での判定は、リネーム規則を変えた瞬間に静かに壊れるのでやめた

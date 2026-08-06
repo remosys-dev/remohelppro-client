@@ -127,7 +127,17 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
         writeln!(f, "{hard_limit}")?;
     }
 
-    let exe = dst.join(format!("{}.exe", crate::get_app_name()));
+    // 🔴 実行ファイルの名前を決め打ちしない（2026-08-06）。
+    //   お客様用のアプリは、常駐の taskkill に巻き込まれないよう
+    //   `remohelppro-support.exe` という別の名前で配るようにした。
+    //   ここで `remohelppro.exe` と決め打ちすると、複製の中に見つからず
+    //   **ログオン前の接続が丸ごと動かなくなる**。
+    //   ★いま動いている自分の名前をそのまま使う。名前を変えても壊れない。
+    let my_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| format!("{}.exe", crate::get_app_name()));
+    let exe = dst.join(&my_name);
     if !exe.exists() {
         bail!("copied exe not found: {}", exe.display());
     }
