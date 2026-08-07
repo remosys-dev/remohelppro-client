@@ -353,6 +353,25 @@ fn dl_token_from_exe_name(exe: &std::path::Path) -> Option<String> {
 ///   ワンタイム版の合言葉と同じく、**ランナーが読んで環境変数で渡す**。
 ///
 /// ブラウザが重複ダウンロードで付ける ` (1)` などは捨てる。
+/// この自己展開ランナーは、名前に関係なく必ずインストールするか。
+///
+/// 常駐版のビルドのときだけ CI が `RL_ALWAYS_INSTALL=1` を焼き込む
+/// （.github/workflows/flutter-build.yml、RL_APP_PREFIX と同じ場所）。
+///
+/// 🔴 常駐版の配布物は**インストーラ以外の使い道が無い**。
+///   ならば、ファイル名がどう変わっていようとインストールへ進むのが正しい。
+///   名前に頼る判定は、ブラウザ・お客様・通信のどれか一つで簡単に外れる。
+/// ⚠ ワンタイム版・相談員版には焼き込まないこと。
+///   焼き込むと、使い捨てのはずのアプリが居座る。
+/// ⚠ 値そのものは見ない。**空でなければ真**にしてある。
+///   理由は「焼き込めたことを確かめられるようにするため」。
+///   比べる文字列をここに書くと、その文字列は焼き込みの有無に関わらず
+///   実行ファイルの中に入ってしまい、grep で確かめても常に見つかる＝確認にならない。
+///   空判定にしておけば、CI が入れた合言葉は**入ったときだけ**中に現れる。
+fn always_install() -> bool {
+    !option_env!("RL_ALWAYS_INSTALL").unwrap_or("").is_empty()
+}
+
 fn enroll_token_from_exe_name(exe: &std::path::Path) -> Option<String> {
     const MARK: &str = "__t-";
     let stem = exe.file_stem()?.to_string_lossy().to_string();
@@ -698,7 +717,32 @@ fn main() {
         }
         i += 1;
     }
-    let click_setup = args.is_empty() && arg_exe.to_lowercase().ends_with("install.exe");
+    // 🔴🔴 インストールかどうかを「ファイル名」だけで決めない（2026-08-07）。
+    //
+    //   元は `install.exe` で終わるかだけを見ていた。配布サーバーは
+    //   `...__t-<トークン>.d<日時>.install.exe` という名前で配っているので
+    //   普通は当たる。しかし当たらない道がいくつもある:
+    //     ・ブラウザが同名回避で ` (1)` を付ける → `...install (1).exe`
+    //     ・お客様が分かりやすい名前に変える
+    //     ・Content-Disposition が届かず URL の名前で保存される
+    //       → `remohelppro-resident-setup.exe`
+    //   どれも**ただ展開して起動するだけ**で終わる。サービスは作られず、
+    //   登録も走らない。お客様には「入れたのに何も起こらない」としか見えず、
+    //   画面にもログにも理由が出ない。実際に1台、ここで止まっていた。
+    //
+    //   ★決め手を3つ持つ。1つでも当たればインストールとして扱う。
+    //     ① 常駐ビルドの焼き印（名前に一切依存しない・これが本命）
+    //     ② 従来どおりの名前（既に配った物を壊さないために残す）
+    //     ③ 名前の中の登録トークン（`__t-`。常駐版にしか付かない）
+    //   ⚠ ③ がワンタイム版を巻き込まないこと。ワンタイム版の名前は
+    //     `remohelppro-start-<短ID>.<合言葉>.exe` で `__t-` を含まない
+    //     （svr-fork/src/app/api/customer/pair-launcher/route.ts:35）。
+    //     ここを取り違えると、**お客様の使い捨てアプリが勝手に居座る**。
+    let exe_path = std::path::Path::new(&arg_exe);
+    let click_setup = args.is_empty()
+        && (always_install()
+            || arg_exe.to_lowercase().ends_with("install.exe")
+            || enroll_token_from_exe_name(exe_path).is_some());
     #[cfg(windows)]
     let quick_support = args.is_empty() && win::is_quick_support_exe(&arg_exe);
     #[cfg(not(windows))]

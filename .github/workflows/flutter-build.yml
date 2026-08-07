@@ -535,8 +535,28 @@ jobs:
           #     generate.py が中で cargo build を走らせ、option_env! はそのとき焼き込まれる。
           #     （RL_ONETIME_EXPIRES_AT と同じ流儀。環境変数が変われば cargo は
           #       確実に再コンパイルすることを実測で確認済み）
+          # 🔴🔴 常駐版は、ファイル名に関係なく必ずインストールする（2026-08-07）。
+          #
+          #   自己展開ランナーは `install.exe` で終わる名前かどうかだけを見て
+          #   インストールか否かを決めていた（libs/portable/src/main.rs）。
+          #   配布サーバーは正しい名前で配っているが、
+          #     ・ブラウザが ` (1)` を付ける
+          #     ・お客様が名前を変える
+          #     ・Content-Disposition が届かず URL の名前で保存される
+          #   のどれかで簡単に外れ、**ただ展開して起動するだけ**になる。
+          #   サービスも作られず登録も走らないのに、画面には何も出ない。
+          #   実機で1台、ここで止まっていた（インストーラ取得の記録はあるのに
+          #   登録の記録が0件・アプリと機能にも出ない）。
+          #   ★常駐版の配布物はインストーラ以外の使い道が無いので、焼き印で決める。
+          #   ⚠ 常駐版だけ。ワンタイム版・相談員版に焼き込むと、
+          #     使い捨てのはずのアプリが居座る。
           if [ "${{ inputs.resident }}" = "true" ]; then
             export RL_APP_PREFIX="remohelppro-agent"
+            # 値は「焼き込めたか確かめるための合言葉」。中身に意味は無い。
+            #   ランナー側は空でなければ真として扱う（main.rs の always_install）。
+            #   比べる文字列をソースに書くと、焼き込めていなくても実行ファイルに
+            #   その文字列が入ってしまい、grep での確認が意味を失う。
+            export RL_ALWAYS_INSTALL="agent-forced-install-9f3a"
           elif [ "${{ inputs.support_show_window }}" = "true" ]; then
             export RL_APP_PREFIX="remohelppro-support"
           else
@@ -555,6 +575,13 @@ jobs:
           grep -qaF "$RL_APP_PREFIX" ./target/release/rustdesk-portable-packer.exe || {
             echo "RL: 展開先フォルダ名を焼き込めませんでした。中止します"; exit 1; }
           echo "RL: 展開先フォルダ名の焼き込みを確認しました (${RL_APP_PREFIX})"
+          # 常駐版だけ、「名前に関係なく必ずインストールする」印も確かめる。
+          #   ここが空振りすると、また「入れたのに何も起こらない」に戻る。
+          if [ "${{ inputs.resident }}" = "true" ]; then
+            grep -qaF "$RL_ALWAYS_INSTALL" ./target/release/rustdesk-portable-packer.exe || {
+              echo "RL: 常駐を必ずインストールする印を焼き込めませんでした。中止します"; exit 1; }
+            echo "RL: 常駐は名前に関係なく必ずインストールします（焼き込み確認済み）"
+          fi
           # 🔴 名前を元に戻す（2026-08-06・ビルド失敗で判明）。
           #   この後の MSI の工程は内包 exe が remohelppro.exe である前提で動く
           #   （preprocess.py --bin-name remohelppro）。名前を変えたままだと
