@@ -40,6 +40,17 @@ const String _kSlug = 'remohelppro';
 ///   誰も戻せなくなる。Windows 自身に予定を持たせて、外の誰かを当てにしない。
 const String _kResumeTask = 'REMOHELPPRO_RESUME';
 
+/// 常駐版のサービス名（＝ APP_NAME）。
+///
+/// 🔴 2つある（2026-08-07）。
+///   常駐版は 1.4.29 から `remohelppro-agent` に名前を分けた。
+///   ワンタイム版と同じ名前・同じフォルダ・同じ接続番号を奪い合っていたため。
+///   ⚠ **分ける前に入った常駐は `remohelppro` のまま残る。**
+///     新版を入れても旧版は消えない（消す対象の名前が違うので届かない）。
+///     だから**両方**を見る必要がある。片方しか見ないと、
+///     「入っているのに入っていないことになる」。
+const List<String> _kResidentServices = ['remohelppro-agent', 'remohelppro'];
+
 // REMOHELP PRO ブランド配色（ブルー系）。ここを変えれば一括で色が変わる。
 const Color _accent = Color(0xFF2563EB);
 const Color _accentDeep = Color(0xFF1E40AF);
@@ -145,9 +156,45 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     await _maybeAutoStart();
   }
 
+  /// この実行ファイルが常駐版か。
+  ///
+  /// 判定は APP_NAME。常駐版は 1.4.29 から `remohelppro-agent` に分けてある
+  /// （CI が libs/hbb_common/src/config.rs の APP_NAME を焼き替える）。
+  /// ⚠ 新しい橋渡しを足さずに済むよう、既存の同期APIだけで判定する。
+  bool get _isResidentBuild {
+    try {
+      return bind.mainGetAppNameSync().toLowerCase() == 'remohelppro-agent';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 前回の一時パスワードを使えなくする。失敗しても起動は妨げない。
   Future<void> _invalidateLeftoverPassword() async {
     if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) return;
+    // 🔴🔴 常駐版では**絶対に**やってはいけない（2026-08-07 判明）。
+    //
+    //   常駐版は登録のときに固定パスワードを作り、それをサーバーへ預ける
+    //   （src/agent.rs:248-249, 267 `fixedPassword`）。相談員が常駐端末へ
+    //   繋ぐときは、サーバーが預かっているその固定パスワードを使う。
+    //   ★固定パスワードを作り直すのは**登録のとき1回だけ**。
+    //     登録が済むと ensure_enrolled() は先頭で戻るので、二度と作り直さない。
+    //
+    //   ところがこの画面は常駐版のウィンドウにも出る
+    //   （desktop_home_page.dart:146 は常駐版でも RemohelpproPairingCard を描く）。
+    //   その initState でここが走ると、**サーバーが預かっている固定パスワードと
+    //   PCの中身が食い違う**。しかも作り直す者はもう居ない。
+    //   ＝ 常駐端末へ繋ぐと必ず「パスワードが間違っています」になる。
+    //   ＝ お客様がログオンしてこの窓が一度開いた時点で、常駐は死ぬ。
+    //
+    //   実機で「常駐を入れ直したがパスワード間違いで接続できない」が
+    //   繰り返し起きていた。その筋が通る。
+    //   ⚠ ワンタイム版では今までどおり必要（残った一時パスワードを潰す）。
+    //     消す理由が「毎回使い捨てだから」なので、常駐には当てはまらない。
+    if (_isResidentBuild) {
+      debugPrint('RL: 常駐版なので固定パスワードは触らない');
+      return;
+    }
     try {
       final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
       await bind.mainSetPermanentPasswordWithResult(password: 'boot-$rnd');
@@ -556,10 +603,18 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       //     普通に終われば下で予定を消す。消せなくても最大1時間で戻る。
       //   ⚠ 既に動いているサービスに開始をかけても害は無い（何も起きない）。
       //   ⚠ 管理者の確認は1回で済ませる。止めるのと予定を置くのを1回にまとめる。
+      // 🔴 名前が2つある（2026-08-07）。片方だけ止めても、もう片方が
+      //   登録の口を押さえたままになる。止める予定・戻す予定も両方に置く。
+      //   ⚠ 入っていない方に sc stop をかけても害は無い（見つからないだけ）。
       const cmd = 'sc stop remohelppro'
+          ' & sc stop remohelppro-agent'
           ' & schtasks /create /tn $_kResumeTask'
           ' /sc minute /mo 60'
           ' /tr "sc.exe start remohelppro"'
+          ' /ru SYSTEM /rl HIGHEST /f'
+          ' & schtasks /create /tn ${_kResumeTask}_AGENT'
+          ' /sc minute /mo 60'
+          ' /tr "sc.exe start remohelppro-agent"'
           ' /ru SYSTEM /rl HIGHEST /f';
       final ps = "\$ErrorActionPreference='Stop';"
           "\$p=Start-Process -FilePath 'cmd.exe'"
@@ -606,7 +661,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _residentPaused = false;
     try {
       const cmd = 'sc start remohelppro'
-          ' & schtasks /delete /tn $_kResumeTask /f';
+          ' & sc start remohelppro-agent'
+          ' & schtasks /delete /tn $_kResumeTask /f'
+          ' & schtasks /delete /tn ${_kResumeTask}_AGENT /f';
       const ps = "\$p=Start-Process -FilePath 'cmd.exe'"
           " -ArgumentList '/c','$cmd'"
           " -Verb RunAs -Wait -PassThru; exit \$p.ExitCode";
@@ -709,6 +766,27 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   onetimeToken → それを一時パスワードに設定 → 準備完了表示＋終了監視を開始。
   Future<void> _finishRemotePairing(String shortId,
       {bool viewOnly = false}) async {
+    // 🔴🔴 常駐版のウィンドウからワンタイム接続をさせない（2026-08-07 判明）。
+    //
+    //   下で mainSetPermanentPasswordWithResult() を呼び、一時トークンを
+    //   **固定パスワードとして**書き込んでいる。ワンタイム版では正しいが、
+    //   常駐版でこれをやると、サーバーが預かっている固定パスワードが
+    //   PCの中身と食い違い、常駐端末へ二度と繋げなくなる（上の説明と同じ穴）。
+    //
+    //   さらに接続番号も常駐のものが使われるため、
+    //   **ワンタイムのつもりで常駐の口を使ってしまう**。
+    //   実際、本日つながった2件はどちらも常駐の接続番号
+    //   （1060458689 / 688619419＝どちらも 0x20000000 の印つき）だった。
+    //   ＝ 動いているように見えて、ワンタイムの導線は一度も通っていなかった。
+    //
+    //   ⚠ 行き止まりにしない。やることを書く。
+    if (_isResidentBuild) {
+      throw Exception('このパソコンには常駐版が入っています。\n'
+          '常駐でお使いの場合、相談員は電話なしで接続できますので、\n'
+          '認証コードの入力は不要です。\n\n'
+          '一時的な接続をご希望の場合は、担当者からご案内する\n'
+          '「お客様アプリ」からお願いします。');
+    }
     // 🔴 遠隔操作のときは、操作系を必ず戻してから繋ぐ（2026-07-26）。
     //   直前に同じPCで画面共有を使っていると 'N' が残ったままで、
     //   相談員が繋いでもキーボードもマウスも効かない。原因が見えないので厄介。
@@ -851,6 +929,26 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     } catch (_) {
       /* 判定できなければ、下の一般的な案内にする */
     }
+    // 🔴 mainIsInstalled() だけでは足りない（2026-08-07 名前を分けた副作用）。
+    //
+    //   この判定は Rust 側の is_installed() を呼ぶだけで、中身は
+    //   `<Program Files>\<APP_NAME>\<APP_NAME>.exe` があるかを見ている
+    //   （src/platform/windows.rs:1933 → 1415）。
+    //   ★見るのは**自分の APP_NAME だけ**。
+    //     このアプリ（ワンタイム版）の APP_NAME は `remohelppro` なので、
+    //     常駐版 `remohelppro-agent` が入っていても **必ず false を返す**。
+    //
+    //   その結果どうなるか:
+    //     常駐が邪魔をして繋がらないのに「サーバーに接続できませんでした。
+    //     Wi-Fi をご確認ください」という**まったく違う案内**が出て、
+    //     逃げ道のボタン（常駐を一時停止して接続する）も出ない。
+    //     ＝ お客様も相談員も、通信の問題だと思って延々と時間を使う。
+    //
+    //   ⚠ 名前を分けたのは正しいが、**探す側を分け忘れていた**。
+    //     入っているかどうかは、両方の名前で確かめる。
+    if (!installed && Platform.isWindows) {
+      installed = _residentInstalledByPath();
+    }
     if (installed) {
       // 🔴 行き止まりにしない（2026-08-05 ご指示）。
       //   「常駐が入っているせいで繋がりません」で終わらせると、
@@ -866,6 +964,27 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     }
     throw Exception('サーバーに接続できませんでした。\n'
         'Wi-Fi／モバイル通信の状態を確認して、もう一度お試しください。');
+  }
+
+  /// 常駐版がこのPCに入っているかを、**インストール先の実体**で確かめる。
+  ///
+  /// 置き場所は Rust 側と同じ規則:
+  ///   `<Program Files>\<APP_NAME>\<APP_NAME>.exe`
+  ///   （src/platform/windows.rs:1343-1357 / 1415）
+  ///
+  /// ⚠ ここでは**読むだけ**。止めたり消したりはしない。
+  ///   判定を間違えても案内の文が変わるだけで済むようにしておく。
+  bool _residentInstalledByPath() {
+    if (!Platform.isWindows) return false;
+    final pf = Platform.environment['ProgramFiles'] ?? r'C:\Program Files';
+    for (final name in _kResidentServices) {
+      try {
+        if (File('$pf\\$name\\$name.exe').existsSync()) return true;
+      } catch (_) {
+        /* 権限等で見られなければ、入っていないものとして扱う */
+      }
+    }
+    return false;
   }
 
   /// リレー登録が済んで自分のIDが得られるまで、少し待ちながらリトライする。
