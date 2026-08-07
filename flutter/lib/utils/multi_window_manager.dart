@@ -510,6 +510,55 @@ class RustDeskMultiWindowManager {
     return _activeWindows;
   }
 
+  /// 誰のものでもない子ウィンドウを見つけて閉じる。
+  ///
+  /// 🔴🔴 「Loading...」の窓が消えない件（2026-08-04 発覚・08-08 に作り直し）。
+  ///
+  ///   子ウィンドウの中身は、その窓自身の Dart（main.dart の multi_window 分岐）が
+  ///   描く。ところが**その Dart にたどり着けない**ことがあり、そのときは
+  ///   何も描かれないまま「Loading...」の板だけが残る。
+  ///   閉じ方も分からないので、お客様の画面に居座り続ける。
+  ///
+  ///   ⚠ 2026-08-04 に main.dart の default: へ「自分で閉じる」歯止めを入れたが、
+  ///     **効かなかった**。当然で、あれは**その窓の Dart が動いた場合**の話。
+  ///     動かないから残っているのに、動いた前提の手当てをしていた。
+  ///     3回ご指摘をいただいて、ようやくそこに気づいた。
+  ///
+  ///   ★閉じられるのは、外から見ている**メインウィンドウだけ**。
+  ///     OS が持っている子ウィンドウの一覧と、こちらが把握している一覧を
+  ///     突き合わせ、身に覚えの無いものを閉じる。
+  ///
+  /// ⚠ 作りかけの窓を巻き込まない。窓は「作られてから登録されるまで」に
+  ///   わずかな間がある。**2回続けて身に覚えが無かったものだけ**閉じる。
+  /// ⚠ メインウィンドウ自身は決して触らない。
+  /// ⚠ メインウィンドウからのみ呼ぶこと（_activeWindows を知っているのはここだけ）。
+  final Set<int> _strayCandidates = {};
+
+  Future<void> closeStrayWindows() async {
+    try {
+      final all = await getAllSubWindowIds();
+      final known = <int>{..._activeWindows, ..._inactiveWindows, kMainWindowId};
+      final unknown = all.where((id) => !known.contains(id)).toSet();
+      // 前回も身に覚えが無かったものだけ閉じる（作りかけを巻き込まないため）。
+      final toClose = unknown.intersection(_strayCandidates);
+      _strayCandidates
+        ..clear()
+        ..addAll(unknown);
+      for (final id in toClose) {
+        try {
+          debugPrint('RL: 身に覚えの無い子ウィンドウを閉じます id=$id');
+          await WindowController.fromWindowId(id).close();
+          _strayCandidates.remove(id);
+        } catch (e) {
+          debugPrint('RL: 子ウィンドウを閉じられませんでした id=$id, $e');
+        }
+      }
+    } catch (e) {
+      // 一覧が取れないことはある（起動直後など）。次の回に任せる。
+      debugPrint('RL: 子ウィンドウの点検に失敗: $e');
+    }
+  }
+
   Future<void> _notifyActiveWindow() async {
     for (final callback in _windowActiveCallbacks) {
       await callback.call();

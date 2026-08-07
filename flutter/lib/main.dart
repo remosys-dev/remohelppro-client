@@ -166,6 +166,21 @@ void runMainApp(bool startService) async {
   gFFI.userModel.refreshCurrentUser();
   runApp(App());
 
+  // 🔴🔴 誰のものでもない子ウィンドウを片付ける（2026-08-08・3回目のご指摘）。
+  //
+  //   「Loading...」とだけ書かれた窓が閉じられないまま残る事故が続いていた。
+  //   2026-08-04 に下の multi_window 分岐へ「自分で閉じる」歯止めを入れたが
+  //   **効かなかった**。当然で、あれは**その窓の Dart が動いた場合**の話。
+  //   動かないから残っているのに、動いた前提の手当てをしていた。
+  //   ★閉じられるのは、外から見ているメインウィンドウだけ。
+  //   ⚠ 10秒ごとに点検し、2回続けて身に覚えが無かったものだけ閉じるので、
+  //     実際に閉じるまで最大20秒かかる（作りかけの窓を巻き込まないため）。
+  if (isDesktop) {
+    Timer.periodic(const Duration(seconds: 10), (_) async {
+      await rustDeskWinManager.closeStrayWindows();
+    });
+  }
+
   bool? alwaysOnTop;
   if (isDesktop) {
     alwaysOnTop =
