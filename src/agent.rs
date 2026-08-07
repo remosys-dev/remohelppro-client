@@ -169,16 +169,6 @@ mod imp {
     ///   届くまで毎回持ち回り、200 が返ってはじめて手放す。
     static PENDING_PW: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-    /// サービスが立ち上がるたびに固定パスワードを作り直し、預ける準備をする。
-    ///
-    /// 🔴 これが「パスワードが間違っています」の直し（2026-08-07）。
-    ///   常駐は登録のときに固定パスワードを作ってサーバーへ預けるが、
-    ///   作り直すのは**登録の1回だけ**（登録済みなら ensure_enrolled は先頭で戻る）。
-    ///   端末側で書き換わる道があると、預かっている物と中身が**永久に食い違い**、
-    ///   端末を消して入れ直す以外に直す道が無かった。
-    ///   ★立ち上がるたびに揃え直せば、何が壊しても再起動で自分で治る。
-    /// ⚠ 毎回変わるが困らない。相談員は繋ぐ直前にサーバーから受け取る。
-    ///   むしろ、つけっぱなしの端末で同じ合言葉が残り続けない分だけ良い。
     /// 固定パスワードを揃え直す間隔（秒）。
     ///
     /// 🔴 起動時に1回だけでは足りない（2026-08-08）。
@@ -193,6 +183,68 @@ mod imp {
     const PW_ROTATE_INTERVAL_SECS: u64 = 30 * 60;
     static NEXT_ROTATE_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+    /// 中継サーバーに受け入れられていない状態が、これだけ続いたらやり直す（秒）。
+    ///
+    /// ⚠ 短すぎるとやり直しを繰り返して繋がらなくなる。
+    ///   登録の間隔（REG_INTERVAL）と失敗の数え方に余裕を持たせて 150 秒。
+    const RENDEZVOUS_STALE_SECS: u64 = 150;
+    /// やり直しの間隔（秒）。連打しない。
+    const RENDEZVOUS_RETRY_SECS: u64 = 180;
+    static NEXT_RZ_RESTART_AT: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+
+    /// 中継サーバーへ登録できていなければ、自分でやり直す。
+    ///
+    /// 🔴🔴 パソコンを再起動すると、サービスは起動して当社の管理サーバーへ
+    ///   ハートビートも送るのに、**中継サーバーへの登録だけが成立しない**
+    ///   （2026-08-08 実機で3回再現・Win10/Win11 とも）。
+    ///   相談員のビュアーには「リモートデスクトップはオフラインです」と出る。
+    ///   ところが**サービスを手で再起動すると必ず繋がる**。
+    ///   ＝ サービスが「起動している」ことと「正しく動いている」ことは別。
+    ///
+    ///   原因はまだ特定できていない。だが**やり直せば直る**ことは分かっている。
+    ///   お客様に毎回サービスの再起動をお願いするわけにはいかないので、
+    ///   気づいて自分でやり直す。やることは手での再起動と同じ
+    ///   （`RendezvousMediator::restart()`）。
+    ///
+    /// ⚠ 起動直後は猶予を置く。立ち上がりに時間がかかるのは普通で、
+    ///   そこでやり直すと立ち上がれない。
+    /// ⚠ 原因究明をやめない。これは「繋がらないまま放置しない」ための歯止めであって、
+    ///   直したことにはならない。
+    fn watch_rendezvous(started_at: u64) {
+        let now = now_secs();
+        // 一度も受け入れられていなければ、起動からの時間で測る。
+        let stale = match crate::secs_since_rendezvous_accepted() {
+            Some(secs) => secs,
+            None => now.saturating_sub(started_at),
+        };
+        if stale < RENDEZVOUS_STALE_SECS {
+            return;
+        }
+        if now < NEXT_RZ_RESTART_AT.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        NEXT_RZ_RESTART_AT.store(
+            now + RENDEZVOUS_RETRY_SECS,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        log::warn!(
+            "REMOHELP PRO agent: 中継サーバーに{}秒受け入れられていないので、登録をやり直します",
+            stale
+        );
+        crate::RendezvousMediator::restart();
+    }
+
+    /// サービスが立ち上がるたびに固定パスワードを作り直し、預ける準備をする。
+    ///
+    /// 🔴 これが「パスワードが間違っています」の直し（2026-08-07）。
+    ///   常駐は登録のときに固定パスワードを作ってサーバーへ預けるが、
+    ///   作り直すのは**登録の1回だけ**（登録済みなら ensure_enrolled は先頭で戻る）。
+    ///   端末側で書き換わる道があると、預かっている物と中身が**永久に食い違い**、
+    ///   端末を消して入れ直す以外に直す道が無かった。
+    ///   ★立ち上がるたびに揃え直せば、何が壊しても再起動で自分で治る。
+    /// ⚠ 毎回変わるが困らない。相談員は繋ぐ直前にサーバーから受け取る。
+    ///   むしろ、つけっぱなしの端末で同じ合言葉が残り続けない分だけ良い。
     fn rotate_fixed_password() {
         let pw = Config::get_auto_password(12);
         Config::set_permanent_password(&pw);
@@ -472,7 +524,10 @@ mod imp {
         //   ⚠ 登録より前に置く。まだ登録していない端末なら、この値がそのまま
         //     登録のときに預けられる（ensure_enrolled が読む場所と同じ）。
         rotate_fixed_password();
+        // 中継サーバーへの登録の見張り。詳しくは watch_rendezvous() を参照。
+        let started_at = now_secs();
         loop {
+            watch_rendezvous(started_at);
             // 決めた間隔で揃え直す。何が壊しても、最長でこの間隔で自分で治る。
             //   ⚠ まだ預けきっていない分があるうちは作り直さない。
             //     作り直すたびに端末側だけ変わり、追いつけなくなる。

@@ -42,6 +42,43 @@ static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 static MANUAL_RESTARTED: AtomicBool = AtomicBool::new(false);
 static SENT_REGISTER_PK: AtomicBool = AtomicBool::new(false);
 
+/// 中継サーバーに「受け入れられた」最後の時刻（UNIX秒）。0 は一度も無い。
+///
+/// 🔴 これが要る理由（2026-08-08 実機で3回再現）:
+///   パソコンを再起動すると、サービスは起動してこちらの管理サーバーへ
+///   ハートビートも送るのに、**中継サーバーへの登録だけが成立しない**。
+///   相談員のビュアーには「リモートデスクトップはオフラインです」と出る。
+///   ところが**サービスを手で再起動すると必ず繋がる**。Win10・Win11 とも。
+///   ＝ サービスが「起動している」ことと「正しく動いている」ことは別。
+///
+///   ★原因が分からなくても、**登録できていないことに気づいて、やり直せる**。
+///     やり直しは RendezvousMediator::restart()（手での再起動と同じ効果）。
+/// ⚠ 「返事が来た」ではなく「**受け入れられた**」を記録する。
+///   RegisterPeerResponse は鍵を要求する（request_pk=true）ときも返ってくるので、
+///   返事が来ただけでは繋がる状態とは言えない。
+static LAST_ACCEPTED_SECS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn mark_accepted() {
+    LAST_ACCEPTED_SECS.store(now_secs(), Ordering::SeqCst);
+}
+
+/// 中継サーバーに最後に受け入れられてからの秒数。一度も無ければ None。
+pub fn secs_since_rendezvous_accepted() -> Option<u64> {
+    let last = LAST_ACCEPTED_SECS.load(Ordering::SeqCst);
+    if last == 0 {
+        None
+    } else {
+        Some(now_secs().saturating_sub(last))
+    }
+}
+
 #[derive(Clone)]
 pub struct RendezvousMediator {
     addr: TargetAddr<'static>,
@@ -313,12 +350,16 @@ impl RendezvousMediator {
                 if rpr.request_pk {
                     log::info!("request_pk received from {}", self.host);
                     self.register_pk(sink).await?;
+                } else {
+                    // 鍵を求められなかった＝この端末は受け入れられている。
+                    mark_accepted();
                 }
             }
             Some(rendezvous_message::Union::RegisterPkResponse(rpr)) => {
                 update_latency();
                 match rpr.result.enum_value() {
                     Ok(register_pk_response::Result::OK) => {
+                        mark_accepted();
                         Config::set_key_confirmed(true);
                         Config::set_host_key_confirmed(&self.host_prefix, true);
                         *SOLVING_PK_MISMATCH.lock().await = "".to_owned();
