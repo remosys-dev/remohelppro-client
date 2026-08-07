@@ -155,6 +155,44 @@ mod imp {
     /// 登録に失敗したあと、次に試すまで空ける時間（秒）。
     const ENROLL_RETRY_SECS: u64 = 60;
 
+    /// 端末に設定したが、まだサーバーへ届いていない固定パスワード。
+    ///
+    /// 🔴🔴 **平文は読み戻せない**（2026-08-07 に config.rs を読んで判明）。
+    ///   固定パスワードは保存時にハッシュ化される
+    ///   （config.rs:724 `encode_permanent_password_storage_from_h1`）。
+    ///   ＝「いま端末に入っている合言葉を読んで名乗り直す」はできない。
+    ///   ★**こちらから作り直して、その平文を預ける**しかない。
+    ///     作った本人なら平文を持っているので、必ず一致させられる。
+    ///
+    /// 🔴 届いたことを確かめるまで捨てない。
+    ///   先に端末を書き換えるので、預けそこねると**食い違ったまま**になる。
+    ///   届くまで毎回持ち回り、200 が返ってはじめて手放す。
+    static PENDING_PW: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    /// サービスが立ち上がるたびに固定パスワードを作り直し、預ける準備をする。
+    ///
+    /// 🔴 これが「パスワードが間違っています」の直し（2026-08-07）。
+    ///   常駐は登録のときに固定パスワードを作ってサーバーへ預けるが、
+    ///   作り直すのは**登録の1回だけ**（登録済みなら ensure_enrolled は先頭で戻る）。
+    ///   端末側で書き換わる道があると、預かっている物と中身が**永久に食い違い**、
+    ///   端末を消して入れ直す以外に直す道が無かった。
+    ///   ★立ち上がるたびに揃え直せば、何が壊しても再起動で自分で治る。
+    /// ⚠ 毎回変わるが困らない。相談員は繋ぐ直前にサーバーから受け取る。
+    ///   むしろ、つけっぱなしの端末で同じ合言葉が残り続けない分だけ良い。
+    fn rotate_fixed_password() {
+        let pw = Config::get_auto_password(12);
+        Config::set_permanent_password(&pw);
+        Config::set_option(
+            "verification-method".to_owned(),
+            "use-permanent-password".to_owned(),
+        );
+        Config::set_option("approve-mode".to_owned(), "password".to_owned());
+        if let Ok(mut p) = PENDING_PW.lock() {
+            *p = Some(pw);
+        }
+        log::info!("REMOHELP PRO agent: 固定パスワードを作り直しました（サーバーへ預けます）");
+    }
+
     fn now_secs() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -244,14 +282,27 @@ mod imp {
             return;
         }
 
-        // 無人アクセス用の永続パスワードを生成し、ローカルに設定して無人アクセスを有効化
-        let pw = Config::get_auto_password(12);
-        Config::set_permanent_password(&pw);
-        Config::set_option(
-            "verification-method".to_owned(),
-            "use-permanent-password".to_owned(),
-        );
-        Config::set_option("approve-mode".to_owned(), "password".to_owned());
+        // 無人アクセス用の永続パスワードを用意し、無人アクセスを有効にする。
+        //
+        // 🔴 ここで作り直さない（2026-08-07 に作り直し）。
+        //   元はこの場で新しい合言葉を作っていたが、サービス起動時にも
+        //   rotate_fixed_password() が作るので、**2つの値が競合していた**。
+        //   登録では新しい方を預け、次の報告では古い方を預ける、という
+        //   食い違いが起きる（そして「パスワードが間違っています」に戻る）。
+        //   ★預ける値は1本にする。用意されていなければここで作る。
+        let pw = match PENDING_PW.lock().ok().and_then(|p| p.clone()) {
+            Some(p) => p,
+            None => {
+                rotate_fixed_password();
+                match PENDING_PW.lock().ok().and_then(|p| p.clone()) {
+                    Some(p) => p,
+                    None => {
+                        log::warn!("REMOHELP PRO agent: 固定パスワードを用意できませんでした");
+                        return;
+                    }
+                }
+            }
+        };
 
         // 🔴 自分の版を名乗る（2026-08-06 追加）。
         //
@@ -277,6 +328,11 @@ mod imp {
                     Config::set_option("agent-token".to_owned(), tok.to_owned());
                     // 成功したので待ち時間を解除する
                     NEXT_ENROLL_AT.store(0, std::sync::atomic::Ordering::Relaxed);
+                    // 登録で預けきったので、報告で送り直す必要はない。
+                    // 残したままだと、同じ値を毎回の報告に載せることになる。
+                    if let Ok(mut p) = PENDING_PW.lock() {
+                        *p = None;
+                    }
                     log::info!("REMOHELP PRO agent enrolled");
                 }
             }
@@ -392,17 +448,53 @@ mod imp {
         //   セーフモード中なら自動復帰の見張りを立てる。ここを飛ばすと
         //   顧客PCがセーフモードのまま戻らなくなる可能性がある。
         crate::safemode::on_service_start();
+        // 🔴 立ち上がるたびに固定パスワードを揃え直す（2026-08-07）。
+        //   これが「パスワードが間違っています」の直し。詳しくは
+        //   rotate_fixed_password() の説明を参照。
+        //   ⚠ 登録より前に置く。まだ登録していない端末なら、この値がそのまま
+        //     登録のときに預けられる（ensure_enrolled が読む場所と同じ）。
+        rotate_fixed_password();
         loop {
             ensure_enrolled().await;
             if let Some(token) = agent_token() {
                 // いまセーフモードかを毎回伝える。相談員の画面に出し、
                 // 「戻し忘れ」に気づけるようにするため。
-                let hb = post_status(
-                    "/api/agent/heartbeat",
-                    Some(&token),
-                    json!({ "safeMode": crate::safemode::is_safe_mode() }),
-                )
-                .await;
+                let mut body = json!({
+                    "safeMode": crate::safemode::is_safe_mode(),
+                    // 🔴 版を毎回名乗る（2026-08-07）。
+                    //   これまで版を送るのは登録のときだけだった。登録は端末の
+                    //   一生で1回きりなので、**入れ直しても画面の版が変わらない**。
+                    //   実機で 1.4.32 を入れても 1.4.29 と表示され続け、
+                    //   「新しい版が入ったのか」を誰も確かめられなかった。
+                    "appVersion": crate::VERSION,
+                });
+                // 🔴🔴 合言葉が食い違っていたら、名乗り直す（2026-08-07・自己修復）。
+                //
+                //   常駐は登録のときに固定パスワードを作ってサーバーへ預ける。
+                //   作り直すのは**登録の1回だけ**（登録済みなら ensure_enrolled は
+                //   先頭で戻る）。ところが端末側で固定パスワードが書き換わる道があり、
+                //   そうなると預かっている物と中身が**永久に食い違う**。
+                //   相談員が繋ぐと必ず「パスワードが間違っています」になり、
+                //   端末を消して入れ直す以外に直す道が無かった。
+                //   ★端末が今の合言葉を名乗り直せるようにする。何が壊しても、
+                //     次の報告で自然に揃う。
+                //   ⚠ 毎回は送らない。まだ届いていない分があるときだけ。
+                //     送る回数を増やすほど、値が流れる機会も増える。
+                let pending = PENDING_PW.lock().ok().and_then(|p| p.clone());
+                if let Some(ref pw) = pending {
+                    body["fixedPassword"] = json!(pw);
+                }
+                let hb = post_status("/api/agent/heartbeat", Some(&token), body).await;
+                // 🔴 受け取ってもらえたときだけ手放す。
+                //   届かなかったのに手放すと、端末とサーバーが食い違ったまま残る。
+                if pending.is_some() {
+                    if let Some((200, _)) = hb {
+                        if let Ok(mut p) = PENDING_PW.lock() {
+                            *p = None;
+                        }
+                        log::info!("REMOHELP PRO agent: 固定パスワードを預けました");
+                    }
+                }
                 // 🔴 断られたら、合鍵を捨てて登録からやり直す（2026-08-07）。
                 //   管理者が端末を削除すると、この端末の合鍵は無効になる。
                 //   これまでは 401 を捨てていたため、**永久に断られ続けたまま**
