@@ -42,19 +42,46 @@ mod imp {
         crate::hbbs_http::create_http_client_async_with_url(config::AGENT_API_BASE).await
     }
 
-    async fn post(path: &str, token: Option<&str>, body: Value) -> Option<Value> {
+    /// 応答コードつきで送る。
+    ///
+    /// 🔴🔴 これまで応答コードを**一度も見ていなかった**（2026-08-07 実機で判明）。
+    ///   管理者が管理画面から端末を削除すると、端末が持っている合鍵は無効になる。
+    ///   ところがエージェントは 401 を捨てていたため、**7秒ごとに断られ続けながら
+    ///   一生気づかない**。本番で heartbeat 1101回・poll 1099回がすべて 401 だった。
+    ///   画面にも記録にも何も出ないので、「入れたのに出てこない」にしか見えない。
+    async fn post_status(path: &str, token: Option<&str>, body: Value) -> Option<(u16, Value)> {
         let client = http().await;
         let mut req = client.post(url(path)).json(&body);
         if let Some(t) = token {
             req = req.header("x-agent-token", t);
         }
         match req.send().await {
-            Ok(resp) => resp.json::<Value>().await.ok(),
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let v = resp.json::<Value>().await.unwrap_or(Value::Null);
+                Some((status, v))
+            }
             Err(e) => {
                 log::debug!("agent post {} failed: {}", path, e);
                 None
             }
         }
+    }
+
+    async fn post(path: &str, token: Option<&str>, body: Value) -> Option<Value> {
+        post_status(path, token, body).await.map(|(_, v)| v)
+    }
+
+    /// 合鍵が通らなくなったときに、捨てて登録からやり直す。
+    ///
+    /// ⚠ 「通信できない」と「断られた」は別物。ここで消してよいのは**断られた**ときだけ。
+    ///   回線が切れているだけで消すと、繋がるたびに登録し直す端末になってしまう。
+    fn forget_agent_token(reason: &str) {
+        log::warn!(
+            "REMOHELP PRO agent: 端末の合鍵が通らなくなりました（{}）。登録からやり直します",
+            reason
+        );
+        Config::set_option("agent-token".to_owned(), String::new());
     }
 
     fn agent_token() -> Option<String> {
@@ -118,10 +145,38 @@ mod imp {
     }
 
     /// 初回のみ：永続PWを生成→ローカル設定→無人アクセス有効化→サーバー登録→端末トークン保存。
+    /// 次に登録を試してよい時刻（UNIX秒）。0 なら即試してよい。
+    ///
+    /// 🔴 登録できない状態（会社が無効・トークンが違う等）はいくらでもある。
+    ///   7秒ごとに叩き続けると、当社サーバーの記録が失敗で埋まり、
+    ///   本当に見たいものが見えなくなる。実際、上流APIを呼び続けて
+    ///   記録を埋めた前科がある（2026-08-05）。
+    static NEXT_ENROLL_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    /// 登録に失敗したあと、次に試すまで空ける時間（秒）。
+    const ENROLL_RETRY_SECS: u64 = 60;
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
     async fn ensure_enrolled() {
         if agent_token().is_some() {
             return;
         }
+        // 前回の登録が失敗していたら、少し待ってから試す
+        let now = now_secs();
+        if now < NEXT_ENROLL_AT.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        // 先に「次は60秒後」を置く。この先どこで抜けても叩き続けない。
+        // 成功したらこの関数の最後で 0 に戻す。
+        NEXT_ENROLL_AT.store(
+            now + ENROLL_RETRY_SECS,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let mut enroll = Config::get_option("enroll-token");
         if enroll.is_empty() {
             // 🔴 自己展開のランナーが渡してくる値を最優先で見る（2026-07-31 追加）。
@@ -220,10 +275,16 @@ mod imp {
             Some(v) if v.get("ok").and_then(Value::as_bool).unwrap_or(false) => {
                 if let Some(tok) = v.get("deviceToken").and_then(Value::as_str) {
                     Config::set_option("agent-token".to_owned(), tok.to_owned());
+                    // 成功したので待ち時間を解除する
+                    NEXT_ENROLL_AT.store(0, std::sync::atomic::Ordering::Relaxed);
                     log::info!("REMOHELP PRO agent enrolled");
                 }
             }
-            other => log::warn!("agent enroll failed: {:?}", other),
+            other => log::warn!(
+                "agent enroll failed: {:?}（{}秒後にもう一度試します）",
+                other,
+                ENROLL_RETRY_SECS
+            ),
         }
     }
 
@@ -336,13 +397,26 @@ mod imp {
             if let Some(token) = agent_token() {
                 // いまセーフモードかを毎回伝える。相談員の画面に出し、
                 // 「戻し忘れ」に気づけるようにするため。
-                let _ = post(
+                let hb = post_status(
                     "/api/agent/heartbeat",
                     Some(&token),
                     json!({ "safeMode": crate::safemode::is_safe_mode() }),
                 )
                 .await;
-                poll_and_execute(&token).await;
+                // 🔴 断られたら、合鍵を捨てて登録からやり直す（2026-08-07）。
+                //   管理者が端末を削除すると、この端末の合鍵は無効になる。
+                //   これまでは 401 を捨てていたため、**永久に断られ続けたまま**
+                //   一度も登録し直さなかった。実機で 1100 回連続の 401 を確認。
+                //   ⚠ 通信できない（None）ときは触らない。回線の問題で
+                //     登録し直す端末になってしまう。
+                match hb {
+                    Some((401, _)) | Some((403, _)) => {
+                        forget_agent_token("サーバーに拒否されました");
+                    }
+                    _ => {
+                        poll_and_execute(&token).await;
+                    }
+                }
             }
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
         }
