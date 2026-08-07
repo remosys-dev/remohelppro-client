@@ -156,14 +156,31 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     await _maybeAutoStart();
   }
 
-  /// この実行ファイルが常駐版か。
+  /// いま動いているこの実行ファイルが、常駐版か。
   ///
-  /// 判定は APP_NAME。常駐版は 1.4.29 から `remohelppro-agent` に分けてある
-  /// （CI が libs/hbb_common/src/config.rs の APP_NAME を焼き替える）。
-  /// ⚠ 新しい橋渡しを足さずに済むよう、既存の同期APIだけで判定する。
+  /// 判定は**自分の実行ファイルの場所**。常駐版は
+  /// `<Program Files>\remohelppro-agent\remohelppro-agent.exe` に入る
+  /// （src/platform/windows.rs:1343-1357 / 1415）。
+  ///
+  /// 🔴🔴 `mainGetAppNameSync()` を使ってはいけない（2026-08-08 実機で判明）。
+  ///   APP_NAME を返すと思い込んでいたが、中身は**固定の文字列**だった:
+  ///     flutter_ffi.rs:1116  SyncReturn("REMOHELP PRO".to_string())
+  ///   リブランドのときに、表示名を統一するため書き換えられている。
+  ///   ＝ 判定は**常に false** になり、常駐版でも固定パスワードを壊す処理が
+  ///     走り続けていた。build-30 の修正は一度も効いていなかった。
+  ///   ⚠ 名前を返す関数が「どの名前」を返すのかは、必ず中身を見て確かめる。
+  ///
+  /// ⚠ 「常駐が入っているか」（_residentInstalledByPath）と混同しない。
+  ///   あちらはPCに入っているかを見るので、常駐が入ったPCでワンタイム版を
+  ///   動かしても true になる。ここで使うと、**使い捨てのはずのワンタイム版が
+  ///   後始末をやめてしまう**（前回の合言葉が残る）。
+  ///   ここが見るのは「**自分自身**が常駐版か」。
   bool get _isResidentBuild {
+    if (!Platform.isWindows) return false;
     try {
-      return bind.mainGetAppNameSync().toLowerCase() == 'remohelppro-agent';
+      return Platform.resolvedExecutable
+          .toLowerCase()
+          .contains('remohelppro-agent');
     } catch (_) {
       return false;
     }

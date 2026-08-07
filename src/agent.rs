@@ -179,6 +179,20 @@ mod imp {
     ///   ★立ち上がるたびに揃え直せば、何が壊しても再起動で自分で治る。
     /// ⚠ 毎回変わるが困らない。相談員は繋ぐ直前にサーバーから受け取る。
     ///   むしろ、つけっぱなしの端末で同じ合言葉が残り続けない分だけ良い。
+    /// 固定パスワードを揃え直す間隔（秒）。
+    ///
+    /// 🔴 起動時に1回だけでは足りない（2026-08-08）。
+    ///   「起動時に揃えたのだから、あとは壊れない」という前提で作ったが、
+    ///   実際には**別の処理が上書きしていた**（常駐版の判定が効いておらず、
+    ///   窓が開くたびに壊されていた）。一度きりの修正は、前提が崩れた瞬間に
+    ///   **黙って壊れたまま**になる。
+    ///   ★見立てを当てにせず、**定期的に揃え直す**。
+    ///     何が壊しても、最長でこの間隔で自分で治る。
+    ///   ⚠ 相談員は繋ぐ直前にサーバーから受け取るので、値が変わっても困らない。
+    ///   ⚠ 接続中に変えても、その接続は切れない（照合は入るときの1回だけ）。
+    const PW_ROTATE_INTERVAL_SECS: u64 = 30 * 60;
+    static NEXT_ROTATE_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     fn rotate_fixed_password() {
         let pw = Config::get_auto_password(12);
         Config::set_permanent_password(&pw);
@@ -190,6 +204,10 @@ mod imp {
         if let Ok(mut p) = PENDING_PW.lock() {
             *p = Some(pw);
         }
+        NEXT_ROTATE_AT.store(
+            now_secs() + PW_ROTATE_INTERVAL_SECS,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         log::info!("REMOHELP PRO agent: 固定パスワードを作り直しました（サーバーへ預けます）");
     }
 
@@ -455,6 +473,14 @@ mod imp {
         //     登録のときに預けられる（ensure_enrolled が読む場所と同じ）。
         rotate_fixed_password();
         loop {
+            // 決めた間隔で揃え直す。何が壊しても、最長でこの間隔で自分で治る。
+            //   ⚠ まだ預けきっていない分があるうちは作り直さない。
+            //     作り直すたびに端末側だけ変わり、追いつけなくなる。
+            if PENDING_PW.lock().map(|p| p.is_none()).unwrap_or(false)
+                && now_secs() >= NEXT_ROTATE_AT.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                rotate_fixed_password();
+            }
             ensure_enrolled().await;
             if let Some(token) = agent_token() {
                 // いまセーフモードかを毎回伝える。相談員の画面に出し、
