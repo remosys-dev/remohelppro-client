@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -68,6 +69,17 @@ class _InstallPageBodyState extends State<_InstallPageBody>
   final RxBool printer = true.obs;
   final RxBool showProgress = false.obs;
   final RxBool btnEnabled = true.obs;
+  /// インストールを始めてから十分な時間が経ったか。
+  ///
+  /// 🔴 押したあと、画面が**何も言わなくなる**（2026-08-07 ご指摘）。
+  ///   細い進捗バーが出るだけで、終わったのかどうか分からない。
+  ///   お客様は「固まった」と思って窓を閉じるか、待ち続ける。
+  ///   ⚠ インストールは**別の（管理者権限の）プロセス**が行うので、
+  ///     この画面から「終わった」を正確には知れない。
+  ///     だから時間で区切って、**やることを伝える**形にする。
+  ///     黙っているより、目安を出すほうがよい。
+  final RxBool installDone = false.obs;
+  Timer? _doneTimer;
 
   // todo move to theme.
   final buttonStyle = OutlinedButton.styleFrom(
@@ -91,6 +103,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
 
   @override
   void dispose() {
+    _doneTimer?.cancel();
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -209,8 +222,36 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                 children: [
                   Expanded(
                     // NOT use Offstage to wrap LinearProgressIndicator
+                    // 🔴 進捗バーだけでは何も伝わらない（2026-08-07 ご指摘）。
+                    //   「終わったのか、固まったのか」が分からず、
+                    //   お客様は窓を閉じるか待ち続けることになる。
+                    //   ★いま何が起きていて、次に何をすればよいかを書く。
                     child: Obx(() => showProgress.value
-                        ? LinearProgressIndicator().marginOnly(right: 10)
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (!installDone.value)
+                                LinearProgressIndicator()
+                                    .marginOnly(right: 10, bottom: 6),
+                              Text(
+                                installDone.value
+                                    ? '✅ インストールが完了しました。この画面は閉じて構いません。'
+                                    : 'インストールしています。しばらくお待ちください（30秒ほど）。\n'
+                                        'この画面は閉じないでください。',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.4,
+                                  fontWeight: installDone.value
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  color: installDone.value
+                                      ? const Color(0xFF15803D)
+                                      : null,
+                                ),
+                              ).marginOnly(right: 10),
+                            ],
+                          )
                         : Offstage()),
                   ),
                   Obx(
@@ -259,6 +300,18 @@ class _InstallPageBodyState extends State<_InstallPageBody>
       if (desktopicon.value) args += ' desktopicon';
       if (printer.value) args += ' printer';
       bind.installInstallMe(options: args, path: controller.text);
+      // 🔴 終わったことを伝える（2026-08-07 ご指摘）。
+      //   インストールは管理者権限の別プロセスが行うので、この画面からは
+      //   正確な完了を知れない。だから時間で区切って案内する。
+      //   ⚠ 30秒。実測でおおむね収まる長さ。短すぎると「完了」と出したあとに
+      //     まだ動いていることになり、いちばん質が悪い。
+      //   ⚠ 「閉じてよい」まで書く。完了だけ伝えても、次に何をすればよいか
+      //     分からなければ、お客様はやはり止まってしまう。
+      _doneTimer?.cancel();
+      _doneTimer = Timer(const Duration(seconds: 30), () {
+        installDone.value = true;
+        btnEnabled.value = true; // 「キャンセル」＝窓を閉じる を押せるように戻す
+      });
     }
 
     do_install();

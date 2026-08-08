@@ -419,12 +419,25 @@ mod imp {
         //   実機を見ても入っている物が特定できなかった。
         //   ★端末自身に名乗らせるのがいちばん確か。
         //   これで当社の画面から「どの版が入っているか」が分かる。
+        // 🔴 このPCの名前を名乗る（2026-08-08）。
+        //
+        //   名乗らないと、サーバーは接続番号の末尾から `PC-8689` のような
+        //   仮の名前を作る（register/route.ts:115）。
+        //   ★管理者から見て**どこのPCなのか全く分からない**。
+        //   実際「pc-7777 ではどこのPCなのか分からない」というご指摘を受けた。
+        //   ⚠ 人が付け直せる仕組み（名前の変更）とは別に、まずこれを送る。
+        //     最初から意味のある名前が付いていれば、直す手間そのものが減る。
+        //   ⚠ 取れなければ送らない。空を送るとサーバー側の既定を上書きしてしまう。
+        let host = crate::common::hostname();
         let mut body = json!({
             "enrollToken": enroll,
             "rustdeskId": id,
             "fixedPassword": pw,
             "appVersion": crate::VERSION,
         });
+        if !host.is_empty() && host != "localhost" {
+            body["name"] = json!(host);
+        }
         if let Some(mac) = primary_mac() {
             body["macAddress"] = json!(mac);
         }
