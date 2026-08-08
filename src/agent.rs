@@ -38,8 +38,35 @@ mod imp {
         format!("{}{}", config::AGENT_API_BASE, path)
     }
 
+    /// 管理サーバーとの通信に使う、**使い回しの**HTTPクライアント。
+    ///
+    /// 🔴🔴 毎回作ってはいけない（2026-08-08 負荷試算で判明）。
+    ///
+    ///   元は post のたびに新しいクライアントを作っていた。reqwest の
+    ///   クライアントは接続の使い回し（コネクションプール）を内側に持つので、
+    ///   毎回作ると**接続を使い回せない**。
+    ///   ＝ 7秒ごとに TCP 接続も TLS の握手もゼロからやり直していた。
+    ///
+    ///   ★中身のデータは60バイト程度なのに、証明書のやり取りだけで
+    ///     1回 3〜4KB かかる。**通信の 99% が「つなぎ直しの費用」**だった。
+    ///     試算で 1台あたり月 3.6GB。据置き回線なら問題にならないが、
+    ///     モバイル回線や従量制のお客様では実害になる。
+    ///     使い回せば **7分の1（月0.5GB）** になる。
+    ///
+    /// ⚠ 一度作ったら差し替えない。途中でプロキシ設定を変えた場合は
+    ///   サービスを再起動するまで反映されない。常駐は入れっぱなしで使う物なので、
+    ///   通信量の削減を優先する。
+    /// ⚠ Client の clone は中身を共有するだけで安い（内部が Arc）。
+    static HTTP_CLIENT: tokio::sync::OnceCell<reqwest::Client> =
+        tokio::sync::OnceCell::const_new();
+
     async fn http() -> reqwest::Client {
-        crate::hbbs_http::create_http_client_async_with_url(config::AGENT_API_BASE).await
+        HTTP_CLIENT
+            .get_or_init(|| async {
+                crate::hbbs_http::create_http_client_async_with_url(config::AGENT_API_BASE).await
+            })
+            .await
+            .clone()
     }
 
     /// 応答コードつきで送る。
