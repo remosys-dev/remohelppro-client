@@ -143,6 +143,17 @@ impl RendezvousMediator {
             {
                 let mut futs = Vec::new();
                 let servers = Config::get_rendezvous_servers();
+                // 🔴 どの道で試したかを毎回残す（2026-08-08）。
+                //   「再起動すると繋がらない」を4日追ったが、記録に
+                //   **独自ポートで試したのか 443 で試したのか**が無く、
+                //   切り替えが起きていたかどうかを後から確かめられなかった。
+                //   1行あれば、次の1回で分かる。
+                log::info!(
+                    "RL: 中継サーバーへ登録を試みます 経路={} 失敗の連続={} 相手={:?}",
+                    if config::use_ws() { "websocket(443)" } else { "独自ポート" },
+                    consecutive_failures,
+                    servers
+                );
                 SHOULD_EXIT.store(false, Ordering::SeqCst);
                 MANUAL_RESTARTED.store(false, Ordering::SeqCst);
                 for host in servers.clone() {
@@ -166,9 +177,10 @@ impl RendezvousMediator {
                 }
                 join_all(futs).await;
 
-                // ── WebSocket(443) への自動フォールバック ──────────────
-                //   独自ポートで 2 回続けて駄目なら 443 に切り替える。
-                //   企業ネットワークは 80/443 しか開いていないことが多いため。
+                // ── 経路の切り替え（独自ポート ⇄ WebSocket 443）──────────
+                //   2回続けて駄目なら、もう一方の経路に切り替えて試す。
+                //   企業ネットワークは 80/443 しか開いていないことが多いので 443 が要り、
+                //   443 が使えない環境もあるので**戻れる**必要がある（＝片道にしない）。
                 //   設定で明示的に WS を選んでいる場合は何もしない（既にWSなので）。
                 if config::option2bool(
                     config::keys::OPTION_ALLOW_WEBSOCKET,
@@ -186,12 +198,34 @@ impl RendezvousMediator {
                     }
                     consecutive_failures = 0;
                 } else {
+                    // 🔴🔴 切り替えは**片道にしない**（2026-08-08 Codex の指摘で確定）。
+                    //
+                    //   元は `consecutive_failures >= 2 && !is_ws_fallback()` だった。
+                    //   一度 WS に移ると、この条件は**永久に偽**になる。
+                    //   ＝ WS でも繋がらない環境では、独自ポートに戻る道が無く、
+                    //     そのプロセスが生きている限り繋がらないままになる。
+                    //
+                    //   ★これが「再起動すると繋がらない／サービスを手で再起動すると
+                    //     必ず直る」の説明になりうる:
+                    //     ・起動直後はネットワークが整っておらず、失敗が**数秒で**返る
+                    //       （DNS 11001 で待ち時間を3秒に詰めているため）。
+                    //       すると `elapsed < 30` となり、2回で WS に落ちる。
+                    //     ・WS_FALLBACK はプロセス内の値なので、**サービスを再起動すると
+                    //       独自ポートに戻る**＝手で再起動すると必ず直る。
+                    //
+                    //   ⚠ 「WSをやめて独自ポートに固定」では直らない。塞がれた環境の
+                    //     お客様が繋がらなくなる。**両方を代わる代わる試す**のが正しい。
                     consecutive_failures = consecutive_failures.saturating_add(1);
-                    if consecutive_failures >= 2 && !config::is_ws_fallback() {
+                    if consecutive_failures >= 2 {
+                        let to_ws = !config::is_ws_fallback();
                         log::info!(
-                            "rendezvous failed {consecutive_failures} times on native ports; falling back to websocket(443)"
+                            "rendezvous failed {consecutive_failures} times; switching transport to {}",
+                            if to_ws { "websocket(443)" } else { "native ports" }
                         );
-                        config::set_ws_fallback(true);
+                        config::set_ws_fallback(to_ws);
+                        // 切り替えたら数え直す。数え続けると、次の切り替えが
+                        // 1回の失敗で起きてしまい、行ったり来たりが速くなりすぎる。
+                        consecutive_failures = 0;
                     }
                 }
             } else {
