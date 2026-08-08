@@ -460,6 +460,53 @@ mod imp {
         .await;
     }
 
+    /// 新しい版を落として、自分を入れ替える。
+    ///
+    /// 🔴 入手先は当社のドメインだけ受け付ける。ここを緩めると、
+    ///   記録を書き換えられたときに任意のプログラムを全台へ配れることになる。
+    ///   無人アクセスの端末なので、破られたときの被害が最大になる。
+    ///   （サーバー側でも同じ確認をしている。**両方で見る**。）
+    ///
+    /// ⚠ 名前は `.install.exe` で終わらせる。自己展開のランナーは名前も見るため。
+    ///   （1.4.32 以降は焼き印でも判定するので二重の備え）
+    /// ⚠ `--silent-install` で起動する。画面を出さずに入れ替える。
+    /// ⚠ 落とし終わるまで何もしない。中途半端なファイルを実行すると、
+    ///   **入れ替えに失敗したうえに元も壊れる**。
+    async fn self_update(url: &str) -> Result<(), String> {
+        if !url.starts_with("https://svr.remohelppro.jp/") {
+            return Err(format!("入手先が当社のものではありません: {url}"));
+        }
+        let client = http().await;
+        let resp = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("落とせませんでした: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("落とせませんでした: HTTP {}", resp.status()));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("落とせませんでした: {e}"))?;
+        // 常駐版は 30MB 前後。極端に小さいものは、エラーページ等を掴んでいる。
+        if bytes.len() < 5_000_000 {
+            return Err(format!("落とした物が小さすぎます: {} バイト", bytes.len()));
+        }
+        let dir = std::env::temp_dir();
+        let path = dir.join("remohelppro-agent-update.install.exe");
+        std::fs::write(&path, &bytes).map_err(|e| format!("置けませんでした: {e}"))?;
+        log::info!(
+            "REMOHELP PRO agent: 新しい版を置きました（{} バイト）。入れ替えます",
+            bytes.len()
+        );
+        std::process::Command::new(&path)
+            .arg("--silent-install")
+            .spawn()
+            .map_err(|e| format!("起動できませんでした: {e}"))?;
+        Ok(())
+    }
+
     async fn poll_and_execute(token: &str) {
         let v = match post("/api/agent/poll", Some(token), json!({})).await {
             Some(v) => v,
@@ -492,6 +539,36 @@ mod imp {
                 "power_off" => {
                     report(token, id, "done").await;
                     let _ = system_shutdown::shutdown();
+                }
+                // 🔴 自分を新しい版に入れ替える（2026-08-08）。
+                //
+                //   直しが続く段階で、そのたびにお客様へ入れ直しをお願いするのは
+                //   現実的でない（2日で 1.4.29 → 1.4.38 まで動いた）。
+                //   ⚠ 押すのは**相談員**（ユーザー判断・案①）。勝手には更新しない。
+                //     人がその場にいるので、戻ってこなければすぐ気づける。
+                //   ⚠ 版と入手先は**サーバーが決める**。端末に決めさせない。
+                //     悪い版を出しても、配布側を1か所直せば全台が戻る。
+                //   ⚠ 入れ替えると自分が止まるので、**先に done を報告する**。
+                //     報告できないまま入れ替わると、指示が残り続けて何度も走る。
+                "self_update" => {
+                    let url = cmd.pointer("/update/url").and_then(Value::as_str);
+                    let ver = cmd
+                        .pointer("/update/version")
+                        .and_then(Value::as_str)
+                        .unwrap_or("?");
+                    match url {
+                        Some(u) => {
+                            log::info!("REMOHELP PRO agent: 自己更新を開始します ({ver})");
+                            report(token, id, "done").await;
+                            if let Err(e) = self_update(u).await {
+                                log::error!("REMOHELP PRO agent: 自己更新に失敗しました: {e}");
+                            }
+                        }
+                        None => {
+                            log::warn!("REMOHELP PRO agent: 更新の入手先がありません");
+                            report(token, id, "failed").await;
+                        }
+                    }
                 }
                 // セーフモードで再起動する。
                 //   🔴 設定に成功したときだけ再起動する。失敗したまま再起動すると
