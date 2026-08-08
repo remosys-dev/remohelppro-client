@@ -1366,6 +1366,50 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ),
+            // 🔴🔴 いま実際に操作されているかを、お客様の画面に出す
+            //   （2026-08-08 ご指摘）。
+            //
+            //   「接続済み」は**準備ができた**という意味でしかない。
+            //   ところがお客様から見ると、繋がっているのか、誰かが今この瞬間
+            //   自分の画面を見ているのかが区別できない。
+            //   ★見られている最中は、そうと分かるように出す。
+            //     これは機能ではなく**約束**にあたる。黙って見ないこと。
+            //
+            //   ⚠ 判定は「実際に繋がっている相手が居るか」。
+            //     server_model が持っている接続中の一覧を見る。
+            //     許可した／コードを入れた、では足りない（まだ見られていない）。
+            //   ⚠ 1秒ごとの時計(_clock)で作り直されるので、
+            //     つながった1秒以内に出て、切れた1秒以内に消える。
+            if (gFFI.serverModel.clients.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF1F1),
+                  border: Border.all(color: const Color(0xFFF3C9C9)),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Column(
+                  children: [
+                    const Text('🔴 ただいま遠隔サポート中です',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: _danger)),
+                    const SizedBox(height: 3),
+                    Text(
+                      '担当者がこのパソコンの画面を見ています。'
+                      '\nやめるときは下の「終了する」を押してください。',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: Color(0xFF9A3B3B), height: 1.45),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Container(
               decoration: BoxDecoration(
