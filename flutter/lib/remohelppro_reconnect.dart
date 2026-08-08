@@ -298,13 +298,44 @@ Future<void> prepareRebootResume() async {
     //     そちらが呼ばれて、判定が常に「見つからない」になる。
     //     （実際、検証中に他の find が呼ばれて誤判定した）
     const findExe = r'%SystemRoot%\System32\find.exe';
-    const taskChk =
-        'tasklist /FI "IMAGENAME eq remohelppro.exe" | $findExe /I "remohelppro.exe" >nul';
+
+    // 🔴🔴 探す名前を決め打ちにしない（2026-08-08 実機で確定）。
+    //
+    //   ここは `remohelppro.exe` を探していた。ところがお客様用のアプリは
+    //   **`remohelppro-support.exe`** という別の名前で配っている
+    //   （常駐の taskkill に巻き込まれないよう名前を分けた）。
+    //   ＝ 探しても**絶対に見つからない** → 毎回「起動していない」と判定 →
+    //     20秒おきに3回とも起動する。
+    //
+    //   実機で見つかった状態（お客様PC・再起動後）:
+    //     remohelppro-resume  ×3   ← この命令書が3回起こした
+    //     remohelppro-support ×4   ← 各 resume が展開して起動した
+    //   RustDesk 系は1台に1つの接続番号しか持てないので、**4本が奪い合って
+    //   どれも中継サーバーに登録できない**。画面には「接続できません」としか出ない。
+    //   常駐まで巻き添えで繋がらなくなり、8/4 から追っていた
+    //   「再起動すると繋がらない／サービスを手で再起動すると直る」の正体だった。
+    //
+    //   ★名前から機能を推測しない。**いま自分が動いている実行ファイルの名前**を
+    //     そのまま使う。名前を変えても、ここが追随する。
+    //   ⚠ 控え（remohelppro-resume.exe）も一緒に見る。前の復帰がまだ動いて
+    //     いるなら、重ねて起こしてはいけない。
+    final myExe = Platform.resolvedExecutable.split(sep).last;
+    final resumeName = dst.path.replaceAll('/', sep).split(sep).last;
+    final watchNames = <String>{myExe, resumeName, 'remohelppro.exe'}
+        .where((n) => n.isNotEmpty)
+        .toList();
+
+    // どれか1つでも動いていれば「起動済み」。
+    String runningCheck(String label) => watchNames
+        .map((n) => [
+              'tasklist /FI "IMAGENAME eq $n" | $findExe /I "$n" >nul',
+              'if not errorlevel 1 goto :$label',
+            ].join('\r\n'))
+        .join('\r\n');
 
     String tryOnce(String n) => [
           'ping -n 21 127.0.0.1 >nul',
-          taskChk,
-          'if not errorlevel 1 goto :running',
+          runningCheck('running'),
           'echo [%date% %time%] try $n >> "$logPath"',
           'start "" "$exePath"',
         ].join('\r\n');
@@ -316,9 +347,15 @@ Future<void> prepareRebootResume() async {
       tryOnce('2'),
       tryOnce('3'),
       'ping -n 11 127.0.0.1 >nul',
-      taskChk,
-      'if errorlevel 1 (echo [%date% %time%] FAILED >> "$logPath") '
-          'else (echo [%date% %time%] OK >> "$logPath")',
+      // 最後の見届け。どれか動いていれば OK、1つも無ければ FAILED。
+      //   ⚠ 記録に**探した名前を残す**。今回のように「探す名前が違っていた」
+      //     ときは、これが無いと FAILED の理由に一生辿り着けない。
+      'echo [%date% %time%] watching ${watchNames.join(" ")} >> "$logPath"',
+      runningCheck('ok'),
+      'echo [%date% %time%] FAILED >> "$logPath"',
+      'goto :end',
+      ':ok',
+      'echo [%date% %time%] OK >> "$logPath"',
       'goto :end',
       ':running',
       'echo [%date% %time%] ALREADY-RUNNING >> "$logPath"',
