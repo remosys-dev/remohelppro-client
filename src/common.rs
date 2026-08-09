@@ -952,7 +952,28 @@ pub fn check_software_update() {
 // No need to check `danger_accept_invalid_cert` for now.
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
+#[allow(unreachable_code)]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    // 🔴🔴 上流（RustDesk 社）への版の確認を止める（2026-08-10 点検で判明）。
+    //
+    //   ここは `https://api.rustdesk.com/version/latest` へ POST し、
+    //   本文に **端末の指紋**（CPUの型番・コア数・メモリ量・platform・id・addr から作る値）
+    //   と OS・版・CPU種別を載せる。
+    //   ＝ **お客様のPCから、当社と無関係の第三者へ、端末を識別できる情報が
+    //     定期的に送られる**（常駐は起動30秒後と1日ごと）。
+    //
+    //   ⚠ 悪意のある仕掛けではなく、本家の更新確認機能。
+    //     しかし当社は本家の更新を使わない（自前で配布している）ので**用が無い**。
+    //     お客様にも説明していない。遠隔サポートという商売で、知らない先へ
+    //     識別子が飛ぶのは説明できない。
+    //
+    //   ★入口が2つある（UIの「更新を確認」と、常駐の自動更新スレッド）ので、
+    //     設定で止めるのではなく**ここで塞ぐ**。どの経路からも出なくなる。
+    //   ⚠ 当社の管理サーバー（AGENT_API_BASE）とは別物。そちらは使う。
+    //   ⚠ 常駐の版上げは、当社の仕組み（相談員が押す self_update）で行う。
+    //     この関数を復活させる必要は無い。
+    log::debug!("RL: 上流への版の確認は行いません（意図的に停止）");
+    return Ok(());
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
     let proxy_conf = Config::get_socks();
@@ -1404,7 +1425,50 @@ where
 ///   falls back to TCP proxy if WS is off.
 /// - 4xx responses are returned as-is (server is reachable, business logic error).
 /// - If fallback also fails, returns the original HTTP result (text or error).
+/// 通信してよい相手か。**当社のドメインと自分自身だけ**を許す。
+///
+/// 🔴🔴 第三者への通信を、仕組みとして禁じる（2026-08-10 ユーザー指示）。
+///
+///   お客様のPCに入れて、画面と操作を預かる商売である。
+///   「知らない先へ何かが飛んでいないか」に**絶対に**答えられなければならない。
+///   宛先を1か所ずつ潰す方式は、見落としが必ず出るし、上流の更新で復活する。
+///   ★**出口に関所を置く。**ここを通らない HTTP は作れない。
+///
+///   実際に塞いだ例:
+///     ・`api.rustdesk.com/version/latest`（端末の指紋を送る版の確認）
+///     ・`api.telegram.org`（本家の2段階認証。設定すれば有効になってしまう）
+///     ・`admin.rustdesk.com`（上流の管理API。既定の組み立て先）
+///
+/// ⚠ 増やすときは**理由を書いて**増やすこと。安易に足さない。
+/// ⚠ これは HTTP だけの関所。中継サーバー(21116)は別経路なので、
+///   そちらは `RENDEZVOUS_SERVERS`（rd.remohelppro.jp のみ）で担保している。
+pub fn rl_is_allowed_url(url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    // 宛先のホスト名だけを取り出す（scheme とパスを外す）
+    let rest = u.split("://").nth(1).unwrap_or(&u);
+    let host = rest.split('/').next().unwrap_or("");
+    let host = host.split('@').last().unwrap_or(host); // 認証情報付きの形も剥がす
+    let host = host.split(':').next().unwrap_or(host); // ポートを外す
+    host == "remohelppro.jp"
+        || host.ends_with(".remohelppro.jp")
+        || host == "3410.jp"
+        || host.ends_with(".3410.jp")
+        || host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+}
+
+fn rl_reject_third_party(url: &str) -> ResultType<()> {
+    if rl_is_allowed_url(url) {
+        return Ok(());
+    }
+    // ⚠ 宛先はそのまま記録に残す。黙って落とすと、後から追えない。
+    log::warn!("RL: 当社以外への通信を止めました: {}", url);
+    hbb_common::bail!("blocked: third-party endpoint");
+}
+
 pub async fn post_request(url: String, body: String, header: &str) -> ResultType<String> {
+    rl_reject_third_party(&url)?;
     with_tcp_proxy_fallback(
         &url,
         "POST",
@@ -1515,6 +1579,9 @@ async fn get_http_response_async(
     danger_accept_invalid_cert: Option<bool>,
     original_danger_accept_invalid_cert: Option<bool>,
 ) -> ResultType<reqwest::Response> {
+    // 関所（2026-08-10）。post_request 以外の経路もここを通る。
+    //   ⚠ 片方だけに置くと、もう片方から出ていける。両方に置くこと。
+    rl_reject_third_party(url)?;
     let http_client = create_http_client_async(
         tls_type.unwrap_or(TlsType::Rustls),
         danger_accept_invalid_cert.unwrap_or(false),
