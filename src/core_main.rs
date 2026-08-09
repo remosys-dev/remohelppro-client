@@ -62,6 +62,21 @@ pub fn core_main() -> Option<Vec<String>> {
         return None;
     }
     crate::load_custom_client();
+    // 🔴 接続は**別ウィンドウ**を既定にする（2026-08-09 ご要望）。
+    //
+    //   RustDesk の既定は「1つの窓にタブで足していく」。相談員が2台3台と
+    //   同時に見るときに、**並べて置けない**のが不便だというご指摘。
+    //   常駐でもワンタイムでも同じ画面なので、既定を変えれば両方に効く。
+    //
+    //   ⚠ 固定はしない。DEFAULT_LOCAL_SETTINGS は「利用者が何も選んでいないときの値」で、
+    //     設定画面の「Open connection in new tab」で戻せる（そちらが優先される）。
+    //     好みが分かれる項目を、こちらで決め打ちにしない。
+    //   ⚠ load_custom_client() の**後**に置くこと。あちらも同じ表へ書くので、
+    //     先に置くと配布設定に上書きされる。
+    config::DEFAULT_LOCAL_SETTINGS.write().unwrap().insert(
+        config::keys::OPTION_ENABLE_OPEN_NEW_CONNECTIONS_IN_TABS.to_owned(),
+        "N".to_owned(),
+    );
     // 🔴🔴 常駐の登録トークンを、**見えた瞬間に設定へ残す**（2026-08-04 実機調査）。
     //
     //   これまで RL_ENROLL_TOKEN を読んでいたのは agent.rs の中だけだった。
