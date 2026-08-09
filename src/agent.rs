@@ -133,6 +133,53 @@ mod imp {
         None
     }
 
+    /// 電源を落とす／再起動する前に、お客様に見せる猶予（秒）。
+    ///
+    /// 🔴 0 にしない。常駐PCの前に人が座っていることがある（サーバーとは限らない）。
+    ///   何の予告も無く落ちると、書きかけの書類が消えたと受け取られる。
+    /// 🔴 長くもしない。相談員は「落ちたか」を見届ける必要がある。
+    ///   30秒なら、保存する時間はあり、待つのも苦にならない。
+    const POWER_GRACE_SECS: u32 = 30;
+
+    /// 電源操作を Windows に**予約**する。受理されれば Ok（実際に落ちるのは猶予のあと）。
+    ///
+    /// 🔴🔴 `system_shutdown::shutdown()` を使ってはいけない（2026-08-09 実機で判明）。
+    ///   あれは `ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCEIFHUNG)` で、**強制ではない**。
+    ///   終了を拒むアプリが1つでもあると止まる。Win11 で落ちず、Win10 で落ちたのは
+    ///   単に塞ぐものが有ったか無かったかの違いだった。
+    ///
+    ///   ★`InitiateSystemShutdownW`（= `*_with_message`）が正しい。
+    ///     ・サービス（session 0）から**PC全体**を落とせる
+    ///     ・お客様の画面に**理由と残り時間**が出る
+    ///     ・受理／拒否がその場で戻るので、**嘘の「成功」を報告せずに済む**
+    ///
+    /// ⚠ 猶予のあとはアプリを強制終了する（第3引数 true）。
+    ///   ここを false にすると、また「頼んだのに落ちない」に戻る。
+    ///   30秒の予告を出したうえで落とす、が落としどころ。
+    #[cfg(windows)]
+    fn request_power(reboot: bool) -> std::io::Result<()> {
+        let msg = if reboot {
+            "REMOHELP PRO の遠隔サポートにより、まもなく再起動します。作業中のものは保存してください。"
+        } else {
+            "REMOHELP PRO の遠隔サポートにより、まもなく電源を切ります。作業中のものは保存してください。"
+        };
+        if reboot {
+            system_shutdown::reboot_with_message(msg, POWER_GRACE_SECS, true)
+        } else {
+            system_shutdown::shutdown_with_message(msg, POWER_GRACE_SECS, true)
+        }
+    }
+
+    /// Windows 以外は従来どおり（常駐は今のところ Windows 専用）。
+    #[cfg(not(windows))]
+    fn request_power(reboot: bool) -> std::io::Result<()> {
+        if reboot {
+            system_shutdown::reboot()
+        } else {
+            system_shutdown::shutdown()
+        }
+    }
+
     /// 起こし役として、対象 MAC へマジックパケットを送出（全インターフェースのブロードキャストへ）。
     fn send_wol_to_mac(mac: &str) {
         let interfaces = default_net::get_interfaces();
@@ -544,15 +591,31 @@ mod imp {
                         report(token, id, "failed").await;
                     }
                 }
-                "power_restart" => {
-                    // 再起動すると報告を送れなくなるため、先に done を報告してから実行
-                    report(token, id, "done").await;
-                    let _ = system_shutdown::reboot();
-                }
-                "power_off" => {
-                    report(token, id, "done").await;
-                    let _ = system_shutdown::shutdown();
-                }
+                // 🔴🔴 電源操作は「頼んだ結果」を見てから報告する（2026-08-09 実機で判明）。
+                //
+                //   元は **実行する前に done を報告し、実行結果を `let _ =` で捨てて**いた。
+                //   ＝ コンソールには必ず「成功」と出る。落ちたかどうかとは無関係。
+                //   実機で林メインノート(Win11)に power_off を**4回**送り、
+                //   **4回とも「成功」なのに一度も落ちなかった**。
+                //   運用で最も危ない種類の嘘（画面が「できた」と言うのに、できていない）。
+                //
+                //   ★報告の順番も直す。`InitiateSystemShutdownW` は
+                //     **予約して即座に戻る**ので、戻り値を見てから報告できる。
+                //     受理されたら done、断られたら failed。
+                "power_restart" => match request_power(true) {
+                    Ok(_) => report(token, id, "done").await,
+                    Err(e) => {
+                        log::error!("REMOHELP PRO agent: 再起動を頼めませんでした: {e}");
+                        report(token, id, "failed").await;
+                    }
+                },
+                "power_off" => match request_power(false) {
+                    Ok(_) => report(token, id, "done").await,
+                    Err(e) => {
+                        log::error!("REMOHELP PRO agent: 電源オフを頼めませんでした: {e}");
+                        report(token, id, "failed").await;
+                    }
+                },
                 // 🔴 自分を新しい版に入れ替える（2026-08-08）。
                 //
                 //   直しが続く段階で、そのたびにお客様へ入れ直しをお願いするのは
@@ -594,8 +657,14 @@ mod imp {
                         .unwrap_or(crate::safemode::DEFAULT_DEADLINE_MINUTES);
                     match crate::safemode::arm(minutes) {
                         Ok(_) => {
-                            report(token, id, "done").await;
-                            let _ = system_shutdown::reboot();
+                            // 再起動も「頼めたか」を見てから報告する（2026-08-09）。
+                            match request_power(true) {
+                                Ok(_) => report(token, id, "done").await,
+                                Err(e) => {
+                                    log::error!("safemode reboot failed: {e}");
+                                    report(token, id, "failed").await;
+                                }
+                            }
                         }
                         Err(e) => {
                             log::error!("safemode arm failed: {}", e);
@@ -607,10 +676,13 @@ mod imp {
                 //   ここが失敗すると顧客PCがセーフモードのまま残るので、
                 //   失敗しても諦めず、見張り（safemode::watch）が期限で再度戻す。
                 "safemode_exit" => match crate::safemode::disarm() {
-                    Ok(_) => {
-                        report(token, id, "done").await;
-                        let _ = system_shutdown::reboot();
-                    }
+                    Ok(_) => match request_power(true) {
+                        Ok(_) => report(token, id, "done").await,
+                        Err(e) => {
+                            log::error!("safemode exit reboot failed: {e}");
+                            report(token, id, "failed").await;
+                        }
+                    },
                     Err(e) => {
                         log::error!("safemode disarm failed: {}", e);
                         report(token, id, "failed").await;
