@@ -646,6 +646,19 @@ impl Connection {
                             conn.on_close("connection manager", true).await;
                             break;
                         }
+                        // 🔴 セッションの切り替えで閉じる（＝サポートは続いている）。
+                        //   お客様が Windows にログインすると、サービスが新しい
+                        //   セッションで --server を立て直すため、古い方はここへ来る。
+                        //   ★「終了した」と伝えてはいけない。相談員の画面が閉じてしまう。
+                        //     専用の合図を送り、ビュアー側は繋ぎ直しを試みる。
+                        #[cfg(windows)]
+                        ipc::Data::CloseForSessionSwitch => {
+                            conn.chat_unanswered = false;
+                            conn.file_transferred = false;
+                            conn.send_close_reason_no_retry("RL_SESSION_SWITCH").await;
+                            conn.on_close("session switch", true).await;
+                            break;
+                        }
                         ipc::Data::CmErr(e) => {
                             if e != "expected" {
                                 // cm closed before connection

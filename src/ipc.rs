@@ -313,6 +313,17 @@ pub enum Data {
     MouseMoveTime(i64),
     Authorize,
     Close,
+    /// Windows のセッションが切り替わるので閉じる（＝サポートは続いている）。
+    ///
+    /// 🔴 これが無いと「お客様が終了した」と区別できない（2026-08-09 実機で判明）。
+    ///   お客様が Windows にログインすると使用中のセッションが変わり、
+    ///   サービスは新しいセッションで --server を立て直すため、古い方に Close を送る。
+    ///   ところが受けた側は理由を知らないので、相談員へ
+    ///   「Closed manually by the peer」＝**お客様が終了した**と伝えていた。
+    ///   相談員の画面には「サポートを終了しました」と出て2秒で閉じる。
+    ///   実際にはサポートは続いているのに、である。
+    #[cfg(windows)]
+    CloseForSessionSwitch,
     #[cfg(windows)]
     SAS,
     UserSid(Option<u32>),

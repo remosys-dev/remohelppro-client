@@ -794,7 +794,10 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
 async fn launch_server(session_id: DWORD, close_first: bool) -> ResultType<HANDLE> {
     if close_first {
         // in case started some elsewhere
-        send_close_async("").await.ok();
+        // 🔴 ここで閉じる理由は**セッションの切り替え**であって、サポートの終了ではない
+        //   （2026-08-09 実機で判明）。お客様が Windows にログインした瞬間がこれ。
+        //   通常の Close を送ると、相談員の画面が「サポートを終了しました」で閉じる。
+        send_close_for_session_switch_async("").await.ok();
     }
     let cmd = format!(
         "\"{}\" --server",
@@ -906,6 +909,20 @@ pub fn run_exe_in_session(
 #[tokio::main(flavor = "current_thread")]
 async fn send_close(postfix: &str) -> ResultType<()> {
     send_close_async(postfix).await
+}
+
+/// セッション切り替えのために閉じる（サポートは続いている）。
+///
+/// 🔴 通常の Close と分けること（2026-08-09）。
+///   同じ Close を使うと、相談員の画面に「サポートを終了しました」と出て
+///   2秒で閉じてしまう。お客様がログインしただけなのに、である。
+async fn send_close_for_session_switch_async(postfix: &str) -> ResultType<()> {
+    ipc::connect(1000, postfix)
+        .await?
+        .send(&ipc::Data::CloseForSessionSwitch)
+        .await?;
+    sleep(0.1).await;
+    Ok(())
 }
 
 async fn send_close_async(postfix: &str) -> ResultType<()> {

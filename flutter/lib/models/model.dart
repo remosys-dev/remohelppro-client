@@ -1071,6 +1071,20 @@ class FfiModel with ChangeNotifier {
     //
     //   ⚠ 本物の失敗（相手が居ない・コード違い・回線断）はこの種別に
     //     ならないので、今までどおりエラーとして出る。
+    // 🔴 セッションの切り替え（お客様がログインした）は、終了ではない。
+    //   2026-08-09 実機で判明。「起動後の最初の1〜2回だけ落ちる」の正体がこれ。
+    //   ★閉じずに、少し待ってから繋ぎ直す。
+    //   ⚠ すぐ繋ぎ直さないこと。切り替えた直後は新しいセッションの画面がまだ
+    //     用意できておらず、失敗して本当のエラーに見える。数秒おく。
+    if (type == 'session-switching') {
+      msgBox(sessionId, 'custom-nook-nocancel', 'つなぎ直しています',
+          'お客様がパソコンにログインしました。\n自動でつなぎ直しています。そのままお待ちください。', '', dialogManager);
+      _timer?.cancel();
+      _timer = Timer(const Duration(seconds: 5), () {
+        reconnect(dialogManager, sessionId, false);
+      });
+      return;
+    }
     if (type == 'session-ended') {
       msgBox(sessionId, 'custom-nook-nocancel', 'サポート終了',
           'サポートを終了しました。この画面を閉じます。', '', dialogManager);
