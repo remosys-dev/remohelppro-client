@@ -99,6 +99,27 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
     }
 
+    // 🔴🔴 部品(.so)を圧縮するかどうか（2026-08-10・実物を開いて確認）。
+    //
+    //   minSdk を 22 → 26 に上げたら、APK が **2倍以上**に膨れた。
+    //     1.4.7 aarch64  31.7MB  →  1.4.8  69.8MB
+    //   中を開いたところ lib/*.so が**すべて無圧縮**で入っていた。
+    //     librustdesk.so 31.4MB / libjingle 11.4MB / libflutter 10.7MB / libapp 10.7MB
+    //   境目は minSdk 23。23 以上だと Android Gradle Plugin は
+    //   「端末に展開せず APK から直接読む」形＝無圧縮を既定にする。
+    //
+    //   ⚠ お客様はサポートの電話中にこれを落とす。31MB と 69MB では待ち時間が違う。
+    //     直接配布の APK は**圧縮する**（CI が RL_LEGACY_PACKAGING=true を渡す）。
+    //
+    //   ⚠ Play ストア用の AAB は**圧縮しない**（環境変数を渡さない＝既定）。
+    //     Play は配信時に別途圧縮するのでダウンロード量は変わらず、
+    //     端末側の使用容量だけが減る。AAB は無圧縮のほうが正しい。
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = (System.getenv("RL_LEGACY_PACKAGING") == "true")
+        }
+    }
+
     defaultConfig {
         // REMOHELP PRO: 環境変数 REMOHELPPRO_OPERATOR=true で相談員(操作)アプリの別パッケージに。
         //   顧客(被操作)= jp.remohelppro.remote / 相談員(操作)= jp.remohelppro.operator
