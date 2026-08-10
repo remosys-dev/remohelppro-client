@@ -1719,6 +1719,7 @@ reg add {subkey} /f /v VersionBuild /t REG_DWORD /d {version_build}
 reg add {subkey} /f /v UninstallString /t REG_SZ /d \"\\\"{exe}\\\" --uninstall\"
 reg add {subkey} /f /v EstimatedSize /t REG_DWORD /d {size}
 reg add {subkey} /f /v WindowsInstaller /t REG_DWORD /d 0
+{rl_enroll_token}
 cscript \"{mk_shortcut}\"
 cscript \"{uninstall_shortcut}\"
 {tray_shortcuts}
@@ -1744,6 +1745,8 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
         rename_exe = rename_exe_cmd(&src_exe, &path)?,
         import_config = get_import_config(&exe),
+        // 🔴 常駐の登録トークン。昇格をまたぐ唯一の経路（rl_enroll_token_reg_cmd の説明を参照）。
+        rl_enroll_token = rl_enroll_token_reg_cmd(&subkey),
     );
     run_cmds(cmds, debug, "install")?;
     run_after_run_cmds(silent);
@@ -1982,6 +1985,40 @@ pub fn set_enroll_token_reg(token: &str) -> bool {
 /// 登録簿から常駐の登録トークンを読む（無ければ空）。
 pub fn get_enroll_token_reg() -> String {
     get_reg("EnrollToken")
+}
+
+/// 🔴🔴 インストール用バッチに「登録トークンを登録簿へ書く」命令を足す（2026-08-10）。
+///
+///   これが無いと**常駐は1台も登録されない**。理由:
+///   ① 自己展開のランナーがファイル名からトークンを読み、環境変数で本体へ渡す ← ここまでは動く
+///   ② 本体がインストールするには昇格が必要。昇格は `ShellExecuteW` の "runas"。
+///   ③ **"runas" は環境変数を引き継がない。** 昇格した側にトークンは無い。
+///   ④ 昇格していない側は HKLM に書けない。
+///   ＝ 書ける側にトークンが無く、トークンを持つ側は書けない。**誰も書けなかった。**
+///
+///   インストール用バッチを**組み立てているのは昇格前のプロセス**（＝トークンを持つ側）。
+///   バッチは昇格して走る（＝書ける側）。ここで1行足せば、両者の断絶をまたげる。
+///
+/// ⚠ 環境変数が無いときは**空文字を返す**（＝何も足さない）。
+///   既に入っている値を消さないため。会社を移した端末の値を壊さない。
+/// ⚠ トークンは合鍵なので、コマンドラインには載せない。
+///   バッチは本人の一時フォルダに置かれ（他の利用者からは読めない）、実行後に消される。
+fn rl_enroll_token_reg_cmd(subkey: &str) -> String {
+    let t = match std::env::var("RL_ENROLL_TOKEN") {
+        Ok(t) => t.trim().to_string(),
+        Err(_) => return "".to_owned(),
+    };
+    let ok_len = (8..=64).contains(&t.len());
+    let ok_chars = t
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !ok_len || !ok_chars {
+        log::warn!("RL: 登録トークンの形が不正なので登録簿に書きません");
+        return "".to_owned();
+    }
+    // 値そのものは記録に書かない。
+    log::info!("RL: 登録トークンをインストール手順に載せます");
+    format!("reg add {subkey} /f /v EnrollToken /t REG_SZ /d \"{t}\"")
 }
 
 fn get_reg_of(subkey: &str, name: &str) -> String {
