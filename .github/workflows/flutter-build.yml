@@ -2155,12 +2155,20 @@ jobs:
             remohelppro-*.deb
             remohelppro-*.rpm
 
+      # 🔴 受け渡しの名前から版を外す（2026-08-10 修正）。
+      #   env.VERSION は "1.4.<そのワークフローの実行回数>" でしかなく、
+      #   deb の名前は Cargo.toml の版（1.4.6）で作られる。両者は一致しない。
+      #   Linux は3回目の実行なので VERSION=1.4.3、deb は 1.4.6 となり、
+      #   ここが毎回「該当ファイル無し」で**何も上げず**、
+      #   AppImage 側が受け取れずに必ず失敗していた（警告のみで気づけなかった）。
+      #   → 版に依らない固定の名前で受け渡す。
       - name: Upload deb
         uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          name: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
-          path: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
+          name: remohelppro-deb-${{ matrix.job.arch }}
+          path: remohelppro-*-${{ matrix.job.arch }}.deb
+          if-no-files-found: error
 
       # only x86_64 for arch since we can not find newest arm64 docker image to build
       # old arch image does not make sense for arch since it is "arch" which always update to date
@@ -2434,15 +2442,19 @@ jobs:
         with:
           submodules: recursive
 
+      # 🔴 上と同じ理由で版を名前に使わない（2026-08-10 修正）。
       - name: Download Binary
         uses: actions/download-artifact@master
         with:
-          name: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.deb
+          name: remohelppro-deb-${{ matrix.job.arch }}
           path: .
 
       - name: Rename Binary
         run: |
-          mv remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.deb appimage/rustdesk.deb
+          set -e
+          deb=$(ls remohelppro-*-${{ matrix.job.arch }}.deb | head -1)
+          echo "受け取った deb: $deb"
+          mv "$deb" appimage/rustdesk.deb
 
       - name: Build appimage package
         shell: bash
