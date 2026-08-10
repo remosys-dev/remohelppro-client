@@ -2610,13 +2610,11 @@ connect(BuildContext context, String id,
     }
   } else {
     if (isFileTransfer) {
-      if (isAndroid) {
-        if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-          if (!await AndroidPermissionManager.request(kManageExternalStorage)) {
-            return;
-          }
-        }
-      }
+      // 🔴 全ファイルへのアクセス権を求めるのをやめた（2026-08-10）。
+      //   やりとりの場所はアプリ専用フォルダ（rlAndroidTransferDir）に決めたので、
+      //   権限は要らない。ここで権限を求めると、お客様には
+      //   「なぜ端末の全ファイルを渡すのか」としか見えず、断られれば何も起きない。
+      //   ⚠ 権限を外した以上、ここで求めても**設定画面に飛ばされて必ず失敗する**。
       if (isWeb) {
         Navigator.push(
           context,

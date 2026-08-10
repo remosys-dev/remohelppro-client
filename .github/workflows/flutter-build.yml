@@ -1780,6 +1780,11 @@ jobs:
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          # 🔴 版番号を毎回増やす（2026-08-10）。
+          #   local.properties の 77 に固定されていたため、
+          #   **Play ストアは2回目のアップロードを必ず弾く**状態だった。
+          #   1000 を底上げに使うのは、過去の 77 を確実に上回るため。
+          RL_VERSION_CODE: ${{ 1000 + github.run_number }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           # Increase Gradle JVM memory for CI builds
@@ -1799,9 +1804,15 @@ jobs:
           # build flutter
           pushd flutter
           flutter build apk "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
+          # 🔴 Play ストア用の AAB も作る（2026-08-10 追加）。
+          #   Play は **AAB でしか受け付けない**（APK では登録できない）。
+          #   直接配布は今までどおり APK なので、両方を作って両方出す。
+          flutter build appbundle "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64
           popd
-          mkdir -p signed-apk
+          mkdir -p signed-apk signed-aab
           mv ./flutter/build/app/outputs/flutter-apk/app-${{ env.reltype }}.apk signed-apk/remohelppro-${{ env.VERSION }}-universal${{ env.suffix }}.apk
+          mv ./flutter/build/app/outputs/bundle/${{ env.reltype }}/app-${{ env.reltype }}.aab signed-aab/remohelppro-${{ env.VERSION }}-playstore.aab
+          ls -la signed-apk signed-aab
 
       # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
@@ -1825,12 +1836,32 @@ jobs:
           # env.ANDROID_SIGN_TOOL_VERSION is set by Step "Setup sign tool version variable"
           BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
 
+      # 🔴 Play ストア用の AAB に署名する（2026-08-10 追加）。
+      #   ⚠ APK とは別のフォルダで別に署名する。同じフォルダに置くと
+      #     どちらが signedReleaseFile なのか決まらず、取り違える。
+      #   ⚠ Play App Signing では、この鍵は「アップロード鍵」として扱われる。
+      - uses: r0adkll/sign-android-release@v1
+        name: Sign app AAB (Play ストア用)
+        if: env.ANDROID_SIGNING_KEY != null
+        id: sign-rustdesk-aab
+        with:
+          releaseDirectory: ./signed-aab
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
+
       - name: Upload Artifacts
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@master
         with:
           name: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
           path: ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
+          # 🔴 空でも緑になるのを止める（2026-08-10）。
+          #   作られていないのに成功と表示され、気づけない事故が2件あった。
+          if-no-files-found: error
 
       - name: Publish signed apk package
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
@@ -1840,6 +1871,16 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
+
+      # 署名鍵が登録されていれば AAB も出す。Play Console にはこれを上げる。
+      - name: Publish AAB (Play ストア用)
+        if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: true
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            ${{steps.sign-rustdesk-aab.outputs.signedReleaseFile}}
 
       - name: Publish unsigned apk package
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'

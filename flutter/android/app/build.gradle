@@ -82,7 +82,11 @@ protobuf {
 }
 
 android {
-    compileSdkVersion 34
+    // 🔴 対象APIの引き上げ（2026-08-10）。
+    //   33 のままだと **Play プロテクトがインストールを止める**（実機で確認）。
+    //   Playストアに出す出さないの話ではなく、直接配布でも起きる。
+    //   Google の期限: 2026-08-31 から新規・更新とも API 36 必須。
+    compileSdkVersion 36
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
 
@@ -100,9 +104,18 @@ android {
         //   顧客(被操作)= jp.remohelppro.remote / 相談員(操作)= jp.remohelppro.operator
         def remohelpproOpPkg = (System.getenv("REMOHELPPRO_OPERATOR") == "true") ? "jp.remohelppro.operator" : "jp.remohelppro.remote"
         applicationId remohelpproOpPkg
-        minSdkVersion 22
-        targetSdkVersion 33
-        versionCode flutterVersionCode.toInteger()
+        // 🔴 minSdk 22 → 26（2026-08-10・ユーザー承認済み）。
+        //   26 にすると MANAGE_EXTERNAL_STORAGE を外せる（＝審査の最大の論点が消える）。
+        //   Android 8.0 未満は切り捨てになるが、2026年時点で実質いない。
+        minSdkVersion 26
+        targetSdkVersion 36
+        // 🔴 版番号を毎回増やす（2026-08-10）。
+        //   これまで local.properties の 77 に固定されていた。
+        //   ⚠ Play ストアは**同じ版番号を二度受け付けない**ので、
+        //     このままでは2回目のアップロードが必ず弾かれる。
+        //   CI では RL_VERSION_CODE（= github.run_number を底上げした値）を渡す。
+        //   手元ビルドでは従来どおり local.properties の値を使う。
+        versionCode (System.getenv("RL_VERSION_CODE")?.toInteger() ?: flutterVersionCode.toInteger())
         versionName flutterVersionName
     }
 

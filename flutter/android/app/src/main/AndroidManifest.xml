@@ -2,14 +2,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.carriez.flutter_hbb">
 
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!--
+      🔴 全ファイルへのアクセス権を外した（2026-08-10）。
+
+        外したもの:
+          MANAGE_EXTERNAL_STORAGE / READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE
+
+        理由: Google がこの権限を認めるのはファイルマネージャ・バックアップ・
+        ウイルス対策など**あらかじめ決められた用途**だけで、遠隔サポートは
+        その一覧に無い。持っていると審査の最大の論点になる。
+
+        ⚠ ファイル送受信は**無くならない**。やりとりの場所を
+        アプリ専用フォルダ（Android/data/<pkg>/files/）に決めることで、
+        権限ゼロのまま両方向とも成立する（main_set_home_dir で起点を決める）。
+        Rust 側のファイル処理は一行も変えていない。
+    -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 🔴 API 34 以降、常駐サービスは種別ごとの権限も要る（2026-08-10 追加）。
+         宣言が無いと起動時に落ちる。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -89,14 +106,24 @@
             android:excludeFromRecents="true"
             android:theme="@style/Transparent" />
 
+        <!-- 🔴 種別に microphone を足した（2026-08-10）。
+             音声も流すので mediaProjection だけでは API 34 以降で落ちる。 -->
         <service
             android:name=".MainService"
             android:enabled="true"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|microphone" />
 
+        <!-- 🔴 種別が無く、API 34 以降は起動時に落ちる状態だった（2026-08-10 追加）。
+             サポート中に接続状態を画面の上に出し続けるための常駐なので specialUse。
+             ⚠ Play Console 側でも同じ用途を書くこと。食い違うと差し戻される。 -->
         <service
             android:name=".FloatingWindowService"
-            android:enabled="true" />
+            android:enabled="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="サポート接続中であることを画面上に表示し続けるため" />
+        </service>
 
         <!--
  Don't delete the meta-data below.
