@@ -1783,10 +1783,16 @@ jobs:
           # 🔴 版番号を毎回増やす（2026-08-10）。
           #   local.properties の 77 に固定されていたため、
           #   **Play ストアは2回目のアップロードを必ず弾く**状態だった。
-          #   1000 を底上げに使うのは、過去の 77 を確実に上回るため。
-          RL_VERSION_CODE: ${{ 1000 + github.run_number }}
+          #   ⚠ 式の中で足し算はできない（GitHub Actions の式は四則演算に非対応）。
+          #     `${{ 1000 + github.run_number }}` と書くとワークフロー全体が
+          #     読み込めなくなり、**全プラットフォームのビルドが止まる**。
+          #     底上げは下の run で shell に計算させる。
+          RL_RUN_NUMBER: ${{ github.run_number }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          # 版番号の底上げ。1000 は、固定されていた過去の 77 を確実に上回るため。
+          export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
+          echo "RL: versionCode = ${RL_VERSION_CODE}"
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
