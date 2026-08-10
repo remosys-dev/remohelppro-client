@@ -26,6 +26,13 @@ on:
         #   Raspberry Pi で検証するため aarch64 が要る（64bit の Raspberry Pi OS が対象）。
         type: boolean
         default: false
+      enable_appimage:
+        # REMOHELP PRO: AppImage を作るか（既定 false・2026-08-10）。
+        #   appimage-builder の pip install が ubuntu-22.04 で失敗する（上流側の問題）。
+        #   Linux の配布は .deb で足りており、AppImage はどこからもリンクされていない。
+        #   ⚠ 直せないジョブを赤いまま残すと、本物の失敗が埋もれる。
+        type: boolean
+        default: false
       mac_only:
         # REMOHELP PRO: true のとき macOS だけをビルド（Windows/Android/iOS/Linux/appimage/flatpak を skip・分数節約）
         #   mac-build.yml をゲート無しで呼ぶと全マトリクスが回り、1回で数時間分を消費していた。
@@ -2425,11 +2432,24 @@ jobs:
           name: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
           path: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
 
+  # 🔴 AppImage は当面作らない（2026-08-10）。
+  #
+  #   受け渡しの名前の不一致は直したが、今度は appimage-builder の
+  #   pip install が ubuntu-22.04 で失敗するようになった（上流側の問題）。
+  #   Linux の配布は .deb で足りており（同期スクリプトが取り込むのは deb）、
+  #   AppImage はどこからもリンクされていない。
+  #
+  #   ⚠ 止める理由は「不要だから」だけではない。**常に赤いジョブは
+  #     本物の失敗を隠す**。実際 2026-08-10 に、その状態のせいで
+  #     「deb が上がっていない」「常駐 MSI が作られていない」の2件を
+  #     見逃していた。直せないものは、赤いまま放置せず明示的に止める。
+  #
+  #   再開するときは enable-appimage を true にして呼ぶこと。
   build-appimage:
     name: Build appimage ${{ matrix.job.target }}
     needs: [build-rustdesk-linux]
     runs-on: ubuntu-22.04
-    if: ${{ inputs.upload-artifact }}
+    if: ${{ inputs.upload-artifact && inputs.enable_appimage }}
     strategy:
       fail-fast: false
       matrix:
