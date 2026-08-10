@@ -1546,8 +1546,15 @@ jobs:
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          # 🔴 機種別のAPKにも版番号を渡す（2026-08-10 追補）。
+          #   universal の工程にだけ入れていたため、機種別APKは 77 のままだった（実物で確認）。
+          #   ⚠ 1009 を入れた端末に 77 の版は**入らない**（番号が下がる更新は拒まれる）。
+          #     同じ回のビルドで番号が食い違うと、その場で気づけない事故になる。
+          RL_RUN_NUMBER: ${{ github.run_number }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
+          echo "RL: versionCode = ${RL_VERSION_CODE}"
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
