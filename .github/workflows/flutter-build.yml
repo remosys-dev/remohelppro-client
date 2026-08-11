@@ -1555,6 +1555,17 @@ jobs:
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
           export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
           echo "RL: versionCode = ${RL_VERSION_CODE}"
+          # 🔴🔴 アプリの中に出る版番号を、ファイル名と揃える（2026-08-12）。
+          #   お客様の端末には **pubspec.yaml の 1.4.9 が固定で**出ていた。
+          #   ファイル名は 1.4.7 でも 1.4.10 でも、画面はいつも 1.4.9。
+          #   ＝ サポートで「どの版をお使いですか」が**成り立たない**。
+          #   実際に、修正版か旧版かを端末から判別できず調査が止まった。
+          #   ⚠ Windows は 2026-08-06 から同じことをしている（上の工程）。
+          #     Android だけ抜けていた。焼き込めなければ**止める**（黙って出さない）。
+          sed -i "0,/^version: .*/s//version: ${VERSION}+${RL_VERSION_CODE}/" ./flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -m1 '^version:' ./flutter/pubspec.yaml
+          grep -q "^version: ${VERSION}+${RL_VERSION_CODE}$" ./flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
@@ -1800,6 +1811,17 @@ jobs:
           # 版番号の底上げ。1000 は、固定されていた過去の 77 を確実に上回るため。
           export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
           echo "RL: versionCode = ${RL_VERSION_CODE}"
+          # 🔴🔴 アプリの中に出る版番号を、ファイル名と揃える（2026-08-12）。
+          #   お客様の端末には **pubspec.yaml の 1.4.9 が固定で**出ていた。
+          #   ファイル名は 1.4.7 でも 1.4.10 でも、画面はいつも 1.4.9。
+          #   ＝ サポートで「どの版をお使いですか」が**成り立たない**。
+          #   実際に、修正版か旧版かを端末から判別できず調査が止まった。
+          #   ⚠ Windows は 2026-08-06 から同じことをしている（上の工程）。
+          #     Android だけ抜けていた。焼き込めなければ**止める**（黙って出さない）。
+          sed -i "0,/^version: .*/s//version: ${VERSION}+${RL_VERSION_CODE}/" ./flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -m1 '^version:' ./flutter/pubspec.yaml
+          grep -q "^version: ${VERSION}+${RL_VERSION_CODE}$" ./flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
