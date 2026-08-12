@@ -125,6 +125,22 @@
                 android:value="サポート接続中であることを画面上に表示し続けるため" />
         </service>
 
+        <!-- 🔴 受け取ったファイルを取り出すための受け口（2026-08-12 追加）。
+             ⚠ authority は MainActivity.kt の
+               FileProvider.getUriForFile(..., "${applicationId}.fileprovider", ...)
+               と**厳密に一致**させること。ずれると実行時に必ず落ちる。
+             ⚠ 渡せる範囲は res/xml/rl_file_paths.xml に書いた場所だけ。
+               端末の他の場所は対象外なので、権限は要らないまま。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rl_file_paths" />
+        </provider>
+
         <!--
  Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java
