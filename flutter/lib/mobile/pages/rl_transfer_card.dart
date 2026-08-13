@@ -53,9 +53,20 @@ class _RlTransferCardState extends State<RlTransferCard> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
-    );
+    // ⚠ Scaffold が親に無いと ScaffoldMessenger.of は例外を投げる。
+    //   お知らせを出せないだけでアプリを落とすのは筋が通らない。
+    try {
+      final m = ScaffoldMessenger.maybeOf(context);
+      if (m == null) {
+        debugPrint('RL: $msg');
+        return;
+      }
+      m.showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 3)),
+      );
+    } catch (e) {
+      debugPrint('RL: お知らせを出せません: $e');
+    }
   }
 
   String _size(File f) {
@@ -73,7 +84,17 @@ class _RlTransferCardState extends State<RlTransferCard> {
   Widget build(BuildContext context) {
     // 受け渡しフォルダが用意できていない端末では、何も出さない。
     if (rlTransferDirPath == null) return const SizedBox.shrink();
+    // ⚠ ここはサポートの本線（接続画面）の一部。
+    //   受け渡しの飾りが原因でお客様の画面が真っ赤になってはいけない。
+    try {
+      return _build(context);
+    } catch (e) {
+      debugPrint('RL: 受け渡しの表示に失敗: $e');
+      return const SizedBox.shrink();
+    }
+  }
 
+  Widget _build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
       decoration: BoxDecoration(
