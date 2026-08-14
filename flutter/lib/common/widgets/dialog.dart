@@ -1991,6 +1991,35 @@ void showConfirmSwitchSidesDialog(
   });
 }
 
+/// 繋いでいる相手が常駐版か。
+///
+/// 🔴 見分け方（2026-08-14・実際の生成コードで確かめた）。
+///   デスクトップの接続番号は `id &= 0x1FFFFFFF` で29ビットに丸められる
+///   （libs/hbb_common/src/config.rs の get_auto_id）。常駐だけが起動時に
+///   `0x20000000` を立てて自分を分ける（src/server.rs の RESIDENT_ID_BIT）。
+///   ＝ **デスクトップでこの印があるのは常駐だけ**。
+///
+/// ⚠ Android の番号は 10億〜20億で作られるため、**偶然この印を持つ**。
+///   印だけで判定すると、Android のお客様を常駐と誤って扱う。
+///   常駐は Windows にしか無いので、相手の種別も併せて見る。
+///
+/// ⚠ 相手の種別がまだ分からないうちは false。
+///   迷ったら「常駐ではない」に倒す。ワンタイム向けの文言は、
+///   常駐に出しても**お客様に余計なお願いをするだけ**で済むが、
+///   逆（常駐向けの文言をワンタイムに出す）は
+///   「次も繋げます」という**嘘**になる。
+bool _isResidentPeer(FFI? ffi) {
+  if (ffi == null) return false;
+  try {
+    if (ffi.ffiModel.pi.platform != kPeerPlatformWindows) return false;
+    final n = int.tryParse(ffi.id.trim());
+    if (n == null) return false;
+    return (n & 0x20000000) != 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// 遠隔操作を終わるときの確認。
 ///
 /// 🔴 ×は誤って押しやすい位置にある（2026-07-27 実機テストの指摘）。
@@ -2036,6 +2065,11 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
     final (state, remainSec) = await rlWatchReconnect(ffi);
     if (state == 'waiting') {
       final m = (remainSec / 60).ceil();
+      final endNote = _isResidentPeer(ffi)
+          ? 'ここで終了しても、常駐しているので\nあとから繋ぎ直せます。'
+          : 'ここで終了すると、お客様が戻ってきても\n'
+              'つなぎ直せなくなります\n'
+              '（認証コードの入れ直しが必要になります）。';
       final res = await dialogManager.show<bool>((setState, close, context) {
         return CustomAlertDialog(
           content: Column(
@@ -2050,9 +2084,10 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
               Text(
                 'あと およそ $m 分、戻りを待つことができます。\n'
                 '戻り次第、自動でつなぎ直します。\n\n'
-                'ここで終了すると、お客様が戻ってきても\n'
-                'つなぎ直せなくなります\n'
-                '（認証コードの入れ直しが必要になります）。',
+                // ⚠ 常駐は入ったままなので、終了しても繋ぎ直せる。
+                //   ここで「つなぎ直せなくなります」と出すと、相談員は
+                //   起きていない不利益を避けようとして待ち続けてしまう。
+                '$endNote',
               ),
             ],
           ),
@@ -2067,6 +2102,12 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
       return res == true;
     }
   }
+  // 🔴 常駐に繋いでいるときは、言っていることが事実と違う（2026-08-14 ご指摘）。
+  //   常駐はPCに入ったままなので、終了しても認証コードの入れ直しは要らない。
+  //   次も相談員だけで繋げる。それなのに「入れ直していただく必要があります」と
+  //   出るので、相談員が終了をためらうか、お客様に不要なお願いをしてしまう。
+  //   ⚠ ワンタイムでは今の文言が正しい（お客様のアプリごと終わる）。**分ける**。
+  final isResident = _isResidentPeer(ffi);
   final res = await dialogManager.show<bool>((setState, close, context) {
     return CustomAlertDialog(
       content: Column(
@@ -2074,13 +2115,17 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'サポートを終了しますか？',
+            '遠隔接続を終了しますか？',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
-            'この接続を終了し、お客様の画面のアプリも終了します。\n'
-            'もう一度つなぐには、お客様に認証コードを入れ直していただく必要があります。',
+            isResident
+                ? 'この接続を終了します。\n'
+                    'お客様のパソコンには引き続き常駐していますので、\n'
+                    '次からもお客様の操作なしでおつなぎできます。'
+                : 'この接続を終了し、お客様の画面のアプリも終了します。\n'
+                    'もう一度つなぐには、お客様に認証コードを入れ直していただく必要があります。',
           ),
         ],
       ),
