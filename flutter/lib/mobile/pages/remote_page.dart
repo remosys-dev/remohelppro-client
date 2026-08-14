@@ -264,6 +264,23 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   }
 
   void _handleNonIOSSoftKeyboardInput(String newValue) {
+    // 🔴🔴 日本語が入力できなかったのを直す（2026-08-14 ご指摘）。
+    //
+    //   ここは「文字数が増えたか減ったか」だけを見ていた。
+    //   日本語は変換の途中で**長さが変わらないまま中身が入れ替わる**
+    //   （「n」→「に」）。長さが同じ場合の枝は空（`// ?`）だったので、
+    //   **何も送られない**。変換を確定しても、長さの差だけ送るので
+    //   文字が欠ける。＝日本語は最初から通らなかった。
+    //
+    //   ★① 変換中は送らない（確定するまで待つ）
+    //     ② 確定したら、**中身の差分**で「戻す文字数」と「入れる文字列」を出す
+    //
+    //   ⚠ `_value` は変換中に更新しない。更新すると、確定したときの
+    //     比較相手が「変換中の文字」になり、差分が狂う。
+    if (_textController.value.isComposingRangeValid) {
+      return;
+    }
+
     var oldValue = _value;
     _value = newValue;
     if (oldValue.isNotEmpty &&
@@ -273,8 +290,29 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
+    if (newValue == oldValue) {
+      return;
+    }
+    // 🔴 追記でないとき（変換の確定・途中の書き換え）は、中身の差分で送る。
+    //   ⚠ 追記のときは従来どおりに扱う。英数の打ち心地を変えないため。
+    if (!newValue.startsWith(oldValue)) {
+      var common = 0;
+      while (common < oldValue.length &&
+          common < newValue.length &&
+          oldValue[common] == newValue[common]) {
+        common++;
+      }
+      for (var k = 0; k < oldValue.length - common; k++) {
+        inputModel.inputKey('VK_BACK');
+      }
+      final add = newValue.substring(common);
+      if (add.isNotEmpty) {
+        bind.sessionInputString(sessionId: sessionId, value: add);
+      }
+      return;
+    }
     if (newValue.length == oldValue.length) {
-      // ?
+      // 追記でも削除でもない（ここには来ない。上で弾いている）
     } else if (newValue.length < oldValue.length) {
       final char = 'VK_BACK';
       inputModel.inputKey(char);
