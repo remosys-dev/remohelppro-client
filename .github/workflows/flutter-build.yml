@@ -43,6 +43,18 @@ on:
         #   config.rs の IS_RESIDENT_BUILD を sed で true 化する（APP_NAME 焼込と同流儀）。
         type: boolean
         default: false
+      remohelppro_operator:
+        # REMOHELP PRO: true のとき Android を「相談員版」としてビルドする（2026-08-14 追加）。
+        #   お客様版とは別のパッケージ（jp.remohelppro.operator）になるので、
+        #   1台の端末に**両方**入れられる。画面は「接続ページ」（相手のIDを入れて操作する側）。
+        #
+        #   ⚠⚠ 切替は**2か所を同時に**行う必要がある。片方だけだと静かに食い違う。
+        #     ① 環境変数 REMOHELPPRO_OPERATOR ... build.gradle の applicationId
+        #     ② --dart-define=REMOHELPPRO_OPERATOR ... home_page.dart の画面切替
+        #     ①だけ → 別パッケージなのに**お客様の画面**が出る
+        #     ②だけ → 相談員の画面なのに**お客様版を上書き**する
+        type: boolean
+        default: false
       keep_mode:
         # REMOHELP PRO: true のとき「継続用（消えない版）」をビルドする。
         #   support_show_window と**一緒に**指定する（画面・操作は顧客版と同じ）。
@@ -1558,8 +1570,17 @@ jobs:
           #   ⚠ 1009 を入れた端末に 77 の版は**入らない**（番号が下がる更新は拒まれる）。
           #     同じ回のビルドで番号が食い違うと、その場で気づけない事故になる。
           RL_RUN_NUMBER: ${{ github.run_number }}
+          # 🔴 相談員版の切替（2026-08-14）。build.gradle が applicationId を決めるのに読む。
+          REMOHELPPRO_OPERATOR: ${{ inputs.remohelppro_operator }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          # ⚠ 画面の切替は dart-define でしか届かない（環境変数では届かない）。
+          #   home_page.dart の bool.fromEnvironment('REMOHELPPRO_OPERATOR') が読む。
+          RL_DART_DEFINES=""
+          if [ "${REMOHELPPRO_OPERATOR}" = "true" ]; then
+            RL_DART_DEFINES="--dart-define=REMOHELPPRO_OPERATOR=true"
+            echo "RL: 相談員版としてビルドします（jp.remohelppro.operator）"
+          fi
           export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
           echo "RL: versionCode = ${RL_VERSION_CODE}"
           # 🔴🔴 アプリの中に出る版番号を、ファイル名と揃える（2026-08-12）。
@@ -1584,7 +1605,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
               # build flutter
               pushd flutter
-              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             armv7-linux-androideabi)
@@ -1593,7 +1614,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/librustdesk.so
               # build flutter
               pushd flutter
-              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
               mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             x86_64-linux-android)
@@ -1602,7 +1623,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86_64/librustdesk.so
               # build flutter
               pushd flutter
-              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             i686-linux-android)
@@ -1611,7 +1632,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
               # build flutter
               pushd flutter
-              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
           esac
@@ -1813,8 +1834,17 @@ jobs:
           #     読み込めなくなり、**全プラットフォームのビルドが止まる**。
           #     底上げは下の run で shell に計算させる。
           RL_RUN_NUMBER: ${{ github.run_number }}
+          # 🔴 相談員版の切替（2026-08-14）。build.gradle が applicationId を決めるのに読む。
+          REMOHELPPRO_OPERATOR: ${{ inputs.remohelppro_operator }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          # ⚠ 画面の切替は dart-define でしか届かない（環境変数では届かない）。
+          #   home_page.dart の bool.fromEnvironment('REMOHELPPRO_OPERATOR') が読む。
+          RL_DART_DEFINES=""
+          if [ "${REMOHELPPRO_OPERATOR}" = "true" ]; then
+            RL_DART_DEFINES="--dart-define=REMOHELPPRO_OPERATOR=true"
+            echo "RL: 相談員版としてビルドします（jp.remohelppro.operator）"
+          fi
           # 版番号の底上げ。1000 は、固定されていた過去の 77 を確実に上回るため。
           export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
           echo "RL: versionCode = ${RL_VERSION_CODE}"
@@ -1848,11 +1878,11 @@ jobs:
           # 🔴 直接配布の APK は部品を圧縮する（2026-08-10）。
           #   minSdk 26 の副作用で無圧縮になり 31MB → 69MB に膨れていた（実測）。
           #   お客様はサポートの電話中にこれを落とすので、待ち時間に直結する。
-          RL_LEGACY_PACKAGING=true flutter build apk "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
+          RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
           # 🔴 Play ストア用の AAB も作る（2026-08-10 追加）。
           #   Play は **AAB でしか受け付けない**（APK では登録できない）。
           #   直接配布は今までどおり APK なので、両方を作って両方出す。
-          flutter build appbundle "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64
+          flutter build appbundle ${RL_DART_DEFINES} "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64
           popd
           mkdir -p signed-apk signed-aab
           mv ./flutter/build/app/outputs/flutter-apk/app-${{ env.reltype }}.apk signed-apk/remohelppro-${{ env.VERSION }}-universal${{ env.suffix }}.apk

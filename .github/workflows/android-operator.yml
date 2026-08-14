@@ -1,0 +1,41 @@
+name: Android Operator (相談員版)
+
+# REMOHELP PRO: Android の**相談員版**をビルドする（2026-08-14 追加）。
+#
+# 🔴 何が違うか。
+#   お客様版（jp.remohelppro.remote）は「認証コードを入れて見せる側」。
+#   相談員版（jp.remohelppro.operator）は「相手のIDを入れて操作する側」。
+#   パッケージ名が別なので、1台の端末に**両方**入れられる。
+#
+# 🔴 なぜ要るか（2026-08-14 ご要望）。
+#   「Android から常駐PCを遠隔操作したい」。仕組みは前からあったが、
+#   **この APK は一度も作られたことがなかった**。
+#   相談員コンソール（launch-operator-remote.ts）は Android で開いたとき
+#   `intent://...package=jp.remohelppro.operator` を投げるようになっており、
+#   受け取る側だけが存在しなかった。
+#
+# ⚠⚠ お客様には配らない。upload-tag は "android-operator"。
+#   配布の同期（remohelppro-sync-apps.sh）が拾うのはタグ "android" だけなので、
+#   ここを "android" にすると**お客様の入口に相談員版が並ぶ**。絶対に変えないこと。
+#
+# ⚠ 署名鍵はお客様版と同じ（パッケージ名が別なので衝突しない）。
+#   鍵が未登録だと署名工程ごと飛ぶ → [[remohelppro-android-signing]]
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'operator-android-build-*'   # このタグを push すると自動ビルド（git/SSHだけで起動可）
+
+permissions:
+  contents: write
+
+jobs:
+  build-operator-android:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "android-operator"
+      android_only: true
+      remohelppro_operator: true
