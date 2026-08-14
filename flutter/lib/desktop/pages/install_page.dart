@@ -87,11 +87,30 @@ class _InstallPageBodyState extends State<_InstallPageBody>
     padding: EdgeInsets.symmetric(vertical: 15, horizontal: 12),
   );
 
+  /// 常駐版のインストーラか。
+  ///
+  /// 🔴 常駐はショートカットを作らない（2026-08-14 ご指示）。裏で動くサービスで、
+  ///   お客様が自分で起動する物ではない。押しても何も起きないアイコンが増えるだけで、
+  ///   不審に思われるか、消されて遠隔が使えなくなる。
+  ///
+  /// ⚠ 見分けるのに「入れ先」を使う。常駐版は必ず `...\remohelppro-agent` に入る。
+  ///   アプリ名を返す関数は当てにならない（`mainGetAppNameSync` は APP_NAME を
+  ///   返さない）。実行ファイル名も、インストール中は展開先の一時ファイルなので使わない。
+  ///
+  /// ⚠ 画面を直すだけでは足りない。自己更新は `--silent-install` で
+  ///   `desktopicon startmenu` を固定で渡すため、`install_me`（Rust側）でも
+  ///   落としてある。ここは「見せない」ための直し。
+  bool _isResidentInstaller = false;
+
   _InstallPageBodyState() {
-    controller = TextEditingController(text: bind.installInstallPath());
+    final installPath = bind.installInstallPath();
+    controller = TextEditingController(text: installPath);
+    _isResidentInstaller = installPath.toLowerCase().contains('remohelppro-agent');
     final installOptions = jsonDecode(bind.installInstallOptions());
-    startmenu.value = installOptions['STARTMENUSHORTCUTS'] != '0';
-    desktopicon.value = installOptions['DESKTOPSHORTCUTS'] != '0';
+    startmenu.value =
+        !_isResidentInstaller && installOptions['STARTMENUSHORTCUTS'] != '0';
+    desktopicon.value =
+        !_isResidentInstaller && installOptions['DESKTOPSHORTCUTS'] != '0';
     printer.value = installOptions['PRINTER'] != '0';
   }
 
@@ -174,10 +193,14 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                   )
                 ],
               ).marginSymmetric(vertical: 2 * em),
-              Option(startmenu, label: 'Create start menu shortcuts')
-                  .marginOnly(bottom: 7),
-              Option(desktopicon, label: 'Create desktop icon')
-                  .marginOnly(bottom: 7),
+              // 常駐版では、ショートカットの選択肢そのものを出さない。
+              // 出して既定を外すだけだと「入れれば作れる」と読めてしまう。
+              if (!_isResidentInstaller) ...[
+                Option(startmenu, label: 'Create start menu shortcuts')
+                    .marginOnly(bottom: 7),
+                Option(desktopicon, label: 'Create desktop icon')
+                    .marginOnly(bottom: 7),
+              ],
               Option(printer, label: 'Install {$appName} Printer'),
               Container(
                   padding: EdgeInsets.all(12),

@@ -1552,6 +1552,40 @@ fn get_after_install(
 }
 
 pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> ResultType<()> {
+    // 🔴 常駐版はショートカットを作らない（2026-08-14 ご指示）。
+    //
+    //   常駐は裏で動くサービスで、お客様が自分で起動する物ではない。
+    //   デスクトップとスタートメニューに出ると、
+    //     ・押しても何も起きない（もう動いている）
+    //     ・「知らないアプリが増えた」と不審に思われる
+    //     ・right-click から消されて、遠隔が使えなくなる
+    //   のいずれかにしかならない。
+    //
+    //   ⚠ ここで落とす理由。画面のチェックを外すだけでは足りない。
+    //     自己更新は `--silent-install` を使い、その経路は
+    //     `desktopicon startmenu printer` を**固定で**渡す
+    //     （core_main.rs）。画面を直しても、更新のたびに作り直されていた。
+    //     入口が何であれ、最後にここを通る。ここで落とすのが確実。
+    //
+    //   ⚠ 常駐でも「トレイ」の起動用ショートカット（Startup の Tray.lnk）は残す。
+    //     あれは「サポート待機中」を出し続けるためのもので、
+    //     **入っていることを隠さない**という方針の要。消してはいけない。
+    let options_owned: String = if crate::agent::is_resident() {
+        let stripped = options
+            .split_whitespace()
+            .filter(|o| *o != "desktopicon" && *o != "startmenu")
+            .collect::<Vec<&str>>()
+            .join(" ");
+        log::info!(
+            "RL: 常駐版のためショートカットは作りません（{} → {}）",
+            options,
+            stripped
+        );
+        stripped
+    } else {
+        options.to_owned()
+    };
+    let options: &str = options_owned.as_str();
     let uninstall_str = get_uninstall(false, false);
     let mut path = path.trim_end_matches('\\').to_owned();
     let (subkey, _path, start_menu, exe) = get_default_install_info();
