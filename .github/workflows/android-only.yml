@@ -20,16 +20,16 @@ jobs:
     secrets: inherit
     with:
       upload-artifact: true
-      # 🔴🔴 この枝でだけ "android-test" に出す（2026-08-10）。
+      # 🔴🔴 ここは "android" 固定。触るときは必ず戻すこと（2026-08-14 に戻した）。
       #
       #   配布の同期スクリプト（remohelppro-sync-apps.sh）は
       #   リリースタグ "android" を1時間ごとに取り込み、
       #   /download/remohelppro-customer.apk を差し替える。
-      #   ＝ ここを "android" のままにすると、**検証していない枝の版が
-      #     そのままお客様に配られる**。
       #
-      #   ⚠⚠ master へ取り込むときは必ず "android" に戻すこと。
-      #     戻し忘れると、以後どれだけビルドしてもお客様には何も届かない
-      #     （しかもビルドは緑になるので気づけない）。
-      upload-tag: "android-test"
+      #   ⚠ 検証用に一時的に "android-test" へ逃がすことがある
+      #     （枝 android-play-store で実際にそうしていた）。
+      #     **master に取り込むときは必ずここへ戻す。**
+      #     戻し忘れると、以後どれだけビルドしてもお客様には何も届かないのに、
+      #     **ビルドは緑のまま**なので誰も気づけない。
+      upload-tag: "android"
       android_only: true
