@@ -15,6 +15,7 @@ import '../../models/platform_model.dart';
 import '../../remohelppro_pairing.dart';
 import '../../models/server_model.dart';
 import 'home_page.dart';
+import 'rl_transfer_card.dart';
 
 class ServerPage extends StatefulWidget implements PageShape {
   @override
@@ -216,6 +217,11 @@ class _ServerPageState extends State<ServerPage> {
                             ? const SizedBox.shrink()
                             : ServiceNotRunningNotification(),
                         const ConnectionManager(),
+                        // 🔴 ファイルの受け渡し（2026-08-12）。
+                        //   全ファイルへのアクセス権を外した代わりの出入口。
+                        //   ⚠ Android 11 以降、受け渡しフォルダは「ファイル」アプリから
+                        //     開けないので、ここが唯一の道になる。
+                        const RlTransferCard(),
                         const PermissionChecker(),
                         SizedBox.fromSize(size: const Size(0, 15.0)),
                       ],

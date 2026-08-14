@@ -2,14 +2,32 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.carriez.flutter_hbb">
 
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!--
+      🔴 全ファイルへのアクセス権を外した（2026-08-10）。
+
+        外したもの:
+          MANAGE_EXTERNAL_STORAGE / READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE
+
+        理由: Google がこの権限を認めるのはファイルマネージャ・バックアップ・
+        ウイルス対策など**あらかじめ決められた用途**だけで、遠隔サポートは
+        その一覧に無い。持っていると審査の最大の論点になる。
+
+        ⚠ ファイル送受信は**無くならない**。やりとりの場所を
+        アプリ専用フォルダ（Android/data/<pkg>/files/）に決めることで、
+        権限ゼロのまま両方向とも成立する（main_set_home_dir で起点を決める）。
+        Rust 側のファイル処理は一行も変えていない。
+    -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 🔴 API 34 以降、常駐サービスは種別ごとの権限も要る。
+         ⚠ **使う種別だけ**を宣言すること（2026-08-13 訂正）。
+           使わない種別まで宣言すると、その権限が許可済みでない限り
+           startForeground が SecurityException で落ちる。
+           MICROPHONE / SPECIAL_USE は使っていないので外した。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -89,14 +107,47 @@
             android:excludeFromRecents="true"
             android:theme="@style/Transparent" />
 
+        <!-- 🔴🔴 種別は mediaProjection **だけ**にする（2026-08-13 実機で落ちて判明）。
+             2026-08-10 に「音声も流すので」と microphone を足したが、これは誤りだった。
+
+             MainService.kt:645 は startForeground(id, notification) と**種別を渡さずに**
+             呼んでいる。この形だと Android はマニフェストの宣言を**全部**要求する。
+             microphone を宣言すると RECORD_AUDIO が**許可済みでないと**
+             SecurityException で**アプリが即座に落ちる**。
+             画面共有ではマイクを許可しないのが普通なので、ほぼ必ず落ちる。
+
+             ⚠ 実際に「認証コードを入れると落ちる」で再現した。
+             ⚠ 根拠を確かめずにマニフェストを変えないこと。
+               音声は MediaProjection 経由で取るので mediaProjection に含まれる。 -->
         <service
             android:name=".MainService"
             android:enabled="true"
             android:foregroundServiceType="mediaProjection" />
 
+        <!-- 🔴 種別は付けない（2026-08-13 訂正）。
+             2026-08-10 に「種別が無いと API 34 以降で落ちる」と書いたが**誤り**だった。
+             このサービスは startService() で始まり、**startForeground を一度も呼ばない**
+             ＝ 常駐(フォアグラウンド)サービスではないので、種別は要らない。
+             画面の上への表示は SYSTEM_ALERT_WINDOW で成り立っている。 -->
         <service
             android:name=".FloatingWindowService"
             android:enabled="true" />
+
+        <!-- 🔴 受け取ったファイルを取り出すための受け口（2026-08-12 追加）。
+             ⚠ authority は MainActivity.kt の
+               FileProvider.getUriForFile(..., "${applicationId}.fileprovider", ...)
+               と**厳密に一致**させること。ずれると実行時に必ず落ちる。
+             ⚠ 渡せる範囲は res/xml/rl_file_paths.xml に書いた場所だけ。
+               端末の他の場所は対象外なので、権限は要らないまま。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rl_file_paths" />
+        </provider>
 
         <!--
  Don't delete the meta-data below.

@@ -284,10 +284,10 @@ class ServerModel with ChangeNotifier {
     }
 
     // file
-    if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-      _fileOk = false;
-      bind.mainSetOption(key: kOptionEnableFileTransfer, value: "N");
-    } else {
+    // 🔴 権限で可否を決めるのをやめた（2026-08-10）。
+    //   受け渡しはアプリ専用フォルダの中だけで完結するので、権限は関係ない。
+    //   以前は権限が無い＝常に「ファイル送受信は使えない」になっていた。
+    {
       final fileOption =
           await bind.mainGetOption(key: kOptionEnableFileTransfer);
       _fileOk = fileOption != 'N';
@@ -392,14 +392,8 @@ class ServerModel with ChangeNotifier {
     if (clients.any((c) => !c.disconnected)) {
       await showClientsMayNotBeChangedAlert(parent.target);
     }
-    if (!_fileOk &&
-        !await AndroidPermissionManager.check(kManageExternalStorage)) {
-      final res =
-          await AndroidPermissionManager.request(kManageExternalStorage);
-      if (!res) {
-        showToast(translate('Failed'));
-        return;
-      }
+    // 🔴 権限の要求をやめた（2026-08-10）。受け渡しはアプリ専用フォルダで完結する。
+    {
     }
 
     _fileOk = !_fileOk;
@@ -491,9 +485,9 @@ class ServerModel with ChangeNotifier {
       if (bind.mainGetLocalOption(key: kOptionDisableFloatingWindow) != 'Y') {
         await checkFloatingWindowPermission();
       }
-      if (!await AndroidPermissionManager.check(kManageExternalStorage)) {
-        await AndroidPermissionManager.request(kManageExternalStorage);
-      }
+      // 🔴 全ファイルへのアクセス権の要求をやめた（2026-08-10）。
+      //   ここは開始前の確認画面。権限の設定画面へ飛ばされると、
+      //   お客様は戻ってこられずサポートが始まらない。
       final res = await parent.target?.dialogManager
           .show<bool>((setState, close, context) {
         submit() => close(true);

@@ -1553,8 +1553,26 @@ jobs:
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          # 🔴 機種別のAPKにも版番号を渡す（2026-08-10 追補）。
+          #   universal の工程にだけ入れていたため、機種別APKは 77 のままだった（実物で確認）。
+          #   ⚠ 1009 を入れた端末に 77 の版は**入らない**（番号が下がる更新は拒まれる）。
+          #     同じ回のビルドで番号が食い違うと、その場で気づけない事故になる。
+          RL_RUN_NUMBER: ${{ github.run_number }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
+          echo "RL: versionCode = ${RL_VERSION_CODE}"
+          # 🔴🔴 アプリの中に出る版番号を、ファイル名と揃える（2026-08-12）。
+          #   お客様の端末には **pubspec.yaml の 1.4.9 が固定で**出ていた。
+          #   ファイル名は 1.4.7 でも 1.4.10 でも、画面はいつも 1.4.9。
+          #   ＝ サポートで「どの版をお使いですか」が**成り立たない**。
+          #   実際に、修正版か旧版かを端末から判別できず調査が止まった。
+          #   ⚠ Windows は 2026-08-06 から同じことをしている（上の工程）。
+          #     Android だけ抜けていた。焼き込めなければ**止める**（黙って出さない）。
+          sed -i "0,/^version: .*/s//version: ${VERSION}+${RL_VERSION_CODE}/" ./flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -m1 '^version:' ./flutter/pubspec.yaml
+          grep -q "^version: ${VERSION}+${RL_VERSION_CODE}$" ./flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
@@ -1566,7 +1584,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             armv7-linux-androideabi)
@@ -1575,7 +1593,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/armeabi-v7a/librustdesk.so
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
               mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             x86_64-linux-android)
@@ -1584,7 +1602,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86_64/librustdesk.so
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             i686-linux-android)
@@ -1593,7 +1611,7 @@ jobs:
               cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/x86/librustdesk.so
               # build flutter
               pushd flutter
-              flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
+              RL_LEGACY_PACKAGING=true flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
               mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
           esac
@@ -1787,8 +1805,30 @@ jobs:
         shell: bash
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          # 🔴 版番号を毎回増やす（2026-08-10）。
+          #   local.properties の 77 に固定されていたため、
+          #   **Play ストアは2回目のアップロードを必ず弾く**状態だった。
+          #   ⚠ 式の中で足し算はできない（GitHub Actions の式は四則演算に非対応）。
+          #     `${{ 1000 + github.run_number }}` と書くとワークフロー全体が
+          #     読み込めなくなり、**全プラットフォームのビルドが止まる**。
+          #     底上げは下の run で shell に計算させる。
+          RL_RUN_NUMBER: ${{ github.run_number }}
         run: |
           export PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
+          # 版番号の底上げ。1000 は、固定されていた過去の 77 を確実に上回るため。
+          export RL_VERSION_CODE=$(( 1000 + ${RL_RUN_NUMBER:-0} ))
+          echo "RL: versionCode = ${RL_VERSION_CODE}"
+          # 🔴🔴 アプリの中に出る版番号を、ファイル名と揃える（2026-08-12）。
+          #   お客様の端末には **pubspec.yaml の 1.4.9 が固定で**出ていた。
+          #   ファイル名は 1.4.7 でも 1.4.10 でも、画面はいつも 1.4.9。
+          #   ＝ サポートで「どの版をお使いですか」が**成り立たない**。
+          #   実際に、修正版か旧版かを端末から判別できず調査が止まった。
+          #   ⚠ Windows は 2026-08-06 から同じことをしている（上の工程）。
+          #     Android だけ抜けていた。焼き込めなければ**止める**（黙って出さない）。
+          sed -i "0,/^version: .*/s//version: ${VERSION}+${RL_VERSION_CODE}/" ./flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -m1 '^version:' ./flutter/pubspec.yaml
+          grep -q "^version: ${VERSION}+${RL_VERSION_CODE}$" ./flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
           # Increase Gradle JVM memory for CI builds
           sed -i "s/org.gradle.jvmargs=-Xmx1024M/org.gradle.jvmargs=-Xmx2g/g" ./flutter/android/gradle.properties
           # temporary use debug sign config
@@ -1805,10 +1845,19 @@ jobs:
           fi
           # build flutter
           pushd flutter
-          flutter build apk "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
+          # 🔴 直接配布の APK は部品を圧縮する（2026-08-10）。
+          #   minSdk 26 の副作用で無圧縮になり 31MB → 69MB に膨れていた（実測）。
+          #   お客様はサポートの電話中にこれを落とすので、待ち時間に直結する。
+          RL_LEGACY_PACKAGING=true flutter build apk "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64${{ env.x86_target }}
+          # 🔴 Play ストア用の AAB も作る（2026-08-10 追加）。
+          #   Play は **AAB でしか受け付けない**（APK では登録できない）。
+          #   直接配布は今までどおり APK なので、両方を作って両方出す。
+          flutter build appbundle "--${{ env.reltype }}" --target-platform android-arm64,android-arm,android-x64
           popd
-          mkdir -p signed-apk
+          mkdir -p signed-apk signed-aab
           mv ./flutter/build/app/outputs/flutter-apk/app-${{ env.reltype }}.apk signed-apk/remohelppro-${{ env.VERSION }}-universal${{ env.suffix }}.apk
+          mv ./flutter/build/app/outputs/bundle/${{ env.reltype }}/app-${{ env.reltype }}.aab signed-aab/remohelppro-${{ env.VERSION }}-playstore.aab
+          ls -la signed-apk signed-aab
 
       # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
@@ -1832,12 +1881,32 @@ jobs:
           # env.ANDROID_SIGN_TOOL_VERSION is set by Step "Setup sign tool version variable"
           BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
 
+      # 🔴 Play ストア用の AAB に署名する（2026-08-10 追加）。
+      #   ⚠ APK とは別のフォルダで別に署名する。同じフォルダに置くと
+      #     どちらが signedReleaseFile なのか決まらず、取り違える。
+      #   ⚠ Play App Signing では、この鍵は「アップロード鍵」として扱われる。
+      - uses: r0adkll/sign-android-release@v1
+        name: Sign app AAB (Play ストア用)
+        if: env.ANDROID_SIGNING_KEY != null
+        id: sign-rustdesk-aab
+        with:
+          releaseDirectory: ./signed-aab
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ env.ANDROID_SIGN_TOOL_VERSION }}
+
       - name: Upload Artifacts
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@master
         with:
           name: remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
           path: ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
+          # 🔴 空でも緑になるのを止める（2026-08-10）。
+          #   作られていないのに成功と表示され、気づけない事故が2件あった。
+          if-no-files-found: error
 
       - name: Publish signed apk package
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
@@ -1847,6 +1916,16 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
+
+      # 署名鍵が登録されていれば AAB も出す。Play Console にはこれを上げる。
+      - name: Publish AAB (Play ストア用)
+        if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          prerelease: true
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            ${{steps.sign-rustdesk-aab.outputs.signedReleaseFile}}
 
       - name: Publish unsigned apk package
         if: env.ANDROID_SIGNING_KEY == null && env.UPLOAD_ARTIFACT == 'true'

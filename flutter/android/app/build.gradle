@@ -82,7 +82,11 @@ protobuf {
 }
 
 android {
-    compileSdkVersion 34
+    // 🔴 対象APIの引き上げ（2026-08-10）。
+    //   33 のままだと **Play プロテクトがインストールを止める**（実機で確認）。
+    //   Playストアに出す出さないの話ではなく、直接配布でも起きる。
+    //   Google の期限: 2026-08-31 から新規・更新とも API 36 必須。
+    compileSdkVersion 36
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
 
@@ -95,14 +99,44 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
     }
 
+    // 🔴🔴 部品(.so)を圧縮するかどうか（2026-08-10・実物を開いて確認）。
+    //
+    //   minSdk を 22 → 26 に上げたら、APK が **2倍以上**に膨れた。
+    //     1.4.7 aarch64  31.7MB  →  1.4.8  69.8MB
+    //   中を開いたところ lib/*.so が**すべて無圧縮**で入っていた。
+    //     librustdesk.so 31.4MB / libjingle 11.4MB / libflutter 10.7MB / libapp 10.7MB
+    //   境目は minSdk 23。23 以上だと Android Gradle Plugin は
+    //   「端末に展開せず APK から直接読む」形＝無圧縮を既定にする。
+    //
+    //   ⚠ お客様はサポートの電話中にこれを落とす。31MB と 69MB では待ち時間が違う。
+    //     直接配布の APK は**圧縮する**（CI が RL_LEGACY_PACKAGING=true を渡す）。
+    //
+    //   ⚠ Play ストア用の AAB は**圧縮しない**（環境変数を渡さない＝既定）。
+    //     Play は配信時に別途圧縮するのでダウンロード量は変わらず、
+    //     端末側の使用容量だけが減る。AAB は無圧縮のほうが正しい。
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = (System.getenv("RL_LEGACY_PACKAGING") == "true")
+        }
+    }
+
     defaultConfig {
         // REMOHELP PRO: 環境変数 REMOHELPPRO_OPERATOR=true で相談員(操作)アプリの別パッケージに。
         //   顧客(被操作)= jp.remohelppro.remote / 相談員(操作)= jp.remohelppro.operator
         def remohelpproOpPkg = (System.getenv("REMOHELPPRO_OPERATOR") == "true") ? "jp.remohelppro.operator" : "jp.remohelppro.remote"
         applicationId remohelpproOpPkg
-        minSdkVersion 22
-        targetSdkVersion 33
-        versionCode flutterVersionCode.toInteger()
+        // 🔴 minSdk 22 → 26（2026-08-10・ユーザー承認済み）。
+        //   26 にすると MANAGE_EXTERNAL_STORAGE を外せる（＝審査の最大の論点が消える）。
+        //   Android 8.0 未満は切り捨てになるが、2026年時点で実質いない。
+        minSdkVersion 26
+        targetSdkVersion 36
+        // 🔴 版番号を毎回増やす（2026-08-10）。
+        //   これまで local.properties の 77 に固定されていた。
+        //   ⚠ Play ストアは**同じ版番号を二度受け付けない**ので、
+        //     このままでは2回目のアップロードが必ず弾かれる。
+        //   CI では RL_VERSION_CODE（= github.run_number を底上げした値）を渡す。
+        //   手元ビルドでは従来どおり local.properties の値を使う。
+        versionCode (System.getenv("RL_VERSION_CODE")?.toInteger() ?: flutterVersionCode.toInteger())
         versionName flutterVersionName
     }
 

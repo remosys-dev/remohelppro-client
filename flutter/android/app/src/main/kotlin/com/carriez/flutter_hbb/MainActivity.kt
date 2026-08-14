@@ -32,6 +32,8 @@ import com.hjq.permissions.XXPermissions
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import androidx.core.content.FileProvider
+import java.io.File
 import kotlin.concurrent.thread
 
 
@@ -229,6 +231,54 @@ class MainActivity : FlutterActivity() {
                 "try_sync_clipboard" -> {
                     rdClipboardManager?.syncClipboard(true)
                     result.success(true)
+                }
+                // 🔴🔴 受け取ったファイルを取り出す（2026-08-12 追加）。
+                //
+                //   全ファイルへのアクセス権を外したので、受け渡しは
+                //   アプリ専用フォルダ（Android/data/<pkg>/files/REMOHELP PRO）で行う。
+                //   ⚠ Android 11 以降、そのフォルダは**お客様が「ファイル」アプリから
+                //     開けない**。アプリの中から出す道を用意しないと、
+                //     相談員が送ったファイルを永久に取り出せない。
+                //
+                //   ⚠ file_picker の saveFile() は Android 未実装（UnimplementedError）。
+                //     そのため FileProvider ＋ Intent で、端末の標準の仕組みに渡す。
+                //     お客様は見慣れた画面から、開く／保存する／送る を選べる。
+                "rl_open_file", "rl_share_file" -> {
+                    val path = call.argument<String>("path")
+                    if (path.isNullOrEmpty()) {
+                        result.success(false)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val f = File(path)
+                        if (!f.exists()) {
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        // authority は AndroidManifest の <provider> と厳密に一致させること
+                        val uri = FileProvider.getUriForFile(
+                            this, "${'$'}{packageName}.fileprovider", f
+                        )
+                        val send = call.method == "rl_share_file"
+                        val intent = if (send) {
+                            Intent(Intent.ACTION_SEND).apply {
+                                type = "*/*"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                            }
+                        } else {
+                            Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "*/*")
+                            }
+                        }
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        // 選ぶ画面を必ず出す。既定のアプリに黙って吸われると、
+                        // お客様には「押したのに何も起きない」ように見える。
+                        startActivity(Intent.createChooser(intent, null))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(logTag, "rl file intent failed: ${'$'}e")
+                        result.success(false)
+                    }
                 }
                 GET_START_ON_BOOT_OPT -> {
                     val prefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)

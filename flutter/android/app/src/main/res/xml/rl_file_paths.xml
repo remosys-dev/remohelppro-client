@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  受け渡し用フォルダを、端末の標準の仕組みに渡すための宣言（2026-08-12）。
+
+  ⚠ ここに書いた範囲しか外へ渡せない。アプリ専用フォルダ
+    （Android/data/<パッケージ>/files）だけを開ける。
+    端末の他の場所は一切対象にしない＝権限も要らないまま。
+-->
+<paths>
+    <external-files-path name="rl_transfer" path="." />
+    <files-path name="rl_internal" path="." />
+</paths>
