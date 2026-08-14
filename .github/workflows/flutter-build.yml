@@ -1227,6 +1227,18 @@ jobs:
           echo "--- Info.plist after rename ---"
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST"
+          # 🔴 呼び出し名（URLスキーム）を実物で確かめる（2026-08-15）。
+          #   相談員コンソールの「遠隔操作を開始」は remohelppro:// でこのアプリを呼ぶ。
+          #   ⚠ ここが rustdesk のままだと、macOS は当社アプリを起動せず、
+          #     他社の RustDesk が入っていれば**そちらが別会社のサーバーへ繋ぎに行く**。
+          #     Windows で実際に起きて直した不具合と同じもの。
+          #   ★焼き込めていなければ、黙って出さずに**止める**。
+          SCHEME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$PLIST" 2>/dev/null || echo "")
+          echo "CFBundleURLSchemes:0 = ${SCHEME}"
+          if [ "$SCHEME" != "remohelppro" ]; then
+            echo "::error::URLスキームが remohelppro ではありません（${SCHEME}）。中止します"
+            exit 1
+          fi
           ls -la "$REL"
 
       # 🔴 証明書が無くても「自分で署名」だけはしておく（2026-07-30 実機指摘）。

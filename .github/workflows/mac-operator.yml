@@ -1,0 +1,43 @@
+name: Mac Operator (相談員版)
+
+# Mac の「相談員版」をビルドする（2026-08-15）。
+#
+# 🔴 なぜ要るか。
+#   Mac のお客様を支えるのは、たいてい Mac を使う相談員。
+#   これまで相談員アプリは Windows だけで、Mac → Mac ができなかった。
+#
+# 🔴 mac-build.yml（タグ `mac`）との違い。
+#   中身の作りは同じ（support_show_window を渡さない＝操作もできるフル画面）。
+#   分けたのは**配布のため**。`mac` のリリースには 7月の APK まで混ざっており、
+#   同期スクリプトが何を取るべきか判別できない。相談員版は専用のリリースに出す。
+#   ⚠ 同期スクリプト（svr-fork/ops/remohelppro-sync-apps.sh）は
+#     `mac-operator` タグから取る。タグ名を変えると配布が静かに止まる。
+#
+# ⚠ 署名は未設定（MACOS_P12_BASE64 が空）。初回は「開発元を確認できません」が出るので
+#   右クリック→開く が要る。消すには Apple Developer Program（年 $99）。
+#
+# ⚠ 相談員コンソールの「遠隔操作を開始」は remohelppro:// でこのアプリを呼ぶ。
+#   Info.plist の CFBundleURLSchemes が remohelppro であることを
+#   flutter-build.yml が実物で確かめ、違えば止める。
+#
+# `mac-operator-*` タグを push すると自動ビルド。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'mac-operator-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-operator:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "mac-operator"
+      mac_only: true
+      # 既定 false ＝ 操作もできるフル画面（Windows の相談員版と同じ）。
+      # ★ここを true にすると顧客ワンタイム版になる。触らないこと。
+      support_show_window: false

@@ -26,10 +26,20 @@
 			<key>CFBundleURLIconFile</key>
 			<string></string>
 			<key>CFBundleURLName</key>
-			<string>com.carriez.rustdesk</string>
+			<string>jp.remohelppro.desktop</string>
+			<!--
+				🔴 相談員コンソールの「遠隔操作を開始」は remohelppro:// で操作アプリを呼ぶ
+				  （svr 側 src/lib/launch-operator-remote.ts が唯一の入口）。
+				  Rust の get_uri_prefix() も APP_NAME("remohelppro") 由来で remohelppro:// を返す。
+
+				⚠ ここが rustdesk のままだと、macOS はこのアプリを呼び出さない。
+				  さらに悪いことに、他社の RustDesk が入っていれば**そちらが起動して
+				  別会社のサーバーを見に行く**（Windows で実際に起きて直した不具合と同じ）。
+				  名前を変えるときは Rust 側の APP_NAME と必ず揃えること。
+			-->
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>rustdesk</string>
+				<string>remohelppro</string>
 			</array>
 		</dict>
 	</array>
