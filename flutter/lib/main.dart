@@ -234,6 +234,25 @@ void runMainApp(bool startService) async {
     windowManager.setTitle(getWindowName());
     // Do not use `windowManager.setResizable()` here.
     setResizable(!bind.isIncomingOnly());
+    // 🔴🔴 Mac では音声を送らない（2026-08-16 実機で判明）。
+    //
+    //   Windows は「パソコンから出ている音」を拾えるが、
+    //   ⚠ **macOS にはその仕組みが無く、代わりに「マイク」を拾ってしまう**
+    //     （src/server/audio_service.rs の default_input_device()）。
+    //   ＝ 相談員の「音を聞く」が、Mac では「**部屋の音を聞く**」になる。
+    //   お客様に断りなくマイクが流れるのは、privacy として通らない。
+    //   実際、相談員側と音が回ってハウリングした。
+    //
+    //   ★Mac のお客様版では、最初から音声を送らない。
+    //   ⚠ Windows は従来どおり（エラー音を聞けることに意味がある）。
+    //   ⚠ 相談員が別途始める「Web通話」は音声の扱いが別なので、これに影響されない。
+    if (kRlSupportShowWindow && isMacOS) {
+      try {
+        await bind.mainSetOption(key: 'enable-audio', value: 'N');
+      } catch (e) {
+        debugPrint('RL: Mac の音声を止められませんでした: $e');
+      }
+    }
     // 2026-06-23: サポート版(ワンタイム)は分岐に関係なく最後に必ず表示する(取りこぼし防止)
     if (kRlSupportShowWindow) {
       await windowManager.setSkipTaskbar(false);
