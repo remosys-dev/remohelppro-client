@@ -78,6 +78,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   InputModel get inputModel => gFFI.inputModel;
   SessionID get sessionId => gFFI.sessionId;
 
+  /// 手で入力欄を書き換えている間だけ true。見張りを素通りさせる。
+  /// ⚠ 立てずに書き換えると、相手側へ**消す指示が飛ぶ**。
+  bool _suppressControllerEvents = false;
   final TextEditingController _textController =
       TextEditingController(text: initText);
 
@@ -121,11 +124,45 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
           isKeyboardVisible: keyboardVisibilityController.isVisible);
     });
     WidgetsBinding.instance.addObserver(this);
+    // 🔴🔴 日本語の「確定」を拾うために、入力欄そのものを見張る（2026-08-15）。
+    //   理由は _onTextControllerChanged() の説明を参照。
+    //   ⚠ onChanged だけでは**確定の瞬間が届かない**。
+    if (!isIOS) {
+      _textController.addListener(_onTextControllerChanged);
+    }
+  }
+
+  /// 変換の「確定」を拾う。
+  ///
+  /// 🔴🔴 なぜ onChanged では足りないか（2026-08-15・実機で直らなかった理由）。
+  ///
+  ///   Flutter は **文字が変わったときだけ** onChanged を呼ぶ
+  ///   （EditableText._formatAndSetValue の `if (textChanged)`）。
+  ///   日本語の変換を確定する操作は、多くの場合
+  ///   **文字は「にほん」のままで、変換中の印だけが外れる**。
+  ///   ＝ 文字が変わらないので **onChanged は呼ばれない**。
+  ///   前回の直しは「変換中は送らない」までは正しかったが、
+  ///   **確定の瞬間に呼ばれる先が無かった**ので、結局何も送られなかった。
+  ///
+  ///   ★入力欄の変化そのものを見張れば、変換中の印が外れた瞬間に気づける。
+  ///
+  /// ⚠ 手で `_textController.text` を入れ替えるとき（キーボードを開き直すとき）は
+  ///   ここを素通りさせる。素通りさせないと、相手側へ**消す指示が飛ぶ**。
+  void _onTextControllerChanged() {
+    if (_suppressControllerEvents) return;
+    // まだ変換中。確定するまで送らない。
+    if (_textController.value.isComposingRangeValid) return;
+    final v = _textController.text;
+    if (v == _value) return;
+    _handleNonIOSSoftKeyboardInput(v);
   }
 
   @override
   Future<void> dispose() async {
     WidgetsBinding.instance.removeObserver(this);
+    if (!isIOS) {
+      _textController.removeListener(_onTextControllerChanged);
+    }
     // https://github.com/flutter/flutter/issues/64935
     super.dispose();
     gFFI.dialogManager.hideMobileActionsOverlay(store: false);
@@ -364,7 +401,9 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
     gFFI.invokeMethod("enable_soft_keyboard", true);
     // destroy first, so that our _value trick can work
     _value = initText;
+    _suppressControllerEvents = true;
     _textController.text = _value;
+    _suppressControllerEvents = false;
     setState(() => _showEdit = false);
     _timer?.cancel();
     _timer = Timer(kMobileDelaySoftKeyboard, () {
