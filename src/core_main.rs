@@ -155,6 +155,27 @@ pub fn core_main() -> Option<Vec<String>> {
             {
                 _is_flutter_invoke_new_connection = true;
             }
+            // 🔴🔴 macOS がダブルクリック起動のときに付ける `-psn_0_xxxxx` を捨てる
+            //   （2026-08-15 実機で確定）。
+            //
+            //   macOS の LaunchServices は、Finder や `open` から起動したとき
+            //   `-psn_0_483446` のような引数を渡してくる（プロセス通し番号）。
+            //   これを引数として数えていたため `args.is_empty()` が成り立たず、
+            //   **画面を配信する処理（start_server）が一度も起動しなかった**。
+            //   `is_empty_uni_link()` も `remohelppro://` で始まらないので false。
+            //
+            //   ⚠ 症状は「接続できません。ネットワーク接続を確認してください」。
+            //     中継サーバーへの登録そのものは別経路で成功することがあるため、
+            //     **通信のせいに見えて原因にたどり着けない**。
+            //   ⚠ 診断で実行ファイルを**直接**起動したときは `-psn_` が付かず、
+            //     正しく起動して登録も成立した。
+            //     ＝「調べると動く、ダブルクリックだと動かない」という、
+            //       いちばん厄介な形になっていた（実際 1日を溶かした）。
+            #[cfg(target_os = "macos")]
+            if arg.starts_with("-psn_") {
+                i += 1;
+                continue;
+            }
             if arg == "--elevate" {
                 _is_elevate = true;
             } else if arg == "--run-as-system" {
