@@ -1207,7 +1207,33 @@ jobs:
             export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ inputs.onetime_valid_days }} * 86400 ))
             echo "RL: onetime expires at ${RL_ONETIME_EXPIRES_AT}"
           fi
-          ./build.py --flutter --hwcodec --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
+          # 🔴🔴 Mac では hwcodec を**入れない**（2026-08-15 実機で確定）。
+          #
+          #   お客様の MacBook Pro（Intel・macOS 10.15.8）で、
+          #   認証コードを入れると「ネットワークに接続できません」と出た。
+          #   通信は正常で（21115〜21119・443 すべて到達を実測）、
+          #   中継サーバーにも一度も登録できていなかった。
+          #
+          #   実物の記録に出ていた本当の理由:
+          #     dyld: Symbol not found: _VTRegisterSupplementalVideoDecoderIfAvailable
+          #       Referenced from: .../Frameworks/liblibrustdesk.dylib
+          #       Expected in: /System/Library/Frameworks/VideoToolbox.framework
+          #
+          #   この命令は **macOS 11 (Big Sur) 以降にしか無い**。
+          #   hwcodec が同梱する FFmpeg(libavcodec) が macOS 11 の SDK で
+          #   作られており、遅延解決に失敗した瞬間に**被操作サービスが落ちる**。
+          #   ＝ 接続番号が取れず、画面には「通信の問題」と出る。
+          #   （同じ記録に `Check hwcodec config, exit with: signal: 6 (SIGABRT)` もある）
+          #
+          #   ⚠ 一番たちが悪いのは、**原因から遠ざかる案内が出る**こと。
+          #     お客様も相談員も Wi-Fi を疑い、延々と時間を使う。
+          #
+          #   ★hwcodec を外すと FFmpeg を抱えなくなり、macOS 10.14 以降で動く。
+          #     代わりに映像は VP8/VP9/AV1（ソフトウェア）になる。
+          #     RustDesk の既定はもともと VP9 なので、実用上の差はほぼ無い。
+          #     ⚠ 速さを取り戻したくなっても、hwcodec を戻すと 10.15 以前が
+          #       また落ちる。戻すなら「macOS 11 以降」と明記してからにすること。
+          ./build.py --flutter --unix-file-copy-paste ${{ matrix.job.extra-build-args }}
 
       # REMOHELP PRO: Mac のアプリ名を製品名にする（2026-07-29）。
       #   🔴 Windows だけ remohelppro.exe にリネーム済みで、**Mac が漏れていた**。
