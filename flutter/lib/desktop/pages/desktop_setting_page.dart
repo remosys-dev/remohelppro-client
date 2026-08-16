@@ -2405,6 +2405,24 @@ class _AboutState extends State<_About> {
                             'Copyright © ${DateTime.now().toString().substring(0, 4)} 株式会社リモシス\n$license',
                             style: const TextStyle(color: Colors.white),
                           ),
+                          // 🔴🔴 改変したことと、ソースの入手先を必ず出す（2026-08-16）。
+                          //
+                          //   本製品は RustDesk（AGPL-3.0）を当社が改変したもの。
+                          //   AGPL は「改変したこと」を分かる形で示すことと、
+                          //   配った相手にソースを渡せるようにすることを求める。
+                          //   ⚠ 本家が問題にしているフォークは、まさにこの表示を
+                          //     消したもの。書かないと同じ扱いになる。
+                          //   ⚠ 消さないこと。消すとライセンス違反になる。
+                          const SizedBox(height: 10),
+                          const Text(
+                            '本製品は RustDesk（GNU AGPL-3.0）を\n'
+                            '株式会社リモシスが改変したものです。\n'
+                            'ライセンス本文とソースの入手：\n'
+                            'https://remohelppro.jp/legal/oss',
+                            style: TextStyle(
+                                color: Colors.white70, fontSize: 12, height: 1.5),
+                          ),
+                          const SizedBox(height: 8),
                           Text(
                             translate('Slogan_tip'),
                             style: TextStyle(

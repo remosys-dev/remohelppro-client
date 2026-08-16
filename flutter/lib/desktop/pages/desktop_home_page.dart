@@ -87,6 +87,73 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   //   「認証コードを入力 → 接続する」だけをはっきり見せる。操作員用の相手一覧・
   //   リモートID入力・自分のサーバー案内・インストール誘導は一切出さない。
   //   うまく繋がらない時のためのID＋一時パスワードは折りたたみに退避(口頭フォールバック)。
+  /// 「このアプリについて」の一言。押すと窓が開く。
+  ///
+  /// ⚠ 小さな灰色にしてあるのは、お客様の画面を邪魔しないため。
+  ///   AGPL は「目立たせろ」とは求めていない。「示せ」と求めている。
+  ///   ★ただし**読める大きさと色**にすること。読めない色にすると示したことにならない。
+  Widget _buildAboutLink(BuildContext context) {
+    return TextButton(
+      onPressed: () => _showAboutDialog(context),
+      style: TextButton.styleFrom(
+        minimumSize: Size.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: const Text(
+        'このアプリについて',
+        style: TextStyle(fontSize: 11, color: Color(0xFF98A2B3)),
+      ),
+    );
+  }
+
+  /// 改変の表示とライセンス本文の場所。
+  /// ⚠ URL を変えないこと。ここが唯一の「本文を渡す」経路になっている。
+  void _showAboutDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('このアプリについて', style: TextStyle(fontSize: 16)),
+        content: SelectionArea(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('REMOHELP PRO　${bind.mainGetVersion()}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 2),
+                const Text('提供：株式会社リモシス'),
+                const SizedBox(height: 14),
+                const Text(
+                  '本製品は RustDesk を株式会社リモシスが改変したものです。\n'
+                  'ライセンス：GNU AGPL-3.0',
+                  style: TextStyle(height: 1.6),
+                ),
+                const SizedBox(height: 10),
+                const Text('ライセンス本文とソースの入手：',
+                    style: TextStyle(fontSize: 12.5)),
+                const SelectionArea(
+                  child: Text(
+                    'https://remohelppro.jp/legal/oss',
+                    style: TextStyle(fontSize: 12.5, color: Color(0xFF0B6BB5)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget buildSupportOnlyHome(BuildContext context) {
     final content = ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 460),
@@ -102,6 +169,25 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           //   「うまく繋がらないとき（担当者にIDを伝える）」欄(ID＋一時PW)を撤去。
           //   接続は6桁コード方式に一本化する。
           const SizedBox(height: 20),
+          // 🔴🔴 改変の表示（2026-08-16）。**消さないこと。**
+          //
+          //   本製品は RustDesk（AGPL-3.0）を当社が改変したもの。
+          //   AGPL は「配った相手に、改変したことを示す」ことと
+          //   「ライセンス本文を一緒に渡す」ことを求める。
+          //   ⚠ お客様版には設定も「について」画面も無い
+          //     （高齢の方が迷わないよう、認証コード入力だけにしてある）。
+          //     ＝ いちばんバイナリを受け取っている相手が、
+          //       どこでも表示を見られない状態だった。
+          //   ⚠ ライセンス本文もどこにも渡せていなかった
+          //     （同梱しておらず、$license は上流の商用版用で空）。
+          //
+          //   ★画面には「このアプリについて」の一言だけ（小さな灰色）。
+          //     押すと窓が開いて、そこに表示と本文の場所を出す。
+          //   ⚠ 別の画面へ飛ばさない。窓が開いて閉じるだけなので、
+          //     サポート中のお客様が迷子にならない。
+          //   ⚠ 表示を消さないこと。消すとライセンス違反になる。
+          _buildAboutLink(context),
+          const SizedBox(height: 14),
         ],
       ),
     );

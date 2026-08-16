@@ -1,3 +1,27 @@
+# REMOHELP PRO（RustDesk の改変版）
+
+> **本リポジトリは [RustDesk](https://github.com/rustdesk/rustdesk) を
+> 株式会社リモシスが改変したものです。**
+>
+> - ライセンス: **GNU AGPL-3.0**（`LICENCE` を参照）
+> - 上流: https://github.com/rustdesk/rustdesk
+> - 改変者: 株式会社リモシス
+> - 製品名: REMOHELP PRO
+>
+> 主な改変: 自社の中継サーバーへの切替、常駐（無人アクセス）の作り直し、
+> 会社・相談員・端末の管理、第三者への通信の停止、日本語での案内文の全面的な書き直し。
+>
+> **ソースの入手について**
+> 本製品のバイナリをお受け取りになった方は、対応するソースを請求できます。
+> 本リポジトリで公開しているほか、`info@remosys.jp` へご連絡ください。
+>
+> ⚠ この表示を消さないこと。AGPL は「改変したことを分かる形で示す」ことを求めます。
+> 表示を消したフォークは、上流で繰り返し問題になっています。
+
+以下は上流 RustDesk の README です（当社の改変内容は上記のとおり）。
+
+---
+
 <p align="center">
   <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
   <a href="#raw-steps-to-build">Build</a> •
