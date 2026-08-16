@@ -39,15 +39,22 @@ pub struct WebRTCStream {
 /// Most browsers, including Chromium, enforce this protocol limit.
 const DATA_CHANNEL_BUFFER_SIZE: u16 = u16::MAX;
 
-// use 3 public STUN servers to find out the NAT type, 2 must be the same address but different ports
-// https://stackoverflow.com/questions/72805316/determine-nat-mapping-behaviour-using-two-stun-servers
-// luckily nextcloud supports two ports for STUN
-// unluckily webrtc-rs does not use the same port to do the STUN request
-static DEFAULT_ICE_SERVERS: [&str; 3] = [
-    "stun:stun.cloudflare.com:3478",
-    "stun:stun.nextcloud.com:3478",
-    "stun:stun.nextcloud.com:443",
-];
+// 🔴🔴 STUN は**当社のサーバーだけ**にする（2026-08-16）。
+//
+//   元は Cloudflare と Nextcloud の公開 STUN を使っていた。
+//   ⚠ **お客様のパソコンのIPが、接続のたびに第三者へ渡る。**
+//   「お客様の通信を第三者に渡さない」を売りにしている以上、通らない。
+//
+//   中継サーバー（rd.remohelppro.jp:3478）が STUN に答える
+//   （LiveKit の内蔵 TURN・2026-08-16 に外から実測で確認）。
+//
+//   ⚠ 上流は「NATの種類を見分けるために**別ポートの2つ**が要る」として
+//     nextcloud の 3478 と 443 を並べていた。当社は1つしか出さないので、
+//     NATの種類の見分けは粗くなる。
+//     ★それでも、お客様のIPを第三者に渡さない方を採る。
+//     接続そのものは中継サーバー（21116 / 443）で成立する。
+//   ⚠ 増やすときも**当社のものだけ**にすること。
+static DEFAULT_ICE_SERVERS: [&str; 1] = ["stun:rd.remohelppro.jp:3478"];
 
 lazy_static::lazy_static! {
     static ref SESSIONS: Arc::<Mutex<HashMap<String, WebRTCStream>>> = Default::default();

@@ -2465,17 +2465,28 @@ async fn stun_ipv4_test(stun_server: &str) -> ResultType<(SocketAddr, String)> {
     })
 }
 
-static STUNS_V4: [&str; 3] = [
-    "stun.l.google.com:19302",
-    "stun.cloudflare.com:3478",
-    "stun.nextcloud.com:3478",
-];
+// 🔴🔴 STUN は**当社のサーバーだけ**にする（2026-08-16）。
+//
+//   元は Google・Cloudflare・Nextcloud の STUN に問い合わせていた。
+//   STUN は「自分の外向きIPを教えてもらう」ものなので、
+//   ⚠ **お客様のパソコンのIPが、接続のたびに第三者へ渡っていた**。
+//   「お客様の通信を第三者に渡さない」を売りにしている以上、通らない。
+//
+//   ⚠ 2026-08-10 に入れた関所は **HTTP の出口**（post_request 等）だけを見ており、
+//     STUN は UDP なので**素通りしていた**。塞いだつもりで塞げていなかった。
+//
+//   ★中継サーバー（rd.remohelppro.jp）で LiveKit の内蔵 TURN を有効にし、
+//     3478 で STUN に答えるようにした（2026-08-16・外から実測で確認）。
+//     coturn も新しいサーバーも増やしていない。
+//
+//   ⚠ 1つしか書かないので、ここが落ちると外向きIPが取れない。
+//     ただし外向きIPは**補助**であって、接続そのものは中継サーバーとの
+//     やり取り（21116 / 443）で成立する。中継が落ちていれば
+//     どのみち繋がらないので、STUN だけ第三者に頼る理由がない。
+//   ⚠ 宛先を増やすときも、**当社のものだけ**にすること。
+static STUNS_V4: [&str; 1] = ["rd.remohelppro.jp:3478"];
 
-static STUNS_V6: [&str; 3] = [
-    "stun.l.google.com:19302",
-    "stun.cloudflare.com:3478",
-    "stun.nextcloud.com:3478",
-];
+static STUNS_V6: [&str; 1] = ["rd.remohelppro.jp:3478"];
 
 pub async fn test_nat_ipv4() -> ResultType<(SocketAddr, String)> {
     use hbb_common::futures::future::{select_ok, FutureExt};
