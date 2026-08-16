@@ -59,7 +59,13 @@ fn route_customer_draw(key: String, data: String) {
 
 pub fn register_whiteboard(k: String) {
     std::thread::spawn(|| {
-        allow_err!(start_whiteboard_());
+        if let Err(e) = start_whiteboard_() {
+            // 🔴 黙って諦めない（2026-08-16）。
+            //   ⚠ 元は allow_err! で握りつぶしており、相談員は線を引けるのに
+            //     お客様の画面には何も出ない、という状態になっていた。
+            //     どこで止まったかが記録に残らないと、原因にたどり着けない。
+            log::error!("RL: 画面注釈を始められませんでした: {e}");
+        }
     });
     let mut conns = CONNS.write().unwrap();
     if !conns.contains_key(&k) {
@@ -176,6 +182,11 @@ async fn start_whiteboard_() -> ResultType<()> {
         #[cfg(target_os = "linux")]
         let mut user = None;
 
+        // 🔴 立ち上がったか／どこで止まったかを必ず残す（2026-08-16）。
+        //   ⚠ 元は debug! で「Start whiteboard」と書くだけで、
+        //     **失敗しても誰にも何も出なかった**。相談員は線を引けるのに
+        //     お客様の画面には出ない、という形になり原因にたどり着けない。
+        log::info!("RL: 画面注釈の板を立ち上げます（root={}）", crate::platform::is_root());
         let run_done;
         if crate::platform::is_root() {
             let mut res = Ok(None);
@@ -208,18 +219,37 @@ async fn start_whiteboard_() -> ResultType<()> {
             run_done = false;
         }
         if !run_done {
-            log::debug!("Start whiteboard");
-            CHILD_PROCESS.lock().unwrap().push(crate::run_me(args)?);
+            match crate::run_me(args) {
+                Ok(child) => {
+                    log::info!("RL: 画面注釈の板を起動しました pid={:?}", child.id());
+                    CHILD_PROCESS.lock().unwrap().push(child);
+                }
+                Err(e) => {
+                    // ⚠ 起動そのものに失敗。ここで諦めると原因が残らない。
+                    log::error!("RL: 画面注釈の板を起動できませんでした: {e}");
+                    bail!("failed to spawn whiteboard: {e}");
+                }
+            }
         }
-        for _ in 0..20 {
+        // 🔴 待ち時間を 6秒 → 15秒 に延ばす（2026-08-16）。
+        //   ⚠ 古い Mac では、起動して窓を出すまでに数秒かかることがある。
+        //     短すぎると「立ち上がっているのに間に合わず失敗」になる。
+        let mut waited = 0.0f32;
+        for _ in 0..50 {
             sleep(0.3).await;
+            waited += 0.3;
             if let Ok(s) = ipc::connect(1000, "_whiteboard").await {
+                log::info!("RL: 画面注釈の板につながりました（{:.1}秒）", waited);
                 stream = Some(s);
                 break;
             }
         }
         if stream.is_none() {
-            bail!("Failed to connect to connection manager");
+            // ⚠ 「立ち上げたが、話しかけられない」。どちらなのかを残す。
+            log::error!(
+                "RL: 画面注釈の板は起動したが、{:.1}秒待っても応答がありません", waited
+            );
+            bail!("whiteboard did not respond");
         }
     }
 
