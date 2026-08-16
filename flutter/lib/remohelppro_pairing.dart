@@ -3,6 +3,7 @@ import 'dart:convert';
 // Process / ProcessStartMode は Mac の自己削除で使う（自分を消す後始末を切り離して走らせる）。
 import 'dart:io' show Platform, File, Directory, exit, Process, ProcessStartMode;
 import 'package:flutter/material.dart';
+import 'remohelppro_mac_permission.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -1409,6 +1410,14 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ),
+            // 🔴🔴 Mac の許可を、その場で案内する（2026-08-16 ご指摘「動作が多すぎ」）。
+            //
+            //   Mac は繋がっても、許可が無いと**映像が出ない・操作できない**。
+            //   ところが当社のアプリは**許可について一言も出していなかった**。
+            //   ＝ Mac のお客様は全員ここで止まり、相談員が電話で説明するしかない。
+            //   ⚠ 設定画面を直接開くボタンまで置く。探させない。
+            //   ⚠ Windows には出さない（この手間が無い）。
+            const MacPermissionCard(accent: _accent),
             // 🔴🔴 いま実際に操作されているかを、お客様の画面に出す
             //   （2026-08-08 ご指摘）。
             //
