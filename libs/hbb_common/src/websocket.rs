@@ -5,7 +5,7 @@ use crate::{
     protobuf::Message,
     socket_client::split_host_port,
     sodiumoxide::crypto::secretbox::Key,
-    tcp::Encrypt,
+    tcp::{DynTcpStream, Encrypt},
     tls::{get_cached_tls_accept_invalid_cert, get_cached_tls_type, upsert_tls_cache, TlsType},
     ResultType,
 };
@@ -22,17 +22,113 @@ use std::{
 use tokio::{net::TcpStream, time::timeout};
 use tokio_native_tls::native_tls::TlsConnector;
 use tokio_tungstenite::{
-    connect_async_tls_with_config, tungstenite::protocol::Message as WsMessage, Connector,
+    client_async_tls_with_config, tungstenite::protocol::Message as WsMessage, Connector,
     MaybeTlsStream, WebSocketStream,
 };
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Role;
 
+/// 443 の道が通る「土管」。直につないだ TCP でも、プロキシ越しでも同じ形にする。
+///
+/// 🔴🔴 なぜ型を変えたか（2026-08-17）。
+///   元は `MaybeTlsStream<TcpStream>` に固定されていた。
+///   ⚠ プロキシを通すと中身は TcpStream ではなくなる（CONNECT 後の緩衝つきの流れ、
+///     あるいは socks5 の流れ）ので、この型のままでは**入れられなかった**。
+///   ＝ だから上流は `// to-do: websocket proxy.` のまま放置されていた。
+///   `DynTcpStream` は中身を箱に入れて隠すので、どちらも同じ形で扱える。
+type WsTransport = MaybeTlsStream<DynTcpStream>;
+
 pub struct WsFramedStream {
-    stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    stream: WebSocketStream<WsTransport>,
     addr: SocketAddr,
     encrypt: Option<Encrypt>,
     send_timeout: u64,
+}
+
+/// 443 の宛先を「ホスト名」と「ポート」に分ける。
+///
+/// ⚠ `wss` と `ws` は `url` が既定のポートを知らないので、自分で決める。
+///   知らないまま 0 番を使うと、**プロキシに CONNECT 先 0 番を頼む**ことになり
+///   必ず断られる。
+fn ws_host_port(url: &str) -> ResultType<(String, u16)> {
+    let u = url::Url::parse(url)?;
+    let host = match u.host_str() {
+        Some(h) => h.to_string(),
+        None => bail!("no host in websocket url: {}", url),
+    };
+    let default_port = match u.scheme() {
+        "wss" | "https" => 443u16,
+        _ => 80u16,
+    };
+    Ok((host, u.port().unwrap_or(default_port)))
+}
+
+/// 443 の土管を1本開ける。プロキシが設定されていれば、必ずそこを通す。
+///
+/// ⚠ 直つなぎのときは、これまでどおり local_addr を使わない。
+///   使うと、ポートの再利用の都合で IPv6/IPv4 の食い違いが出て、
+///   **今まで繋がっていた環境が繋がらなくなる**（穴を塞ぐつもりで穴を開ける）。
+async fn open_ws_transport(
+    url: &str,
+    proxy_conf: Option<&Socks5Server>,
+    ms_timeout: u64,
+) -> ResultType<(DynTcpStream, SocketAddr)> {
+    let (host, port) = ws_host_port(url)?;
+
+    if let Some(conf) = proxy_conf {
+        log::info!(
+            "RL: 443の道もプロキシを通します（宛先 {}:{}）",
+            host,
+            port
+        );
+        let proxy = crate::proxy::Proxy::from_conf(conf, Some(ms_timeout))?;
+        return proxy.connect_raw((host.as_str(), port), None).await;
+    }
+
+    let mut last_err: Option<anyhow::Error> = None;
+    match tokio::net::lookup_host((host.as_str(), port)).await {
+        Ok(addrs) => {
+            for addr in addrs {
+                match timeout(Duration::from_millis(ms_timeout), TcpStream::connect(addr)).await {
+                    Ok(Ok(s)) => {
+                        s.set_nodelay(true).ok();
+                        return Ok((DynTcpStream(Box::new(s)), addr));
+                    }
+                    Ok(Err(e)) => last_err = Some(e.into()),
+                    Err(e) => last_err = Some(e.into()),
+                }
+            }
+        }
+        // ⚠ 名前を引けないのも「直接は出られない」の一つの形。
+        //   ここで諦めずに、下のプロキシの逃げ道まで進む。
+        Err(e) => last_err = Some(e.into()),
+    }
+
+    // 🔴 最後の逃げ道: パソコンに元から入っているプロキシの設定を使う。
+    //
+    //   ⚠ お客様は自分の会社のプロキシの場所を知らない。常駐には画面が無い。
+    //     手で入れてもらう道だけでは、実際には届かない。
+    //   ★直につないで駄目だったときにだけ使う。
+    //     普段（家庭・直接出られる会社）はここまで来ないので、
+    //     **今まで繋がっていた環境の動きは何も変わらない**。
+    if let Some(conf) = crate::system_proxy::detect() {
+        log::info!("RL: 直接つなげなかったので、パソコンのプロキシ設定で試します");
+        match crate::proxy::Proxy::from_conf(&conf, Some(ms_timeout)) {
+            Ok(proxy) => match proxy.connect_raw((host.as_str(), port), None).await {
+                Ok(v) => {
+                    log::info!("RL: パソコンのプロキシ設定で 443 の道が通りました");
+                    return Ok(v);
+                }
+                Err(e) => log::warn!("RL: パソコンのプロキシ設定でも通りませんでした: {}", e),
+            },
+            Err(e) => log::warn!("RL: パソコンのプロキシ設定を読めましたが、使えません: {}", e),
+        }
+    }
+
+    match last_err {
+        Some(e) => bail!(e),
+        None => bail!("no address resolved for {}:{}", host, port),
+    }
 }
 
 impl WsFramedStream {
@@ -67,16 +163,16 @@ impl WsFramedStream {
 
     async fn connect(
         url: &str,
+        proxy_conf: Option<&Socks5Server>,
         ms_timeout: u64,
-    ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-        // to-do: websocket proxy.
-
+    ) -> ResultType<(WebSocketStream<WsTransport>, SocketAddr)> {
         let tls_type = get_cached_tls_type(url);
         let is_tls_type_cached = tls_type.is_some();
         let tls_type = tls_type.unwrap_or(TlsType::Rustls);
         let danger_accept_invalid_cert = get_cached_tls_accept_invalid_cert(&url);
         Self::try_connect(
             url,
+            proxy_conf,
             ms_timeout,
             tls_type,
             is_tls_type_cached,
@@ -89,28 +185,31 @@ impl WsFramedStream {
     #[async_recursion]
     async fn try_connect(
         url: &str,
+        proxy_conf: Option<&'async_recursion Socks5Server>,
         ms_timeout: u64,
         tls_type: TlsType,
         is_tls_type_cached: bool,
         danger_accept_invalid_cert: Option<bool>,
         original_danger_accept_invalid_certs: Option<bool>,
-    ) -> ResultType<WebSocketStream<MaybeTlsStream<TcpStream>>> {
+    ) -> ResultType<(WebSocketStream<WsTransport>, SocketAddr)> {
         let ws_config = None;
-        let disable_nagle = false;
         let request = url
             .into_client_request()
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
         let connector =
             Self::get_connector(&tls_type, danger_accept_invalid_cert.unwrap_or(false))?;
+        // ⚠ 土管は**やり直すたびに開け直す**こと。
+        //   TLS の種類を変えて試し直す作りなので、使い終わった流れは再利用できない。
+        let (transport, addr) = open_ws_transport(url, proxy_conf, ms_timeout).await?;
         match timeout(
             Duration::from_millis(ms_timeout),
-            connect_async_tls_with_config(request, ws_config, disable_nagle, connector),
+            client_async_tls_with_config(request, transport, ws_config, connector),
         )
         .await?
         {
             Ok((ws_stream, _)) => {
                 upsert_tls_cache(url, tls_type, danger_accept_invalid_cert.unwrap_or(false));
-                Ok(ws_stream)
+                Ok((ws_stream, addr))
             }
             Err(e) => match (tls_type, is_tls_type_cached, danger_accept_invalid_cert) {
                 (TlsType::Rustls, _, None) => {
@@ -121,6 +220,7 @@ impl WsFramedStream {
                         );
                     Self::try_connect(
                         url,
+                        proxy_conf,
                         ms_timeout,
                         tls_type,
                         is_tls_type_cached,
@@ -137,6 +237,7 @@ impl WsFramedStream {
                     );
                     Self::try_connect(
                         url,
+                        proxy_conf,
                         ms_timeout,
                         TlsType::NativeTls,
                         is_tls_type_cached,
@@ -153,6 +254,7 @@ impl WsFramedStream {
                         );
                     Self::try_connect(
                         url,
+                        proxy_conf,
                         ms_timeout,
                         tls_type,
                         is_tls_type_cached,
@@ -177,16 +279,13 @@ impl WsFramedStream {
     pub async fn new<T: AsRef<str>>(
         url: T,
         _local_addr: Option<SocketAddr>,
-        _proxy_conf: Option<&Socks5Server>,
+        proxy_conf: Option<&Socks5Server>,
         ms_timeout: u64,
     ) -> ResultType<Self> {
-        let stream = Self::connect(url.as_ref(), ms_timeout).await?;
-        let addr = match stream.get_ref() {
-            MaybeTlsStream::Plain(tcp) => tcp.peer_addr()?,
-            MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().get_ref().peer_addr()?,
-            MaybeTlsStream::Rustls(tls) => tls.get_ref().0.peer_addr()?,
-            _ => return Err(Error::new(ErrorKind::Other, "Unsupported stream type").into()),
-        };
+        // ⚠ 相手の住所は、土管を開けたときに控えておく。
+        //   中身を箱に入れて隠したので、後から流れに聞くことはできない
+        //   （プロキシ越しだと、そもそも聞いても**プロキシの住所**しか返らない）。
+        let (stream, addr) = Self::connect(url.as_ref(), proxy_conf, ms_timeout).await?;
 
         let ws = Self {
             stream,
@@ -206,7 +305,11 @@ impl WsFramedStream {
     #[inline]
     pub async fn from_tcp_stream(stream: TcpStream, addr: SocketAddr) -> ResultType<Self> {
         let ws_stream =
-            WebSocketStream::from_raw_socket(MaybeTlsStream::Plain(stream), Role::Client, None)
+            WebSocketStream::from_raw_socket(
+                MaybeTlsStream::Plain(DynTcpStream(Box::new(stream))),
+                Role::Client,
+                None,
+            )
                 .await;
 
         Ok(Self {

@@ -139,8 +139,13 @@ pub async fn connect_tcp<
     }
     let target_str = check_ws(&target.to_string());
     if is_ws_endpoint(&target_str) {
+        // ⚠ ここは `None` を渡していた（＝プロキシを無視していた）。
+        //   443 の道もプロキシを通せるようになったので、設定があれば必ず渡す。
+        //   これを渡し忘れると、プロキシ必須の会社では
+        //   **443 の逃げ道だけが黙って外へ出ようとして塞がれる**。
+        let socks = Config::get_socks();
         return Ok(Stream::WebSocket(
-            websocket::WsFramedStream::new(target_str, None, None, ms_timeout).await?,
+            websocket::WsFramedStream::new(target_str, None, socks.as_ref(), ms_timeout).await?,
         ));
     }
     connect_tcp_local(target, None, ms_timeout).await

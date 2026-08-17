@@ -81,6 +81,8 @@ clap = "4.5.51"
 webrtc = "0.14.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# パソコンに元から入っているプロキシの設定を読むため（system_proxy.rs）
+winreg = "0.11"
 winapi = { version = "0.3", features = [
     "winuser",
     "synchapi",

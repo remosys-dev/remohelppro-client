@@ -1306,6 +1306,156 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     );
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // 会社のプロキシ設定（2026-08-17）
+  //
+  //   🔴🔴 なぜ、ここに自分で書くか。
+  //     同じ窓は設定画面（desktop_setting_page.dart の changeSocks5Proxy）に
+  //     既にある。⚠ しかし、あれを取り込むと
+  //     desktop_tab_page / desktop_home_page まで一緒に付いてくる。
+  //     このファイルは **Android の画面（mobile/pages/server_page.dart）も**
+  //     使っているので、机上専用の部品を持ち込むと Android が壊れる。
+  //     ＝ ここは短く書き写す方が安全。
+  //
+  //   ⚠ 直すときは**両方**直すこと（設定画面と、ここ）。
+  //     ただし保存先は同じ（mainSetSocks）なので、食い違うのは見た目だけ。
+  //
+  //   ⚠ 窓は showDialog（この画面の context）で出す。
+  //     gFFI.dialogManager は土台の登録が要り、お客様版では確実でない。
+  // ══════════════════════════════════════════════════════════════
+  Future<void> _showProxyDialog(BuildContext context) async {
+    // 既に入っている値を出す（入れ直しをさせない）。
+    var host = '';
+    var user = '';
+    var pass = '';
+    try {
+      final socks = await bind.mainGetSocks();
+      if (socks.length == 3) {
+        host = socks[0];
+        user = socks[1];
+        pass = socks[2];
+      }
+    } catch (e) {
+      debugPrint('RL: プロキシ設定を読めませんでした: $e');
+    }
+    if (!mounted) return;
+
+    final hostC = TextEditingController(text: host);
+    final userC = TextEditingController(text: user);
+    final passC = TextEditingController(text: pass);
+    var saving = false;
+    String? msg;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('会社のプロキシを設定する',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '社内からインターネットへ直接出られない会社では、\n'
+                  'プロキシを通す必要があります。\n'
+                  '設定の値は、会社のネットワーク担当者にご確認ください。',
+                  style: TextStyle(fontSize: 12.5, color: _muted, height: 1.6),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: hostC,
+                  decoration: const InputDecoration(
+                    labelText: 'プロキシの場所',
+                    hintText: 'socks5://192.168.1.1:1080',
+                    helperText: '空欄にすると、プロキシを使わない設定に戻ります',
+                    helperMaxLines: 2,
+                    isDense: true,
+                  ),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: userC,
+                  decoration: const InputDecoration(
+                      labelText: 'ユーザー名（必要なときだけ）', isDense: true),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passC,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                      labelText: 'パスワード（必要なときだけ）', isDense: true),
+                  style: const TextStyle(fontSize: 13),
+                ),
+                // ⚠ 種類を書いておかないと、http しか知らない担当者が困る。
+                const SizedBox(height: 10),
+                const Text(
+                  '書き方の例：\n'
+                  '  socks5://ホスト名:1080\n'
+                  '  http://ホスト名:8080\n'
+                  '  https://ホスト名:8080',
+                  style: TextStyle(fontSize: 11, color: _faint, height: 1.5),
+                ),
+                if (msg != null) ...[
+                  const SizedBox(height: 10),
+                  Text(msg!,
+                      style: const TextStyle(fontSize: 12, color: _danger)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.of(ctx).pop(),
+              child: const Text('やめる'),
+            ),
+            TextButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      setLocal(() {
+                        saving = true;
+                        msg = null;
+                      });
+                      try {
+                        await bind.mainSetSocks(
+                          proxy: hostC.text.trim(),
+                          username: userC.text.trim(),
+                          password: passC.text,
+                        );
+                      } catch (e) {
+                        setLocal(() {
+                          saving = false;
+                          msg = '保存できませんでした：$e';
+                        });
+                        return;
+                      }
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                    },
+              child: Text(saving ? '保存しています…' : '保存する'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    hostC.dispose();
+    userC.dispose();
+    passC.dispose();
+    if (!mounted) return;
+    // 🔴 保存しただけでは繋がらない。**入れ直しが要る**ことを必ず伝える。
+    //   ⚠ プロキシは接続を張り直すときに読まれるので、
+    //     今出ている「繋がりません」は、閉じて開き直すまで消えない。
+    setState(() {
+      _error = 'プロキシの設定を保存しました。\n'
+          'このアプリを一度閉じて、開き直してからお試しください。';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // ── 接続中（ワンクリック自動 or 手入力後） ──
@@ -1526,6 +1676,36 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                   color: _error != null ? _danger : _faint),
             ),
           ),
+          // 🔴🔴 プロキシの設定への入口（2026-08-17）。
+          //
+          //   法人のお客様は、社内から直接インターネットへ出られず
+          //   **プロキシを通さないと通信できない**ことがある。
+          //   RustDesk はプロキシ（Socks5/Http(s)）に対応しているが、
+          //   ⚠ その設定は**設定画面の中**にあり、
+          //     お客様版には設定画面そのものが無い（認証コード入力だけ）。
+          //   ＝ プロキシ必須の会社では、**繋ぐ手立てがまったく無かった**。
+          //
+          //   ★繋がらなかったときにだけ出す。普段は出さない
+          //     （高齢のお客様に、要らない選択肢を見せない）。
+          //   ⚠ 相談員が電話口で「会社のプロキシの設定を入れてください」と
+          //     言える形にしておくのが目的。
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Center(
+              child: TextButton.icon(
+                onPressed: () => _showProxyDialog(context),
+                icon: const Icon(Icons.settings_ethernet, size: 16),
+                label: const Text('会社のプロキシを設定する',
+                    style: TextStyle(fontSize: 12.5)),
+                style: TextButton.styleFrom(foregroundColor: _muted),
+              ),
+            ),
+            const Text(
+              '社内からインターネットへ直接出られない会社では、\nプロキシの設定が必要なことがあります（担当者にご確認ください）。',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: _faint, height: 1.5),
+            ),
+          ],
           // 常駐が邪魔をしているときだけ出す逃げ道。普段は出さない。
           if (_residentBlocking) ...[
             const SizedBox(height: 12),

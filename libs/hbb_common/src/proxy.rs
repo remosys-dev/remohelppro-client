@@ -377,6 +377,36 @@ impl Proxy {
     where
         T: IntoTargetAddr<'t>,
     {
+        let (stream, addr) = self.connect_raw(target, local_addr).await?;
+        Ok(FramedStream(
+            Framed::new(stream, BytesCodec::new()),
+            addr,
+            None,
+            0,
+        ))
+    }
+
+    /// プロキシを通した「生の通り道」だけを作る（長さの枠に包まない）。
+    ///
+    /// 🔴🔴 なぜ切り出したか（2026-08-17）。
+    ///   元の `connect` は必ず `FramedStream`（先頭に長さを付ける枠）を返す。
+    ///   ⚠ WebSocket は自分で枠を持つので、この枠に包まれると使えない。
+    ///   ＝ そのため 443 の逃げ道はプロキシを**まるごと無視**していた
+    ///     （上流の `// to-do: websocket proxy.`）。
+    ///
+    ///   UTM でポートを塞がれ、かつプロキシ必須の会社では、
+    ///   ネイティブのポートも 443 も通れず、**どの道も無い**状態になる。
+    ///   ここを分けたことで、443 もプロキシを通せるようになった。
+    ///
+    /// ⚠ `connect` は、これを枠で包むだけにした（動きは変えていない）。
+    pub async fn connect_raw<'t, T>(
+        &self,
+        target: T,
+        local_addr: Option<SocketAddr>,
+    ) -> ResultType<(DynTcpStream, SocketAddr)>
+    where
+        T: IntoTargetAddr<'t>,
+    {
         log::trace!("Connect to proxy server");
         let proxy = self.proxy_addrs().await?;
 
@@ -399,12 +429,7 @@ impl Proxy {
                 let stream =
                     super::timeout(self.ms_timeout, self.http_connect(stream, &target_addr))
                         .await??;
-                Ok(FramedStream(
-                    Framed::new(DynTcpStream(Box::new(stream)), BytesCodec::new()),
-                    addr,
-                    None,
-                    0,
-                ))
+                Ok((DynTcpStream(Box::new(stream)), addr))
             }
             ProxyScheme::Https { .. } => {
                 log::trace!("Connect to remote https proxy server: {}", proxy);
@@ -440,12 +465,7 @@ impl Proxy {
                         crate::bail!("Unreachable, TlsType::Plain in HTTPS proxy");
                     }
                 };
-                Ok(FramedStream(
-                    Framed::new(stream, BytesCodec::new()),
-                    addr,
-                    None,
-                    0,
-                ))
+                Ok((stream, addr))
             }
             ProxyScheme::Socks5 { .. } => {
                 log::trace!("Connect to remote socket5 proxy server: {}", proxy);
@@ -467,12 +487,7 @@ impl Proxy {
                     )
                     .await??
                 };
-                Ok(FramedStream(
-                    Framed::new(DynTcpStream(Box::new(stream)), BytesCodec::new()),
-                    addr,
-                    None,
-                    0,
-                ))
+                Ok((DynTcpStream(Box::new(stream)), addr))
             }
         };
     }
