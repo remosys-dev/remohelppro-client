@@ -121,13 +121,44 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('REMOHELP PRO　${bind.mainGetVersion()}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                // 🔴 版は**待ってから**出す（2026-08-18 実機で判明）。
+                //   mainGetVersion() は Future を返すので、そのまま文字列に
+                //   埋めると ⚠ `Instance of 'Future<String>'` が画面に出る。
+                //   ★取れないうちは**何も出さない**。内部の値を出すより空の方がよい。
+                FutureBuilder<String>(
+                  future: bind.mainGetVersion(),
+                  builder: (_, snap) => Text(
+                    snap.hasData && (snap.data ?? '').isNotEmpty
+                        ? 'REMOHELP PRO　${snap.data}'
+                        : 'REMOHELP PRO',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text('リモートサポート'),
                 const SizedBox(height: 2),
                 const Text('提供：株式会社リモシス'),
                 const SizedBox(height: 14),
+                // 🔴🔴 書き方で、義務と印象の両方を立てる（2026-08-18 ご指示）。
+                //
+                //   ⚠ AGPL 第5条は「**変更したことを明示する**」ことを求める。
+                //     「RustDesk を含む OSS を使用しています」まで弱めると、
+                //     変更した事実が伝わらず、義務を果たしたことにならない。
+                //   ⚠ 一方で「RustDesk を改変したもの」だけだと、
+                //     **他社製品を少しいじっただけ**に読める。実際の開発量が伝わらない。
+                //
+                //   ★「当社が開発した製品」を**先**に置き、基盤として採用したことと、
+                //     独自にカスタマイズ・機能追加したことを続ける。
+                //     読む順番が印象を決める。
+                //   ⚠ 「カスタマイズ・機能追加」の一文は削らないこと。
+                //     これが「変更した」の明示にあたる。
+                //   ⚠ 法的な言葉としての「改変」は、ライセンスのページ
+                //     （/legal/oss）に残してある。そちらは書き換えないこと。
                 const Text(
-                  '本製品は RustDesk を株式会社リモシスが改変したものです。\n'
+                  '本アプリは、株式会社リモシスが開発したリモートサポート製品です。\n'
+                  '基盤の一部にオープンソースソフトウェア「RustDesk」を採用し、\n'
+                  '当社が独自にカスタマイズ・機能追加を行っています。\n'
+                  '\n'
                   'ライセンス：GNU AGPL-3.0',
                   style: TextStyle(height: 1.6),
                 ),
