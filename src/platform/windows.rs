@@ -3866,7 +3866,18 @@ fn get_create_service(exe: &str) -> String {
     if config::is_outgoing_only() {
         return "".to_string();
     }
-    let stop = Config::get_option("stop-service") == "Y";
+    // 🔴🔴 常駐は、設定がどうであれ**必ずサービスを立てる**（2026-08-18 実機で判明）。
+    //
+    //   `stop-service = Y` が残っていると、ここはサービスを作りも起こしもしない。
+    //   ⚠ 更新すると入れ直しの手順が走るので、**更新するたびに常駐が止まる**。
+    //     実際「更新しただけで、他に何もしていない」のに1台が落ちた。
+    //     お客様側で止まるので、こちらからは繋げず、気づくのも遅れる。
+    //
+    //   ★常駐は「無人で入れること」が存在理由。サービスが止まった常駐は、
+    //     ただの入っていないパソコンと同じ。ここで設定に従ってはいけない。
+    //   ⚠ ワンタイム版は今までどおり設定に従う（お客様が止めたいときに止められる）。
+    //     常駐とワンタイムは同じ画面を通るので、片方だけの都合で判断しないこと。
+    let stop = Config::get_option("stop-service") == "Y" && !crate::agent::is_resident();
     if stop {
         format!("
 if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
