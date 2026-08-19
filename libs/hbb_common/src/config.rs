@@ -186,6 +186,33 @@ pub const IS_RESIDENT_BUILD: bool = false;
 ///     ここで止めるのは上流の管理API（有償版の機能）だけ。
 pub const NO_UPSTREAM_API_SERVER: bool = true;
 
+/// プロセス間通信（IPC）の名前空間。
+///
+/// 🔴 2026-08-19 実機で確定した不具合の直し。
+///   通信路の名前は `\\.\pipe\<ここ>\query<postfix>` で決まる。
+///   これまでは常駐版もワンタイム版も同じ `APP_NAME` を使っていたため、
+///   **常駐が入っているPCでワンタイム版を起動すると、互いに相手を
+///   「別の実行ファイル」と見なして拒否し合い**（`src/ipc/auth.rs` の
+///   executable mismatch）、接続番号が取れずに
+///   「接続できません。ネットワーク接続を確認してください」になっていた。
+///   ＝ **常駐をお使いのお客様では必ず起きる**。
+///
+/// ⚠ 環境変数で子プロセスへ渡す形にはしない。
+///   昇格（UAC）をまたぐと環境変数は消えるため、親子で名前がズレる。
+///   **ビルド時定数だけで決まる**ようにして、どのプロセスから見ても
+///   必ず同じ名前になるようにしている。
+///
+/// ⚠ 常駐版の名前は変えない。既に配ってある常駐と互換を保つため。
+#[inline]
+pub fn ipc_app_namespace() -> String {
+    let app_name = APP_NAME.read().unwrap().clone();
+    if IS_RESIDENT_BUILD {
+        app_name
+    } else {
+        format!("{app_name}-once")
+    }
+}
+
 #[inline]
 pub fn is_service_ipc_postfix(postfix: &str) -> bool {
     // `_service` is a protected cross-user IPC channel used by the root service.
@@ -201,7 +228,7 @@ pub fn is_service_ipc_postfix(postfix: &str) -> bool {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[inline]
 fn ipc_parent_dir_for_uid(uid: u32, postfix: &str) -> String {
-    let app_name = APP_NAME.read().unwrap().clone();
+    let app_name = ipc_app_namespace();
     if is_service_ipc_postfix(postfix) {
         format!("/tmp/{app_name}-service")
     } else {
@@ -854,11 +881,7 @@ impl Config {
             // \\ServerName\pipe\PipeName
             // where ServerName is either the name of a remote computer or a period, to specify the local computer.
             // https://docs.microsoft.com/en-us/windows/win32/ipc/pipe-names
-            format!(
-                "\\\\.\\pipe\\{}\\query{}",
-                *APP_NAME.read().unwrap(),
-                postfix
-            )
+            format!("\\\\.\\pipe\\{}\\query{}", ipc_app_namespace(), postfix)
         }
         #[cfg(not(windows))]
         {
@@ -866,14 +889,14 @@ impl Config {
             use std::os::unix::fs::PermissionsExt;
             #[cfg(target_os = "android")]
             let mut path: PathBuf =
-                format!("{}/{}", *APP_DIR.read().unwrap(), *APP_NAME.read().unwrap()).into();
+                format!("{}/{}", *APP_DIR.read().unwrap(), ipc_app_namespace()).into();
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             let mut path: PathBuf = {
                 let uid = unsafe { libc::geteuid() as u32 };
                 ipc_parent_dir_for_uid(uid, postfix).into()
             };
             #[cfg(not(any(target_os = "android", target_os = "linux", target_os = "macos")))]
-            let mut path: PathBuf = format!("/tmp/{}", *APP_NAME.read().unwrap()).into();
+            let mut path: PathBuf = format!("/tmp/{}", ipc_app_namespace()).into();
             // Android stores IPC sockets under app-controlled directories. Create the IPC parent
             // dir and enforce the expected mode here. On other Unix platforms, `ipc_path()` is
             // intentionally side-effect free (no mkdir/chmod); callers should enforce directory and
