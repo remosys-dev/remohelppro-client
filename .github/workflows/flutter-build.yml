@@ -202,6 +202,20 @@ jobs:
           echo "--- pubspec.yaml version ---"; grep -n '^version:' flutter/pubspec.yaml | head -2
           grep -q "^version: ${{ env.VERSION }}+" flutter/pubspec.yaml || {
             echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
+          # 🔴🔴 包み(libs/portable)にも焼き込む（2026-08-20 実機で判明）。
+          #
+          #   お客様が受け取る remohelppro-customer.exe は **自己展開の包み**で、
+          #   その版情報は libs/portable/Cargo.toml から来る。
+          #   ⚠ ここだけ書き換えておらず、**1.4.6 に固定されたまま**だった。
+          #     ＝ 受け取った実行ファイルのプロパティを見ても、
+          #       **どの版か永久に分からない**。
+          #   実害: 署名して配ったあと、お客様のPCで「本当に新しい版が入ったか」を
+          #   確かめる手立てが無い。「入れ直したのに直らない」の切り分けができない。
+          #   ⚠ 空振りしたら止める。黙って 1.4.6 のまま出荷するのが一番困る。
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" libs/portable/Cargo.toml
+          echo "--- libs/portable/Cargo.toml version ---"; grep -n '^version' libs/portable/Cargo.toml | head -2
+          grep -q "^version = \"${{ env.VERSION }}\"" libs/portable/Cargo.toml || {
+            echo "RL: 包みの版を焼き込めませんでした。中止します"; exit 1; }
 
       - name: Rebrand APP_NAME to remohelppro (full rename Phase 1)
         shell: bash
