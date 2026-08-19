@@ -483,12 +483,24 @@ pub fn check_ws(endpoint: &str) -> String {
         (format!("{}{}", endpoint_host, domain_path), true)
     };
     let protocol = if is_domain {
-        let api_server = Config::get_option("api-server");
-        if api_server.starts_with("https") {
-            "wss"
-        } else {
-            "ws"
-        }
+        // 🔴 ドメイン宛は**常に wss**（2026-08-19 直し）。
+        //
+        //   もとは「管理API(api-server)が https なら wss」だった。
+        //   ⚠ 当社は上流の管理APIを立てていないので `api-server` は**常に空**
+        //     （NO_UPSTREAM_API_SERVER）。＝ ここは**必ず ws** になり、
+        //     80番へ繋ぎに行っていた。
+        //
+        //   実測（2026-08-18）:
+        //     80番  → 301（https へ飛ばされる。WebSocket は 301 に従えない）
+        //     443番 → 101（正しく繋がる）
+        //
+        //   実害: UTM 等で 21116 が塞がれて 443 の逃げ道に落ちた端末は、
+        //   ⚠ **二度と登録し直せない**。手で再起動すると直るのは、
+        //     起動直後だけ本来の経路を試すため。
+        //
+        //   ⚠ IP 指定のときは今までどおり ws のまま。
+        //     生IPに証明書は付けられないので、wss にすると必ず失敗する。
+        "wss"
     } else {
         "ws"
     };
@@ -512,9 +524,13 @@ mod tests {
         assert_eq!(check_ws("127.0.0.1:21115"), "ws://127.0.0.1:21118");
         assert_eq!(check_ws("127.0.0.1:21116"), "ws://127.0.0.1:21118");
         assert_eq!(check_ws("127.0.0.1:21117"), "ws://127.0.0.1:21119");
-        assert_eq!(check_ws("rustdesk.com:21115"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21116"), "ws://rustdesk.com/ws/id");
-        assert_eq!(check_ws("rustdesk.com:21117"), "ws://rustdesk.com/ws/relay");
+        // ★管理API(api-server)が空でも、ドメイン宛は wss になること。
+        //   ⚠ ここが ws に戻ると、443 に落ちた端末が二度と登録できなくなる。
+        //     以前この試験が「ws で正しい」と書いてあったため、穴を守っていた。
+        assert_eq!(check_ws("rustdesk.com:21115"), "wss://rustdesk.com/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21116"), "wss://rustdesk.com/ws/id");
+        assert_eq!(check_ws("rustdesk.com:21117"), "wss://rustdesk.com/ws/relay");
+        // ★IP 指定は ws のまま（生IPに証明書は付けられない）
         // set relay-server without port
         Config::set_option("relay-server".to_string(), "127.0.0.1".to_string());
         Config::set_option(
