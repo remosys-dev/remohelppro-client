@@ -58,6 +58,15 @@ const String kWindowDisableGrabKeyboard = "disable_grab_keyboard";
 const String kWindowActionRebuild = "rebuild";
 const String kWindowEventHide = "hide";
 const String kWindowEventShow = "show";
+/// 子ウィンドウが「中身を描き始めた」と親に知らせる合図。
+///
+/// 🔴🔴 「Loading...」の板が永久に残る件の**本筋の直し**（2026-08-20・5回目のご指摘）。
+///   子の中身は子自身の Dart が描く。そこへ**たどり着けない**と、
+///   何も描かれないまま板だけが残り、閉じ方も分からない。
+///   ⚠ これまでの歯止め（身に覚えの無い窓を閉じる）は、
+///     **こちらが作って登録まで済ませた窓には届かない**。
+///   ★描き始めたら必ずこれを送る。**来ない窓は動いていない**ので閉じる。
+const String kWindowEventAlive = "alive";
 const String kWindowConnect = "connect";
 const String kWindowBumpMouse = "bump_mouse";
 

@@ -544,11 +544,65 @@ class RustDeskMultiWindowManager {
   /// ⚠ メインウィンドウからのみ呼ぶこと（_activeWindows を知っているのはここだけ）。
   final Set<int> _strayCandidates = {};
 
+  /// 「描き始めた」と知らせてきた子ウィンドウ。
+  ///
+  /// 🔴🔴 本筋の直し（2026-08-20・5回目のご指摘）。
+  ///   これが**来ない窓は、中身が動いていない**＝「Loading...」の板だけ。
+  ///   ⚠ 知っている窓（こちらが作った窓）でも、動いていなければ閉じる。
+  final Set<int> _aliveWindows = {};
+
+  /// 子から知らせが来た時刻を待つ猶予。
+  ///
+  /// ⚠ 短くしすぎない。窓は「作られてから中身が描き始めるまで」に間がある
+  ///   （createWindow → 子プロセスの Dart 起動 → initEnv → runApp）。
+  ///   実測で1秒未満だが、遅い機械や初回起動では伸びる。
+  /// ⚠ 長くしすぎない。その間ずっと、お客様の画面に
+  ///   閉じ方の分からない板が出たままになる。
+  static const _aliveGraceSecs = 12;
+  final Map<int, DateTime> _firstSeenWithoutAlive = {};
+
+  /// 子ウィンドウが「描き始めた」と知らせてきた。
+  void markWindowAlive(int windowId) {
+    _aliveWindows.add(windowId);
+    _firstSeenWithoutAlive.remove(windowId);
+  }
+
+  void forgetWindow(int windowId) {
+    _aliveWindows.remove(windowId);
+    _firstSeenWithoutAlive.remove(windowId);
+    _strayCandidates.remove(windowId);
+  }
+
   Future<void> closeStrayWindows() async {
     try {
       final all = await getAllSubWindowIds();
       final known = <int>{..._activeWindows, ..._inactiveWindows, kMainWindowId};
       final unknown = all.where((id) => !known.contains(id)).toSet();
+      // 🔴🔴 知っている窓でも、**中身が動いていなければ閉じる**（2026-08-20）。
+      //   これまではここが抜けており、5回ご指摘をいただいても直らなかった。
+      final now = DateTime.now();
+      for (final id in all) {
+        if (id == kMainWindowId) continue;
+        if (_aliveWindows.contains(id)) continue;
+        final since = _firstSeenWithoutAlive[id];
+        if (since == null) {
+          _firstSeenWithoutAlive[id] = now;
+          continue;
+        }
+        if (now.difference(since).inSeconds < _aliveGraceSecs) continue;
+        try {
+          debugPrint('RL: 中身が動いていない子ウィンドウを閉じます id=$id');
+          await WindowController.fromWindowId(id).close();
+          forgetWindow(id);
+          _activeWindows.remove(id);
+          _inactiveWindows.remove(id);
+        } catch (e) {
+          debugPrint('RL: 子ウィンドウを閉じられませんでした id=$id, $e');
+        }
+      }
+      // 既に消えた窓を覚えっぱなしにしない。
+      _aliveWindows.removeWhere((id) => !all.contains(id));
+      _firstSeenWithoutAlive.removeWhere((id, _) => !all.contains(id));
       // 前回も身に覚えが無かったものだけ閉じる（作りかけを巻き込まないため）。
       final toClose = unknown.intersection(_strayCandidates);
       _strayCandidates

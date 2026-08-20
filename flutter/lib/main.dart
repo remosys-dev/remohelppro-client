@@ -329,6 +329,20 @@ void runMultiWindow(
     widget,
     MyTheme.currentThemeMode(),
   );
+  // 🔴🔴 「描き始めた」と親に知らせる（2026-08-20・5回目のご指摘）。
+  //
+  //   ここまで来られなかった窓は「Loading...」の板のまま残る。
+  //   ⚠ これまでの歯止めは**身に覚えの無い窓**しか閉じられず、
+  //     こちらが作って登録まで済ませた窓には届かなかった。
+  //   ★知らせが来ない窓は、親が閉じる（multi_window_manager.dart）。
+  //   ⚠ 失敗しても先へ進む。知らせが送れないこと自体で、
+  //     お客様の画面を止めてはいけない。
+  try {
+    await rustDeskWinManager
+        .call(WindowType.Main, kWindowEventAlive, {"id": kWindowId!});
+  } catch (e) {
+    debugPrint('RL: 親へ「描き始めた」を知らせられませんでした: $e');
+  }
   // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
     WindowController.fromWindowId(kWindowId!).showTitleBar(true);
