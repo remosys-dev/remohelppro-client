@@ -1170,12 +1170,28 @@ class FfiModel with ChangeNotifier {
       //   ⚠ 本物の失敗（相手が居ない・コード違い）は ended が返るので、
       //     ここには来ない。今までどおりエラーとして出る。
       if (state == 'alive') {
+        // 🔴🔴 上書きされた接続先を、その場で見せる（2026-08-20 ご指示）。
+        //
+        //   相談員のPCの設定に `custom-rendezvous-server` が手で入っていると、
+        //   ⚠ **そこへ繋ぎに行って必ず拒否され**、7秒ごとに繰り返す。
+        //   ところが画面は「つなぎ直しています」としか出ないので、
+        //   ⚠ 記録を読むまで誰にも分からない。実際に半日かかった。
+        //   ⚠ しかも、この設定はアプリを更新しても消えない。
+        //
+        //   ★上書きが在るときだけ1行足す。普段は何も増やさない。
+        //     ⚠ 正常時にも出すと毎回読み飛ばされ、肝心なときに効かない。
+        final override =
+            (await bind.mainGetOption(key: 'custom-rendezvous-server')).trim();
+        final extra = override.isEmpty
+            ? ''
+            : '\n\n⚠ 接続先が設定で上書きされています: $override\n'
+                '（設定 → ネットワーク → ID サーバー を空にすると直ります）';
         msgBox(
             sessionId,
             'custom-nook-nocancel',
             'つなぎ直しています',
             'お客様のパソコンとの接続が一時的に切れました。\n'
-                '自動でつなぎ直しています。そのままお待ちください。',
+                '自動でつなぎ直しています。そのままお待ちください。$extra',
             '',
             dialogManager);
         _timer?.cancel();
