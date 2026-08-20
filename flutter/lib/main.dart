@@ -184,6 +184,10 @@ void runMainApp(bool startService) async {
   //       そこを巻き込むと**正規の遠隔画面が開いた瞬間に閉じる**。
   //       その間は1秒未満なので、6秒あれば十分な余裕がある。
   if (isDesktop) {
+    // ⚠ 画面が一度も handler を設定しない作り（お客様の一回版）でも、
+    //   「描き始めた」の合図を受けられるように、ここで必ず据え付ける。
+    //   ⚠ これが無いと合図が届かず、12秒後に**正規の窓まで閉じる**。
+    rustDeskWinManager.setMethodHandler(null);
     Timer.periodic(const Duration(seconds: 3), (_) async {
       await rustDeskWinManager.closeStrayWindows();
     });

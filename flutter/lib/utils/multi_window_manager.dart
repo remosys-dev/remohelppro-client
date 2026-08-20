@@ -444,9 +444,28 @@ class RustDeskMultiWindowManager {
     }
   }
 
+  /// 🔴🔴 「描き始めた」の合図は、**必ずここで受ける**（2026-08-20）。
+  ///
+  ///   受け口を画面（desktop_home_page 等）に置くと、
+  ///   ⚠ **その画面を通らない作り（お客様の一回版）で受け取れない**。
+  ///   合図が来ない＝どの窓にも印が付かない＝
+  ///   ⚠ **12秒後に正規の遠隔画面まで閉じる**。作った当日に気づいた。
+  ///
+  ///   ★どの画面が handler を差し替えても、合図だけは必ずここを通る。
+  ///   ⚠ 画面が handler を一度も設定しない場合に備え、
+  ///     main.dart で起動時に一度 `setMethodHandler(null)` を呼び、
+  ///     この包みを必ず据え付ける。
   void setMethodHandler(
       Future<dynamic> Function(MethodCall call, int fromWindowId)? handler) {
-    DesktopMultiWindow.setMethodHandler(handler);
+    DesktopMultiWindow.setMethodHandler((call, fromWindowId) async {
+      if (call.method == kWindowEventAlive) {
+        final id = call.arguments is Map ? call.arguments['id'] : null;
+        if (id is int) markWindowAlive(id);
+        return null;
+      }
+      if (handler == null) return null;
+      return await handler(call, fromWindowId);
+    });
   }
 
   Future<void> closeAllSubWindows() async {
@@ -580,8 +599,16 @@ class RustDeskMultiWindowManager {
       final unknown = all.where((id) => !known.contains(id)).toSet();
       // 🔴🔴 知っている窓でも、**中身が動いていなければ閉じる**（2026-08-20）。
       //   これまではここが抜けており、5回ご指摘をいただいても直らなかった。
+      //
+      // ⚠⚠ 安全弁: **合図を一度も受け取っていないうちは、何も閉じない**。
+      //   合図の道が塞がっている環境（受け口が据わっていない・古い版の子など）では、
+      //   すべての窓が「動いていない」と見えてしまい、
+      //   ⚠ **正規の遠隔画面まで閉じる**。それは今の不具合よりずっと悪い。
+      //   ★1つでも合図が届いていれば、道は通っていると分かる。
+      final signalWorks = _aliveWindows.isNotEmpty;
       final now = DateTime.now();
       for (final id in all) {
+        if (!signalWorks) break;
         if (id == kMainWindowId) continue;
         if (_aliveWindows.contains(id)) continue;
         final since = _firstSeenWithoutAlive[id];

@@ -1,6 +1,20 @@
 use native_windows_gui as nwg;
 use nwg::NativeUi;
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 「Loading...」の板を、もう閉じてよいかの合図。
+///
+/// 🔴🔴 この窓には**閉じる口が無かった**（2026-08-20 実機で確定）。
+///   出したあと誰も閉じないので、お客様の画面に板が**永久に残り**、
+///   本体の窓のボタンを覆っていた。
+/// ★本体を起動したら `done()` を呼ぶ。板は次の描き替え（30ms）で消える。
+static DONE: AtomicBool = AtomicBool::new(false);
+
+/// 本体が立ち上がったので、板を閉じてよい。
+pub fn done() {
+    DONE.store(true, Ordering::Relaxed);
+}
 
 const GIF_DATA: &[u8] = include_bytes!("./res/spin.gif");
 const LABEL_DATA: &[u8] = include_bytes!("./res/label.png");
@@ -175,6 +189,21 @@ mod basic_app_ui {
                             evt_ui.exit();
                         }
                         Event::OnTimerTick => {
+                            // 🔴🔴 本体が立ち上がったら、自分で閉じる（2026-08-20）。
+                            //
+                            //   ⚠ この窓には**閉じる口が存在しなかった**（上流から
+                            //     引き継いだまま）。出したあと誰も閉じないので、
+                            //     お客様の画面に「Loading...」の板が**永久に残る**。
+                            //   ⚠ 板は本体の窓に重なり、下のボタンを覆う。
+                            //     お客様は閉じ方が分からない。
+                            //
+                            //   ★子ウィンドウの管理（Flutter 側）とは**別物**。
+                            //     そちらをいくら直しても、この板には届かない。
+                            //     5回直して効かなかったのはこのため。
+                            if DONE.load(Ordering::Relaxed) {
+                                evt_ui.exit();
+                                return;
+                            }
                             if let Err(e) = evt_ui.update_gif() {
                                 eprintln!("{:?}", e);
                             }
