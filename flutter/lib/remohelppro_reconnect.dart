@@ -360,6 +360,15 @@ Future<void> prepareRebootResume() async {
       ':running',
       'echo [%date% %time%] ALREADY-RUNNING >> "$logPath"',
       ':end',
+      // 🔴🔴 登録を**自分で消してから**、命令書を消す（2026-08-25 実機で修正）。
+      //
+      //   ⚠ これまでは命令書だけが自分を消し、RunOnce の登録は Windows 任せだった。
+      //     2つがずれると「登録はあるのに中身が無い」状態になり、
+      //     お客様の画面に **『rl-resume.cmd が見つかりません』** が出ていた。
+      //     しかも復帰そのものも起きない（起こす人が居なくなるため）。
+      //   ★消す順番は「登録 → 中身」。逆にすると、消し損ねたときに
+      //     また同じ組み合わせ（登録あり・中身なし）ができる。
+      'reg delete "$_kResumeRunKey" /v $_kResumeRunName /f >nul 2>nul',
       // 命令書は残さない。お客様のPCに当社のファイルを残さない。
       //   ⚠ 記録（.log）は残す。うまくいかなかったときに、
       //     試したかどうかを確かめられるようにするため。
@@ -375,7 +384,11 @@ Future<void> prepareRebootResume() async {
       'add', _kResumeRunKey,
       '/v', _kResumeRunName,
       '/t', 'REG_SZ',
-      '/d', 'cmd /c start "" /min "$cmdPath"',
+      // 🔴 **中身が無ければ何もしない**（2026-08-25 実機で修正）。
+      //   ⚠ `if exist` が無いと、命令書が消えているときに
+      //     Windows が『見つかりません』の窓をお客様に見せる。
+      //     こちらの後始末の失敗を、お客様のエラーとして出してはいけない。
+      '/d', 'cmd /c if exist "$cmdPath" start "" /min "$cmdPath"',
       '/f',
     ]);
   } catch (_) {
