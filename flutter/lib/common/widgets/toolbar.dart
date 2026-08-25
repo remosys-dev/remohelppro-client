@@ -99,6 +99,45 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   final isDefaultConn = ffi.connType == ConnType.defaultConn;
 
   List<TTextMenu> v = [];
+
+  // 🔴 スクリーンショットを**一番上**に置く（2026-08-25 ご指示）。
+  //   ⚠ 一番下にあったため、押すのに毎回メニューを下まで探すことになっていた。
+  //     サポート中は「今の画面を残しておきたい」場面が多く、いちばん使う。
+  // to-do:
+  // 1. Web desktop
+  // 2. Mobile, copy the image to the clipboard
+  if (isDesktop) {
+    final isScreenshotSupported = bind.sessionGetCommonSync(
+        sessionId: sessionId, key: 'is_screenshot_supported', param: '');
+    if ('true' == isScreenshotSupported) {
+      v.add(TTextMenu(
+        child: Text(ffi.ffiModel.timerScreenshot != null
+            ? '${translate('Taking screenshot')} ...'
+            : translate('Take screenshot')),
+        onPressed: ffi.ffiModel.timerScreenshot != null
+            ? null
+            : () {
+                if (pi.currentDisplay == kAllDisplayValue) {
+                  msgBox(
+                      sessionId,
+                      'custom-nook-nocancel-hasclose-info',
+                      'Take screenshot',
+                      'screenshot-merged-screen-not-supported-tip',
+                      '',
+                      ffi.dialogManager);
+                } else {
+                  bind.sessionTakeScreenshot(
+                      sessionId: sessionId, display: pi.currentDisplay);
+                  ffi.ffiModel.timerScreenshot =
+                      Timer(Duration(seconds: 30), () {
+                    ffi.ffiModel.timerScreenshot = null;
+                  });
+                }
+              },
+      ));
+    }
+  }
+
   // elevation
   if (isDefaultConn &&
       perms['keyboard'] != false &&
@@ -301,40 +340,6 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
         onPressed: () => ffi.recordingModel.toggle()));
   }
 
-  // to-do:
-  // 1. Web desktop
-  // 2. Mobile, copy the image to the clipboard
-  if (isDesktop) {
-    final isScreenshotSupported = bind.sessionGetCommonSync(
-        sessionId: sessionId, key: 'is_screenshot_supported', param: '');
-    if ('true' == isScreenshotSupported) {
-      v.add(TTextMenu(
-        child: Text(ffi.ffiModel.timerScreenshot != null
-            ? '${translate('Taking screenshot')} ...'
-            : translate('Take screenshot')),
-        onPressed: ffi.ffiModel.timerScreenshot != null
-            ? null
-            : () {
-                if (pi.currentDisplay == kAllDisplayValue) {
-                  msgBox(
-                      sessionId,
-                      'custom-nook-nocancel-hasclose-info',
-                      'Take screenshot',
-                      'screenshot-merged-screen-not-supported-tip',
-                      '',
-                      ffi.dialogManager);
-                } else {
-                  bind.sessionTakeScreenshot(
-                      sessionId: sessionId, display: pi.currentDisplay);
-                  ffi.ffiModel.timerScreenshot =
-                      Timer(Duration(seconds: 30), () {
-                    ffi.ffiModel.timerScreenshot = null;
-                  });
-                }
-              },
-      ));
-    }
-  }
   // fingerprint
   if (!(isDesktop || isWebDesktop)) {
     v.add(TTextMenu(

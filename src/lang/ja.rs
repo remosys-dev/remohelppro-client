@@ -26,7 +26,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         //     それだけを言い、最初に試すべき手だけを添える。
         ("not_ready_status", "接続番号がまだ取れていません。アプリを一度閉じて、開き直してください"),
         ("Control Remote Desktop", "リモートデスクトップを操作"),
-        ("Transfer file", "ファイルを転送"),
+        ("Transfer file", "ファイル送受信"),
         ("Connect", "接続"),
         ("Recent sessions", "最近のセッション"),
         ("Address book", "アドレス帳"),

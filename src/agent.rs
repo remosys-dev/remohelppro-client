@@ -575,6 +575,35 @@ mod imp {
     /// ⚠ `--silent-install` で起動する。画面を出さずに入れ替える。
     /// ⚠ 落とし終わるまで何もしない。中途半端なファイルを実行すると、
     ///   **入れ替えに失敗したうえに元も壊れる**。
+    /// 自分（常駐）を端末から取り除く（2026-08-23 ご指示）。
+    ///
+    /// 🔴 `--uninstall` の入口は既にある（core_main.rs）。ここはそれを
+    ///   **別プロセスで**呼ぶだけ。自分自身を消しながら動き続けることはできない。
+    ///
+    /// ⚠ 実体の場所を推測しない。`current_exe()` で自分の位置を取る。
+    ///   決め打ちにすると、置き場所が変わった版で静かに失敗する。
+    #[cfg(windows)]
+    fn uninstall_self() -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| format!("自分の場所が分かりません: {e}"))?;
+        log::info!("REMOHELP PRO agent: アンインストールを始めます ({})", exe.display());
+        // ⚠ 引数は raw_arg で渡す（[[windows-cmd-quoting-trap]]）。
+        //   .args だと引用符が壊れ、**静かに何もしない**ことがある。
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        std::process::Command::new(&exe)
+            .raw_arg("--uninstall")
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| format!("起動できませんでした: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn uninstall_self() -> Result<(), String> {
+        // 常駐は Windows のみ。ここへ来ることは無いが、黙って成功にしない。
+        Err("この端末では常駐のアンインストールに対応していません".to_owned())
+    }
+
     async fn self_update(url: &str) -> Result<(), String> {
         if !url.starts_with("https://svr.remohelppro.jp/") {
             return Err(format!("入手先が当社のものではありません: {url}"));
@@ -687,6 +716,26 @@ mod imp {
                             log::warn!("REMOHELP PRO agent: 更新の入手先がありません");
                             report(token, id, "failed").await;
                         }
+                    }
+                }
+                // 🔴🔴 自分をアンインストールする（2026-08-23 ご指示）。
+                //
+                //   会社管理者が管理画面から押す。＝ **お客様ご自身の意思**。
+                //   ⚠ 当社が勝手に消しに行く仕組みにはしない。
+                //     契約が終わった相手の PC を当社の判断で操作するのは、
+                //     「もう接続できません」という説明と矛盾する。
+                //
+                //   ⚠ 消すと自分が止まるので、**先に done を報告する**。
+                //     報告できないまま消えると、指示が残り続けて何度も走る
+                //     （self_update と同じ形）。
+                //
+                //   ⚠ 別プロセスで起動して、自分は抜ける。自分自身を消しながら
+                //     動き続けることはできない。
+                "uninstall" => {
+                    log::info!("REMOHELP PRO agent: アンインストールの指示を受けました");
+                    report(token, id, "done").await;
+                    if let Err(e) = uninstall_self() {
+                        log::error!("REMOHELP PRO agent: アンインストールに失敗しました: {e}");
                     }
                 }
                 // セーフモードで再起動する。

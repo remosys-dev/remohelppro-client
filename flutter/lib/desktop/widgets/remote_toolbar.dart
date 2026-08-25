@@ -296,9 +296,13 @@ class _ToolbarTheme {
   static const double iconRadius = 8;
   static const double elevation = 3;
 
-  // REMOHELP PRO Phase2(モック準拠): ツールバーの各ボタンにアイコン＋日本語ラベルを表示する。
-  //   ラベル文言は既存の tooltip(翻訳キー)を translate() したものを流用＝ja.rs の訳が出る。
-  static const bool showButtonLabel = true;
+  // 🔴 アイコンの下のラベルは**出さない**（2026-08-25 ご指示）。
+  //   ⚠ 日本語のラベルが幅に収まらず、切れて読めなくなっていた。
+  //     Mac では隣のボタンと地続きに見え、どこまでが1つのボタンか分からなかった。
+  //   ★マウスを乗せれば名前が出る（tooltip）ので、下に書く必要がない。
+  //   ⚠ 戻すときは、いちばん長い日本語（「セッションの記録」など）が
+  //     buttonWithLabelWidth に収まるかを実機で確かめてから。
+  static const bool showButtonLabel = false;
   static const double labelFontSize = 9.0;
   static const double labelHeight = 13.0;
   static const double buttonWithLabelWidth = 56.0;
