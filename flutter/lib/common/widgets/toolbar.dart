@@ -11,6 +11,7 @@ import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/models/model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 bool isEditOsPassword = false;
 
@@ -100,6 +101,36 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
 
   List<TTextMenu> v = [];
 
+  // https://github.com/rustdesk/rustdesk/pull/9731
+  // Does not work for connection established by "accept".
+  //
+  // ⚠ 定義をこの位置まで上げてある（2026-08-25）。
+  //   「ファイル送受信」をメニューの上の方に置くため。Dart は
+  //   **宣言より前の参照を許さない**ので、定義が下にあると
+  //   「Local variable can't be referenced before it is declared」で
+  //   ビルドが通らない。項目だけ上げても動かない。
+  connectWithToken(
+      {bool isFileTransfer = false,
+      bool isViewCamera = false,
+      bool isTcpTunneling = false,
+      bool isTerminal = false}) {
+    final connToken = bind.sessionGetConnToken(sessionId: ffi.sessionId);
+    // 🔴 認証コードも一緒に渡す（2026-07-30 実機指摘）。
+    //   ファイル送受信を開くと「パスワードを入力してください」が出ていた。
+    //   合鍵（connToken）が効かない経路があり、そうなると認証の手がかりが
+    //   何も無い状態で新しい接続を張ってしまう。
+    //   ⚠ 合鍵が効くならそちらが先に使われる（Rust 側で「前回の値」が
+    //     空でなければ控えは見ない）。**順番を変えていない**ので、
+    //     今まで通り繋がっていた経路の動きは変わらない。
+    connect(context, id,
+        isFileTransfer: isFileTransfer,
+        isViewCamera: isViewCamera,
+        isTerminal: isTerminal,
+        isTcpTunneling: isTcpTunneling,
+        password: ffi.presetPassword,
+        connToken: connToken);
+  }
+
   // 🔴 スクリーンショットを**一番上**に置く（2026-08-25 ご指示）。
   //   ⚠ 一番下にあったため、押すのに毎回メニューを下まで探すことになっていた。
   //     サポート中は「今の画面を残しておきたい」場面が多く、いちばん使う。
@@ -136,6 +167,37 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
               },
       ));
     }
+  }
+
+  // 🔴 ファイル送受信を**スクリーンショットのすぐ下**に置く（2026-08-25 ご指示）。
+  //   よく使う2つを上に並べる。以前は「カメラを見る」などの下にあった。
+  if (isDefaultConn && isDesktop) {
+    v.add(
+      TTextMenu(
+          child: Text(translate('Transfer file')),
+          onPressed: () => connectWithToken(isFileTransfer: true)),
+    );
+  }
+
+  // 🔴 録画したものを開く（2026-08-25 ご指摘）。
+  //
+  //   ⚠ 録画（REC）はここから始められるのに、**撮った物を見る道が無かった**。
+  //     保存先は本体の窓の「設定 → 録画」にしか出ておらず、その窓は
+  //     開けないようにしたので、どこにも辿り着けなくなっていた。
+  //   ★録り始めるのと同じ場所に、見る道も置く。
+  //   ⚠ フォルダを開くだけにする。一覧や再生をこちらで作らない。
+  //     Windows の「フォト」で開ける物なので、増やす理由が無い。
+  if (isDesktop) {
+    v.add(
+      TTextMenu(
+        child: Text(translate('Open recordings folder')),
+        onPressed: () {
+          final dir = bind.mainVideoSaveDirectory(root: false);
+          if (dir.isEmpty) return;
+          launchUrl(Uri.file(dir));
+        },
+      ),
+    );
   }
 
   // elevation
@@ -199,36 +261,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
         onPressed: () => ffi.cursorModel.reset()));
   }
 
-  // https://github.com/rustdesk/rustdesk/pull/9731
-  // Does not work for connection established by "accept".
-  connectWithToken(
-      {bool isFileTransfer = false,
-      bool isViewCamera = false,
-      bool isTcpTunneling = false,
-      bool isTerminal = false}) {
-    final connToken = bind.sessionGetConnToken(sessionId: ffi.sessionId);
-    // 🔴 認証コードも一緒に渡す（2026-07-30 実機指摘）。
-    //   ファイル送受信を開くと「パスワードを入力してください」が出ていた。
-    //   合鍵（connToken）が効かない経路があり、そうなると認証の手がかりが
-    //   何も無い状態で新しい接続を張ってしまう。
-    //   ⚠ 合鍵が効くならそちらが先に使われる（Rust 側で「前回の値」が
-    //     空でなければ控えは見ない）。**順番を変えていない**ので、
-    //     今まで通り繋がっていた経路の動きは変わらない。
-    connect(context, id,
-        isFileTransfer: isFileTransfer,
-        isViewCamera: isViewCamera,
-        isTerminal: isTerminal,
-        isTcpTunneling: isTcpTunneling,
-        password: ffi.presetPassword,
-        connToken: connToken);
-  }
-
   if (isDefaultConn && isDesktop) {
-    v.add(
-      TTextMenu(
-          child: Text(translate('Transfer file')),
-          onPressed: () => connectWithToken(isFileTransfer: true)),
-    );
     v.add(
       TTextMenu(
           child: Text(translate('View camera')),
@@ -250,10 +283,22 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     v.add(TTextMenu(child: Offstage(), onPressed: () {}, divider: true));
   }
   // ctrlAltDel
+  //
+  // 🔴 昇格済みのときも出す（2026-08-25 ご指摘）。
+  //   ⚠ ワンタイム版はお客様の権限で動くので `sasEnabled` は false のまま。
+  //     元の条件だとメニューに**一度も出なかった**。
+  //   ★昇格すると、キー入力は SYSTEM 権限の別プロセスへ転送されて処理される
+  //     （server/portable_service.rs の Key → handle_key_ → send_sas）。
+  //     ＝ 昇格後は実際に効くので、出してよい。
+  //   ⚠ 昇格前は出さない。押せるのに必ず失敗する項目は置かない
+  //     （プライバシーモードの「モード 2」と同じ過ち）。
+  //     昇格の入口は、下の「権限の昇格をリクエストする」。
   if (isDefaultConn &&
       !ffiModel.viewOnly &&
       ffiModel.keyboard &&
-      (pi.platform == kPeerPlatformLinux || pi.sasEnabled)) {
+      (pi.platform == kPeerPlatformLinux ||
+          pi.sasEnabled ||
+          ffi.elevationModel.portableServiceRunning)) {
     v.add(
       TTextMenu(
           child: Text('${translate("Insert Ctrl + Alt + Del")}'),

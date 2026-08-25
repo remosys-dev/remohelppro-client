@@ -3,7 +3,6 @@ use crate::ui_interface::get_option;
 use crate::{
     display_service,
     ipc::{connect, Data},
-    platform::is_installed,
 };
 #[cfg(windows)]
 use hbb_common::tokio;
@@ -98,11 +97,12 @@ lazy_static::lazy_static! {
                 if display_service::is_privacy_mode_mag_supported() {
                     PRIVACY_MODE_IMPL_WIN_MAG
                 } else {
-                    if is_installed() {
-                        PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY
-                    } else {
-                        ""
-                    }
+                    // 🔴 仮想ディスプレイ方式には**落とさない**（2026-08-25）。
+                    //   ドライバを配っていないので、既定に選ぶと
+                    //   「押せるのに必ず失敗する」状態になる。
+                    //   ここを空にすると、上の一覧も空になりメニューが出ない。
+                    //   詳しくは get_supported_privacy_mode_impl の説明。
+                    ""
                 }
             }.to_owned()
         }
@@ -340,12 +340,24 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
             }
         }
 
-        if is_installed() && crate::platform::windows::is_self_service_running() {
-            vec_impls.push((
-                PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY,
-                "privacy_mode_impl_virtual_display_tip",
-            ));
-        }
+        // 🔴 「モード 2」（仮想ディスプレイ方式）は出さない（2026-08-25 ご指摘）。
+        //
+        //   ⚠ この方式は RustDesk の**仮想ディスプレイ ドライバ**が入っている
+        //     ことが前提で、当社はそれを配っていない。押すと必ず
+        //     「No virtual displays.」で失敗する（お客様の画面で実際に発生）。
+        //   ⚠ 名前が「モード 1／モード 2」なので、どちらが動くのか選びようがない。
+        //     必ず失敗する選択肢を残しておくと、押した人が製品を疑う。
+        //   ★残すのは、ドライバの要らない方式だけ。1つになるとメニューの表示も
+        //     「プライバシーモード」の1項目になる（モード名は出なくなる）。
+        //
+        //   ⚠ 古い Windows（10 の 2004 未満）では、上の2つが両方とも使えない。
+        //     そのときは一覧が空になり、メニュー自体が出なくなる。
+        //     ＝ 押せるのに失敗する、という形にはならない。
+        //   復活させるなら、ドライバの配布とインストールを先に用意すること。
+        let _ = (
+            PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY,
+            "privacy_mode_impl_virtual_display_tip",
+        );
 
         vec_impls
     }

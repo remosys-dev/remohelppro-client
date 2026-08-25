@@ -3784,6 +3784,15 @@ class ElevationModel with ChangeNotifier {
   bool _running = false;
   bool _canElevate = false;
   bool get showRequestMenu => _canElevate && !_running;
+
+  /// 昇格済みか（＝SYSTEM 権限の別プロセスが動いているか）。
+  ///
+  /// 🔴 Ctrl+Alt+Del を出すかの判断に使う（2026-08-25 ご指摘）。
+  ///   ⚠ ワンタイム版はお客様の権限で動くので `pi.sasEnabled` は false のまま。
+  ///     ところが昇格すると、キー入力は SYSTEM 権限の別プロセスへ転送されて
+  ///     処理される（server/portable_service.rs の Key ハンドラ）。
+  ///     ＝ **昇格後は実際に Ctrl+Alt+Del が効く**のに、メニューが出なかった。
+  bool get portableServiceRunning => _running;
   onPeerInfo(PeerInfo pi) {
     _canElevate = pi.platform == kPeerPlatformWindows && pi.sasEnabled == false;
     _running = false;
