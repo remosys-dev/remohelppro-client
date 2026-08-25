@@ -331,6 +331,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Are you sure you want to restart", "本当に再起動しますか"),
         ("Restarting remote device", "リモートデバイスを再起動中"),
         ("remote_restarting_tip", "リモートコンピューターは再起動中です。このメッセージボックスを閉じて、しばらくした後にパスワードを使用して再接続してください。"),
+        ("Copy", "コピー"),
         ("Copied", "コピーしました"),
         ("Exit Fullscreen", "全画面表示を終了"),
         ("Fullscreen", "全画面表示"),
@@ -696,6 +697,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("save-settings-tip", "設定を保存します"),
         ("dont-show-again-tip", "今後は表示しない"),
         ("Take screenshot", "スクリーンショットを撮影"),
+        ("Remote system info", "お客様のパソコンの情報"),
         // 録画したものを見る道（2026-08-25）。設定画面が開けないので、ここに置く。
         ("Open recordings folder", "録画したものを開く"),
         ("Taking screenshot", "スクリーンショットを撮影中"),

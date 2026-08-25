@@ -1720,6 +1720,19 @@ impl Connection {
             platform_additions.insert("support_view_camera".into(), json!(true));
         }
 
+        // 🔴 サポートに要る「お客様のパソコンの情報」（2026-08-26 ご要望）。
+        //
+        //   これまで相談員に分かるのは接続番号と名前だけで、CPU・メモリ・
+        //   ローカルIP・OS の版が**どこにも出ていなかった**。
+        //   ⚠ 外部のサービスには一切問い合わせない。手元で分かることだけを返す
+        //     （第三者に通信を出さない方針。以前 STUN で同じ問題を起こしている）。
+        //   ⚠ グローバルIPはここでは分からない（自分では見えない）。
+        //     当社のサーバー側が接続元として記録している。
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        {
+            platform_additions.insert("rl_sysinfo".into(), crate::rl_support_sysinfo());
+        }
+
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if !platform_additions.is_empty() {
             pi.platform_additions = serde_json::to_string(&platform_additions).unwrap_or("".into());

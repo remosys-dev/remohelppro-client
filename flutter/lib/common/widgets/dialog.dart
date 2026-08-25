@@ -3252,3 +3252,75 @@ Widget trustedDevicesTable(
         )),
   );
 }
+
+/// 🔴 お客様のパソコンの情報を見せる（2026-08-26 ご要望）。
+///
+///   ⚠ これまで相談員に分かるのは接続番号と名前だけだった。
+///     「メモリはいくつですか」をお客様に聞いても、答えられない方が多い。
+///   ★繋いだ時点で分かるものを、そのまま並べる。
+///
+///   ⚠ グローバルIPはここには出ない。**相手のパソコンからは自分の
+///     グローバルIPが分からない**ため。管理画面の常駐PC一覧に、
+///     当社サーバーが見た接続元として出ている。
+///   ⚠ 値が無い項目は行ごと出さない。空欄が並ぶと、壊れているように見える。
+void showRemoteSysinfoDialog(PeerInfo pi, String id, String version,
+    OverlayDialogManager dialogManager) {
+  Map<String, dynamic> info = {};
+  try {
+    final raw = pi.platformAdditions[kPlatformAdditionsRlSysinfo];
+    if (raw is Map) {
+      info = Map<String, dynamic>.from(raw);
+    }
+  } catch (_) {
+    // 読めなくても画面を止めない。空のまま出す。
+  }
+
+  String s(String key) => (info[key] ?? '').toString().trim();
+
+  final rows = <List<String>>[
+    ['接続番号', id],
+    ['コンピューター名', s('hostname')],
+    ['ログイン中のユーザー', s('username')],
+    ['OS', s('os')],
+    ['CPU', s('cpu')],
+    ['メモリ', s('memory')],
+    ['ローカルIP', s('local_ips')],
+    ['アプリの版', version],
+  ].where((r) => r[1].isNotEmpty).toList();
+
+  dialogManager.show((setState, close, context) {
+    return CustomAlertDialog(
+      title: Text(translate('Remote system info')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...rows.map((r) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 140,
+                      child: Text(r[0],
+                          style: const TextStyle(color: Colors.grey)),
+                    ),
+                    Expanded(child: SelectableText(r[1])),
+                  ],
+                ),
+              )),
+        ],
+      ),
+      actions: [
+        // ⚠ 控えを取れるようにする。対応記録に貼るため。
+        dialogButton('Copy', onPressed: () {
+          final text = rows.map((r) => '${r[0]}: ${r[1]}').join('\n');
+          Clipboard.setData(ClipboardData(text: text));
+          showToast(translate('Copied'));
+        }, isOutline: true),
+        dialogButton('Close', onPressed: close),
+      ],
+      onCancel: close,
+    );
+  });
+}

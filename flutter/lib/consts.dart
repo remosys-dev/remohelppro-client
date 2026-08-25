@@ -26,6 +26,10 @@ const String kPlatformAdditionsRustDeskVirtualDisplays =
 const String kPlatformAdditionsAmyuniVirtualDisplays =
     "amyuni_virtual_displays";
 const String kPlatformAdditionsHasFileClipboard = "has_file_clipboard";
+
+/// お客様のパソコンの情報（CPU・メモリ・OS・ローカルIP など）。
+/// 中身は src/common.rs の rl_support_sysinfo() が作る。
+const String kPlatformAdditionsRlSysinfo = "rl_sysinfo";
 const String kPlatformAdditionsSupportedPrivacyModeImpl =
     "supported_privacy_mode_impl";
 

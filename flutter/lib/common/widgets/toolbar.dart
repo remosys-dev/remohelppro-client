@@ -179,6 +179,22 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     );
   }
 
+  // 🔴 お客様のパソコンの情報（2026-08-26 ご要望）。
+  //
+  //   ⚠ これまで相談員に分かるのは接続番号と名前だけで、CPU・メモリ・
+  //     ローカルIP・OS の版がどこにも出ていなかった。お客様に電話で
+  //     聞き出すしかなく、答えられない方も多い。
+  //   ★繋いだ時点で分かるものを、そのまま見せる。
+  //   ⚠ 相手が古い版だと空になる。そのときは項目を出さない
+  //     （押しても何も出ない項目を置かない）。
+  if (isDesktop && pi.platformAdditions[kPlatformAdditionsRlSysinfo] != null) {
+    v.add(TTextMenu(
+      child: Text(translate('Remote system info')),
+      onPressed: () => showRemoteSysinfoDialog(
+          pi, id, ffiModel.pi.version, ffi.dialogManager),
+    ));
+  }
+
   // 🔴 録画したものを開く（2026-08-25 ご指摘）。
   //
   //   ⚠ 録画（REC）はここから始められるのに、**撮った物を見る道が無かった**。

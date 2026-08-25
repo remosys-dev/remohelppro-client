@@ -901,6 +901,37 @@ pub fn get_sysinfo() -> serde_json::Value {
     out
 }
 
+/// 🔴 サポートに要る「相手のパソコンの情報」（2026-08-26 ご要望）。
+///
+///   これまで相談員に分かるのは接続番号と名前だけだった。
+///   お客様に電話で聞き出さずに済むよう、繋いだ時点で分かる形にする。
+///
+/// ⚠ 外部のサービスには一切問い合わせない。手元で分かることだけを返す。
+///   （第三者に通信を出さない方針。以前 STUN で同じ問題を起こしている）
+/// ⚠ グローバルIPは**自分では分からない**ので、ここには入れない。
+///   当社のサーバーが接続元として記録している方を見る。
+/// ⚠ MACアドレスは入れない。接続番号の元になっているので、
+///   見せる意味が薄いわりに、控えられると困る情報になる。
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+pub fn rl_support_sysinfo() -> serde_json::Value {
+    let mut v = get_sysinfo();
+    // ローカルIP（社内のどの島にいるか、VPN越しかの見当がつく）。
+    //   ⚠ 127.0.0.1 は除く。必ず出るので、あっても手掛かりにならない。
+    let mut ips: Vec<String> = Vec::new();
+    for i in default_net::get_interfaces() {
+        for a in i.ipv4.iter() {
+            let s = a.addr.to_string();
+            if s != "127.0.0.1" && !ips.contains(&s) {
+                ips.push(s);
+            }
+        }
+    }
+    if !ips.is_empty() {
+        v["local_ips"] = json!(ips.join(", "));
+    }
+    v
+}
+
 #[inline]
 pub fn check_port<T: std::string::ToString>(host: T, port: i32) -> String {
     hbb_common::socket_client::check_port(host, port)
