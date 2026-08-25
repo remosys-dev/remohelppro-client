@@ -8,6 +8,7 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
+import 'rl_operator_home.dart';
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -48,12 +49,16 @@ class HomePageState extends State<HomePage> {
   void initPages() {
     _pages.clear();
     // REMOHELP PRO: ビルド時フラグ REMOHELPPRO_OPERATOR で役割を切替。
-    //   operator(相談員)=接続ページ(顧客のIDを入れて操作) /
+    //   operator(相談員)=待ち受け画面(接続は相談員画面から) /
     //   それ以外(顧客=被操作)=認証コード入力の ServerPage だけ。
     const isOperator =
         bool.fromEnvironment('REMOHELPPRO_OPERATOR', defaultValue: false);
     if (isOperator) {
-      _pages.add(ConnectionPage(appBarActions: const <Widget>[]));
+      // 🔴 RustDesk 本来の接続画面は出さない（2026-08-25 ご指示）。
+      //   スマホでは相談員画面の「▶ 接続」から起動する運び。
+      //   ⚠ あの画面には**過去につないだ端末が会社をまたいで残る**。
+      //   詳しくは rl_operator_home.dart の冒頭。
+      _pages.add(const RlOperatorHomePage());
     } else {
       _pages.add(ServerPage());
     }
