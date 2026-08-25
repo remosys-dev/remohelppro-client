@@ -1134,10 +1134,25 @@ class _CmControlPanel extends StatelessWidget {
           offstage: !client.remoteDrawing || client.type_() != ClientType.remote,
           child: _CustomerDrawButton(client: client),
         ),
-        // Switch Sides（操作する側とされる側を入れ替える）は出さない。
-        //   2026-07-29 実機指摘: 音声通話のときにこのダイアログが出て、
-        //   お客様の画面に「相談員に制御を戻す」ボタンが並ぶ。
-        //   当社の運用では一度も使わない機能なので、押し間違いにしかならない。
+        // 🔴 相談員の画面を見せてもらっている状態から**元に戻す**ボタン。
+        //
+        //   ★2026-08-25 復活。相談員側の「自分の画面を見せる」を戻したので、
+        //     こちらが**唯一の帰り道**になる。片方だけだと、一度入れ替えたら
+        //     二度と戻せない（7/30 に実際そうなった）。
+        //
+        //   ⚠ `client.fromSwitch` のときだけ出る。＝ 入れ替えでつながった
+        //     ときにしか現れない。通常のサポート中や音声通話のときは出ない。
+        //     7/29 に「音声通話のときに並ぶ」として消したが、消すべきだったのは
+        //     **文言**の方だった（顧客側前提の訳語が相談員側にも出ていた）。
+        Offstage(
+          offstage: !client.fromSwitch,
+          child: buildButton(context,
+              color: Colors.purple,
+              onClick: () => handleSwitchBack(context),
+              icon: Icon(Icons.reply, color: Colors.white),
+              text: "Switch back",
+              textColor: Colors.white),
+        ),
         Offstage(
           offstage: !showElevation,
           child: buildButton(

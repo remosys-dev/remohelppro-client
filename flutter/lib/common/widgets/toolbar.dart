@@ -328,18 +328,34 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
           blockInput.value = !blockInput.value;
         }));
   }
-  // Switch Sides（操作する側とされる側を入れ替える）は出さない。
+  // 🔴 自分の画面を見せる（＝操作する側とされる側を入れ替える）。
   //
-  // 🔴 2026-07-30 実機指摘。入口が2つあり、**戻る道だけを塞いでいた**。
-  //   昨日（指摘⑤）顧客側の接続管理ウィンドウから消したが、そちらが
-  //   「元に戻す」ボタンだった。相談員のツールバーに入口が残ったため、
-  //   一度入れ替えると**二度と戻せない**状態になっていた。
-  //   表示も「相談員に制御を戻す」のままで、顧客側に出す前提の文言が
-  //   相談員の画面に出ており、意味が通らなかった。
+  //   ★2026-08-25 復活。**必要な機能だった**（既存製品にも同じものがある）。
+  //     用途：ソフトウェアをお客様に**入れていただかずに**お見せして、
+  //     その場で触っていただく。相談員PCのソフトを体験してもらう形。
   //
-  // 🔴 入口ごと無くす。遠隔サポートで、**お客様が相談員のPCを操作する**
-  //   場面は無い。あるとすれば事故か、誘導された操作である。
-  //   相談員の画面をお見せしたいだけなら、入れ替えではなく画面共有で足りる。
+  //   ⚠ 7/30 に「お客様が相談員のPCを操作する場面は無い」と判断して
+  //     外したが、**その判断が誤り**だった。使う場面を知らずに機能を
+  //     消したことになる。消す前に用途を確かめること。
+  //
+  //   🔴 外したときの本当の不具合は「入口が2つあり、**戻る道だけを塞いだ**」
+  //     こと。顧客側の接続管理ウィンドウのボタンが「元に戻す」で、
+  //     そちらだけ消したため、一度入れ替えると**二度と戻せなかった**。
+  //     ⚠ 戻る道は server_page.dart に復活させてある。**両方揃って初めて機能**。
+  //
+  //   ⚠ 文言も分けた。同じ 'Switch Sides' を両側で使っていたため、
+  //     顧客側前提の「相談員に制御を戻す」が相談員の画面に出ていた。
+  if (isDefaultConn &&
+      isDesktop &&
+      ffiModel.keyboard &&
+      pi.platform != kPeerPlatformAndroid &&
+      versionCmp(pi.version, '1.2.0') >= 0 &&
+      bind.peerGetSessionsCount(id: id, connType: ffi.connType.index) == 1) {
+    v.add(TTextMenu(
+        child: Text(translate('Show my screen')),
+        onPressed: () =>
+            showConfirmSwitchSidesDialog(sessionId, id, ffi.dialogManager)));
+  }
   // refresh
   if (pi.version.isNotEmpty) {
     v.add(TTextMenu(

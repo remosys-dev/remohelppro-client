@@ -445,7 +445,13 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Strong", "強力"),
         // 🔴 見せている最中のメニューなので「戻す」と書く（2026-07-27 指摘）。
         //   「見せる」のままだと、既に見せている状態で何が起きるか分からない。
-        ("Switch Sides", "相談員に制御を戻す"),
+        // 🔴 入れ替えの文言は**両側で分ける**（2026-08-25）。
+        //   ⚠ 元は両側とも "Switch Sides" の1語で、顧客側前提の訳語が
+        //     相談員の画面にも出ていた。意味が通らず、7/29 に機能ごと
+        //     消される原因になった。
+        ("Show my screen", "自分の画面を見せる（お客様が操作できます）"),
+        ("Switch back", "画面を見せるのをやめる"),
+        ("Switch Sides", "操作する側を入れ替える"),
         ("Please confirm if you want to share your desktop?", "デスクトップの共有を許可しますか？"),
         ("Display", "ディスプレイ"),
         ("Default View Style", "既定の表示スタイル"),
