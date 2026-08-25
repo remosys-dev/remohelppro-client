@@ -281,16 +281,8 @@ class _ViewCameraTabPageState extends State<ViewCameraTabPage> {
 
     menu.addAll([
       MenuEntryDivider<String>(),
-      MenuEntryButton<String>(
-        childBuilder: (TextStyle? style) => Text(
-          translate('Copy Fingerprint'),
-          style: style,
-        ),
-        proc: () => onCopyFingerprint(FingerprintState.find(key).value),
-        padding: padding,
-        dismissOnClicked: true,
-        dismissCallback: cancelFunc,
-      ),
+      // 🔴 「フィンガープリントをコピー」は出さない（2026-08-25 ご指示）。
+      //   遠隔操作の画面と揃える。理由は remote_tab_page.dart のコメント参照。
       MenuEntryButton<String>(
         childBuilder: (TextStyle? style) => Text(
           translate('Close'),

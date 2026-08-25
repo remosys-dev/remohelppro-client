@@ -324,16 +324,12 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
 
     menu.addAll([
       MenuEntryDivider<String>(),
-      MenuEntryButton<String>(
-        childBuilder: (TextStyle? style) => Text(
-          translate('Copy Fingerprint'),
-          style: style,
-        ),
-        proc: () => onCopyFingerprint(FingerprintState.find(key).value),
-        padding: padding,
-        dismissOnClicked: true,
-        dismissCallback: cancelFunc,
-      ),
+      // 🔴 「フィンガープリントをコピー」は出さない（2026-08-25 ご指示）。
+      //   ⚠ 接続先の鍵の指紋を写す機能で、相手が本物かを別の経路で
+      //     読み合わせて確かめるためのもの。当社にその運用は無い。
+      //   ⚠ 意味の分からない項目は押し間違いの元にしかならない。
+      //     実際「これは何ですか」と聞かれた。使う人に伝わらない道具は、
+      //     置いてあるだけで邪魔になる。
       MenuEntryButton<String>(
         childBuilder: (TextStyle? style) => Text(
           translate('Close'),
