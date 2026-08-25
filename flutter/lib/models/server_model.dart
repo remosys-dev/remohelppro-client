@@ -840,14 +840,20 @@ class ServerModel with ChangeNotifier {
         if (client.incomingVoiceCall) {
           if (isAndroid) {
             showVoiceCallDialog(client);
-          } else if (!hideCm) {
-            // Has incoming phone call, let's set the window on top.
-            // ⚠ 隠す設定のときは前に出さない（2026-08-04 検証の指摘）。
-            //   ここだけ showCmWindow を通らず直接 windowOnTop していたため、
-            //   守りが効いていなかった。ワンタイム版では当社の画面が出ているので、
-            //   音声通話がかかってきた拍子に**窓が2つ**になる。
+          } else {
+            // 🔴 音声通話の着信は、**隠す設定でも必ず出す**（2026-08-26 修正）。
+            //
+            //   ⚠ 8/4 に「窓が2つになる」という見た目の理由で `!hideCm` を
+            //     足した。**受けるボタンはこの窓の中にしか無い**ので、
+            //     ワンタイム版のお客様は着信に応答できなくなっていた
+            //     （＝音声通話がまったく使えない状態）。
+            //   ★呼び出しの知らせを、見た目の都合で握りつぶさない。
+            //
+            //   ⚠ windowOnTop だけでは足りない。ワンタイム版の窓は
+            //     setOpacity(0) で透明にしてあり、前に出しても見えない。
+            //     不透明に戻す showCmWindow() を通すこと。
             Future.delayed(Duration.zero, () {
-              windowOnTop(null);
+              showCmWindow();
             });
           }
         }

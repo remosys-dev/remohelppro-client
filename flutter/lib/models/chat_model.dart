@@ -300,6 +300,13 @@ class ChatModel with ChangeNotifier {
       await windowManager.show();
       await windowManager.setSizeAlignment(
           kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+      // ⚠ ワンタイム版は、閉じたら元どおり隠す（2026-08-26）。
+      //   チャットのために出した窓を出しっぱなしにすると、当社の画面と
+      //   2つ並んで、お客様がどちらで終わらせるのか分からなくなる。
+      //   ★出すのは知らせが来たときだけ。用が済んだら引っ込める。
+      if (gFFI.serverModel.hideCm) {
+        await hideCmWindow();
+      }
     } else {
       final currentSelectedTab =
           gFFI.serverModel.tabController.state.value.selectedTabInfo;
@@ -351,10 +358,17 @@ class ChatModel with ChangeNotifier {
       return;
     }
     if (text.isEmpty) return;
-    // ⚠ 隠す設定のときは、チャットが来ても出さない（2026-08-04）。
-    //   他の呼び出し箇所は既に !hideCm で守られているが、ここだけ素通しだった。
-    //   ワンタイム版では当社の画面が出ているので、ここで出すと窓が2つになる。
-    if (desktopType == DesktopType.cm && !gFFI.serverModel.hideCm) {
+    // 🔴 チャットが来たら、**隠す設定でも必ず出す**（2026-08-26 修正）。
+    //
+    //   ⚠ 8/4 に「ワンタイム版では窓が2つになる」という見た目の理由で
+    //     `!hideCm` を足した。その結果、**お客様はチャットを一生見られなく
+    //     なっていた**（相談員は送れているので、送った側は気づけない）。
+    //   ★見た目の都合で、届いた知らせを握りつぶさない。
+    //
+    //   ⚠ ワンタイム版の接続の窓は setOpacity(0) で**透明**にして隠している。
+    //     windowManager.show() だけでは透明のままで、出したつもりで見えない。
+    //     showCmWindow() は不透明に戻してから前に出すので、必ずこちらを通す。
+    if (desktopType == DesktopType.cm) {
       await showCmWindow();
     }
     String? peerId;
