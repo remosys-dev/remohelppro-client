@@ -901,6 +901,54 @@ pub fn get_sysinfo() -> serde_json::Value {
     out
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+lazy_static::lazy_static! {
+    /// このパソコンが外に出るときのグローバルIP。当社サーバーに教えてもらった値。
+    static ref RL_GLOBAL_IP: Arc<Mutex<String>> = Default::default();
+}
+
+/// 🔴 自分のグローバルIPを、**当社のサーバーに**聞いて覚えておく（2026-08-26 ご要望）。
+///
+///   パソコンは自分のグローバルIPを自分では知らない。
+///   相談員が「どの回線から繋がっているか」を見られるように、当社の
+///   `/api/whoami`（呼んだ本人のIPだけを返す口）に一度だけ聞く。
+///
+/// ⚠ 第三者のIP判定サイトは使わない。お客様の通信を当社の外へ出さない
+///   （以前 STUN で同じ問題を起こしている）。
+/// ⚠ 失敗しても何もしない。IPが空になるだけで、接続には一切影響させない。
+/// ⚠ 起動時に一度だけ呼ぶ。7秒ごとに聞くような作りにしない。
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+pub async fn rl_refresh_global_ip() {
+    let base = hbb_common::config::AGENT_API_BASE;
+    let client = crate::hbbs_http::create_http_client_async_with_url(base).await;
+    let url = format!("{}/api/whoami", base);
+    match client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(6))
+        .send()
+        .await
+    {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(v) => {
+                if let Some(ip) = v["ip"].as_str() {
+                    if !ip.is_empty() {
+                        *RL_GLOBAL_IP.lock().unwrap() = ip.to_owned();
+                        log::info!("REMOHELP PRO: グローバルIPを取得しました");
+                    }
+                }
+            }
+            Err(e) => log::debug!("REMOHELP PRO: whoami の中身が読めません: {e}"),
+        },
+        Err(e) => log::debug!("REMOHELP PRO: whoami に届きません: {e}"),
+    }
+}
+
+/// 覚えてあるグローバルIP。まだ取れていなければ空。
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+pub fn rl_global_ip() -> String {
+    RL_GLOBAL_IP.lock().unwrap().clone()
+}
+
 /// 🔴 サポートに要る「相手のパソコンの情報」（2026-08-26 ご要望）。
 ///
 ///   これまで相談員に分かるのは接続番号と名前だけだった。
@@ -928,6 +976,12 @@ pub fn rl_support_sysinfo() -> serde_json::Value {
     }
     if !ips.is_empty() {
         v["local_ips"] = json!(ips.join(", "));
+    }
+    // グローバルIP。⚠ 起動時に当社サーバーへ聞いた値。まだ取れていなければ入れない
+    //   （空欄を出すと「取得できない機種」に見える）。
+    let g = rl_global_ip();
+    if !g.is_empty() {
+        v["global_ip"] = json!(g);
     }
     v
 }

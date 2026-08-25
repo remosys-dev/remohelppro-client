@@ -2011,7 +2011,7 @@ void showConfirmSwitchSidesDialog(
 ///   常駐に出しても**お客様に余計なお願いをするだけ**で済むが、
 ///   逆（常駐向けの文言をワンタイムに出す）は
 ///   「次も繋げます」という**嘘**になる。
-bool _isResidentPeer(FFI? ffi) {
+bool isResidentPeer(FFI? ffi) {
   if (ffi == null) return false;
   try {
     if (ffi.ffiModel.pi.platform != kPeerPlatformWindows) return false;
@@ -2068,7 +2068,7 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
     final (state, remainSec) = await rlWatchReconnect(ffi);
     if (state == 'waiting') {
       final m = (remainSec / 60).ceil();
-      final endNote = _isResidentPeer(ffi)
+      final endNote = isResidentPeer(ffi)
           ? 'ここで終了しても、常駐しているので\nあとから繋ぎ直せます。'
           : 'ここで終了すると、お客様が戻ってきても\n'
               'つなぎ直せなくなります\n'
@@ -2110,7 +2110,7 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
   //   次も相談員だけで繋げる。それなのに「入れ直していただく必要があります」と
   //   出るので、相談員が終了をためらうか、お客様に不要なお願いをしてしまう。
   //   ⚠ ワンタイムでは今の文言が正しい（お客様のアプリごと終わる）。**分ける**。
-  final isResident = _isResidentPeer(ffi);
+  final isResident = isResidentPeer(ffi);
   final res = await dialogManager.show<bool>((setState, close, context) {
     return CustomAlertDialog(
       content: Column(
@@ -3259,9 +3259,10 @@ Widget trustedDevicesTable(
 ///     「メモリはいくつですか」をお客様に聞いても、答えられない方が多い。
 ///   ★繋いだ時点で分かるものを、そのまま並べる。
 ///
-///   ⚠ グローバルIPはここには出ない。**相手のパソコンからは自分の
-///     グローバルIPが分からない**ため。管理画面の常駐PC一覧に、
-///     当社サーバーが見た接続元として出ている。
+///   ⚠ グローバルIPは、お客様のパソコンが**当社のサーバーに聞いた**値
+///     （/api/whoami）。パソコンは自分のグローバルIPを自分では知らないので、
+///     起動時に一度だけ聞いている。第三者のIP判定サイトは使わない。
+///     まだ取れていなければ、行ごと出さない。
 ///   ⚠ 値が無い項目は行ごと出さない。空欄が並ぶと、壊れているように見える。
 void showRemoteSysinfoDialog(PeerInfo pi, String id, String version,
     OverlayDialogManager dialogManager) {
@@ -3284,6 +3285,7 @@ void showRemoteSysinfoDialog(PeerInfo pi, String id, String version,
     ['OS', s('os')],
     ['CPU', s('cpu')],
     ['メモリ', s('memory')],
+    ['グローバルIP', s('global_ip')],
     ['ローカルIP', s('local_ips')],
     ['アプリの版', version],
   ].where((r) => r[1].isNotEmpty).toList();

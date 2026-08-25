@@ -361,10 +361,14 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   //
   //   ⚠ 文言も分けた。同じ 'Switch Sides' を両側で使っていたため、
   //     顧客側前提の「相談員に制御を戻す」が相談員の画面に出ていた。
+  //   ⚠ 常駐PCには出さない（2026-08-26 ご判断）。
+  //     常駐は既にお使いいただいている業務用PC。ソフトを体験していただく
+  //     場面が無いので、押し間違いにしかならない。
   if (isDefaultConn &&
       isDesktop &&
       ffiModel.keyboard &&
       pi.platform != kPeerPlatformAndroid &&
+      !isResidentPeer(ffi) &&
       versionCmp(pi.version, '1.2.0') >= 0 &&
       bind.peerGetSessionsCount(id: id, connType: ffi.connType.index) == 1) {
     v.add(TTextMenu(

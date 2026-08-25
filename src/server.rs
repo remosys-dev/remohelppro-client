@@ -601,6 +601,13 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         hbb_common::platform::windows::start_cpu_performance_monitor();
     });
 
+    // 🔴 自分のグローバルIPを、起動のときに一度だけ当社サーバーへ聞いておく
+    //   （2026-08-26 ご要望）。相談員の画面に「どの回線から繋がっているか」を出すため。
+    //   ⚠ 待たない。取れても取れなくても、接続の動きには一切影響させない。
+    //   ⚠ 接続のたびに聞かない。ここに置くのは、繋がる前に済ませておくため。
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    tokio::spawn(crate::common::rl_refresh_global_ip());
+
     if is_server {
         crate::common::set_server_running(true);
         std::thread::spawn(move || {
