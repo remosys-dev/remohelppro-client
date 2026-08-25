@@ -7,6 +7,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/rl_support.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
@@ -634,8 +635,13 @@ class _DesktopTabState extends State<DesktopTab>
                     Offstage(
                       offstage: kUseCompatibleUiMode || isMacOS,
                       child: Row(children: [
+                        // 🔴 お客様版ではタイトルバーのロゴを出さない（2026-08-25 ご指示）。
+                        //   ⚠ 最初期に作った鎖のマークがそのまま残っていた。
+                        //     いまの絵柄と揃っておらず、小さくて何のマークかも分からない。
+                        //   ★隣に「REMOHELP PRO」の文字が出るので、名乗りは足りている。
+                        //   ⚠ 相談員版（フリート版）はこれまでどおり。
                         Offstage(
-                          offstage: !showLogo,
+                          offstage: !showLogo || kRlSupportShowWindow,
                           child: loadIcon(16),
                         ),
                         Offstage(

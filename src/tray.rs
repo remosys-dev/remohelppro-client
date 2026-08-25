@@ -64,11 +64,22 @@ fn make_tray() -> hbb_common::ResultType<()> {
     } else {
         None
     };
-    let open_i = MenuItem::new(translate("Open".to_owned()), true, None);
+    // 🔴🔴 トレイから本体の窓を開けなくする（2026-08-25 ご指示）。
+    //
+    //   ⚠ 本体の窓（「あなたのコンピューター」＝自分のIDと一時パスワード、
+    //     相手一覧、設定）は、起動時は隠してある。しかしトレイの「開く」から
+    //     開けてしまい、**お客様のPCでその画面が開いた状態**で見つかった。
+    //   ★相談員も顧客も、この画面を見る必要が無い（ご判断）。
+    //     ・相談員は管理画面から「遠隔操作を開始」で操作の窓だけを開く
+    //     ・顧客は認証コードを入れるだけ
+    //   ⚠ 「停止」は残す。動いているものを止める道は塞がない。
+    //     ここまで塞ぐと、何かあったときお客様が自分で止められなくなる。
+    //
+    //   ⚠ 逃げ道: どうしても本体の窓が要るときは `--noinstall` で起動する
+    //     （当社が遠隔で入ったときに使う）。トレイから消しただけで、
+    //     窓そのものを無くしたわけではない。
     if let Some(quit_i) = &quit_i {
-        tray_menu.append_items(&[&open_i, quit_i]).ok();
-    } else {
-        tray_menu.append_items(&[&open_i]).ok();
+        tray_menu.append_items(&[quit_i]).ok();
     }
     let tooltip = |count: usize| {
         if count == 0 {
@@ -93,6 +104,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
     #[cfg(windows)]
     let (ipc_sender, ipc_receiver) = std::sync::mpsc::channel::<Data>();
 
+    // ⚠ 残してあるが**どこからも呼ばない**（2026-08-25）。
+    //   トレイからは開かせない方針にしたため。消さずに残すのは、
+    //   将来「当社が遠隔で入ったときだけ開く」道を足すときの土台になるから。
+    #[allow(dead_code)]
     let open_func = move || {
         if cfg!(not(feature = "flutter")) {
             crate::run_me::<&str>(vec![]).ok();
@@ -179,11 +194,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
                     if !crate::platform::uninstall_service(false, false) {
                         *control_flow = ControlFlow::Exit;
                     }
-                } else if event.id == open_i.id() {
-                    open_func();
                 }
-            } else if event.id == open_i.id() {
-                open_func();
+                // ⚠ 「開く」はメニューから外した（上のコメント参照）。
+                //   受け口も残さない。残すと、後で誰かがメニューに戻したときに
+                //   「なぜか開けてしまう」状態が静かに復活する。
             }
         }
 
@@ -195,15 +209,10 @@ fn make_tray() -> hbb_common::ResultType<()> {
                     button_state,
                     ..
                 } => {
-                    if button == tray_icon::MouseButton::Left
-                        && button_state == tray_icon::MouseButtonState::Up
-                    {
-                        if last_click.elapsed() < std::time::Duration::from_secs(1) {
-                            return;
-                        }
-                        open_func();
-                        last_click = std::time::Instant::now();
-                    }
+                    // ⚠ 左クリックでも本体の窓を開かない（2026-08-25 ご指示）。
+                    //   メニューから「開く」を外しても、ここが残っていると
+                    //   **アイコンを押しただけで開く**。塞ぐならどちらも塞ぐ。
+                    let _ = (button, button_state, &mut last_click);
                 }
                 _ => {}
             }
