@@ -296,8 +296,21 @@ impl PrivacyModeImpl {
             self.handlers.hthread = proc_info.hThread as _;
             self.handlers.hprocess = proc_info.hProcess as _;
 
-            let hwnd = wait_find_privacy_hwnd(1_000)?;
+            // 🔴 待ち時間を 1 秒 → 8 秒に延ばした（2026-08-25 実機で失敗）。
+            //
+            //   ⚠ ここで待っているのは、**いま起動したばかりの別の実行ファイル**が
+            //     黒い窓を作るまで。初回は対策ソフトがその実行ファイルを検査するので、
+            //     1 秒では足りないことがある。
+            //   ⚠ 間に合わないと「Failed to get hwnd after started」で失敗するのに、
+            //     窓の方は少し遅れて出てくる。＝ **お客様の画面は真っ暗のまま、
+            //     相談員にはエラーだけが出る**という最悪の形になっていた（実際に発生）。
+            let hwnd = wait_find_privacy_hwnd(8_000)?;
             if hwnd.is_null() {
+                // 🔴 諦めるときは、必ず後始末する。
+                //   ⚠ 起動した実行ファイルを止めずに抜けると、
+                //     お客様の画面が黒いまま取り残される。
+                //     こちらには「失敗した」としか出ないので、誰も気づけない。
+                self.handlers.reset();
                 bail!("Failed to get hwnd after started");
             }
         }

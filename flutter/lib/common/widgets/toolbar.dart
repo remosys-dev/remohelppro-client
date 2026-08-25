@@ -211,35 +211,14 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
               showRequestElevationDialog(sessionId, ffi.dialogManager)),
     );
   }
-  // osAccount / osPassword
-  if (isDefaultConn && perms['keyboard'] != false) {
-    v.add(
-      TTextMenu(
-        child: Row(children: [
-          Text(translate(pi.isHeadless ? 'OS Account' : 'OS Password')),
-        ]),
-        trailingIcon: Transform.scale(
-          scale: (isDesktop || isWebDesktop) ? 0.8 : 1,
-          child: IconButton(
-            onPressed: () {
-              if (isMobile && Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
-              if (pi.isHeadless) {
-                showSetOSAccount(sessionId, ffi.dialogManager);
-              } else {
-                handleOsPasswordEditIcon(sessionId, ffi.dialogManager);
-              }
-            },
-            icon: Icon(Icons.edit, color: isMobile ? MyTheme.accent : null),
-          ),
-        ),
-        onPressed: () => pi.isHeadless
-            ? showSetOSAccount(sessionId, ffi.dialogManager)
-            : handleOsPasswordAction(sessionId, ffi.dialogManager),
-      ),
-    );
-  }
+  // 🔴 「OS のパスワード」は出さない（2026-08-25 ご判断）。
+  //
+  //   これは**お客様の Windows ログインパスワードを預かって覚えておく**欄で、
+  //   ロック画面などで相談員が代わりに打つためのもの。
+  //   ⚠ 遠隔でつながっている以上、必要ならその場で打てば済む。
+  //     わざわざ**お客様のログインパスワードを当社が持つ**理由が無い。
+  //   ⚠ 預かった時点で、漏れたときの責任がこちらに来る。持たないのが一番安い。
+  //   復活させるなら、預け先と消し方をお客様に説明できる形にしてから。
   // paste
   if (isDefaultConn &&
       pi.platform != kPeerPlatformAndroid &&
@@ -262,11 +241,16 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   }
 
   if (isDefaultConn && isDesktop) {
-    v.add(
-      TTextMenu(
-          child: Text(translate('View camera')),
-          onPressed: () => connectWithToken(isViewCamera: true)),
-    );
+    // 🔴 「カメラを見る」は出さない（2026-08-25 ご判断）。
+    //
+    //   ⚠ これはお客様のPCに繋がっている**カメラの映像を見る**機能で、
+    //     画面共有とは別物。相談員が押すだけで、お客様の部屋が映る。
+    //   ★見る必要があるときは、**顧客側から始めるカメラ共有**を使う。
+    //     そちらはお客様が承諾して始めるので、同意の所在がはっきりする。
+    //   ⚠ 押し間違いで起きてしまう作りにしない。
+    //   接続そのものの仕組み（isViewCamera）は残してある。顧客側から
+    //   始めるカメラ共有がその道を使う。
+    //
     // ターミナル / TCPトンネリング は出さない（2026-07-29 実機指摘）。
     //   遠隔サポートの相談員が使う場面が無く、押し間違いの元にしかならない。
     //   お客様のPCでコマンドを打つ・ポートを開くのは、説明した支援の範囲を

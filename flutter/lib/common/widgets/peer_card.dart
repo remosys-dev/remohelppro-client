@@ -593,6 +593,12 @@ abstract class BasePeerCard extends StatelessWidget {
   }
 
   @protected
+  // 🔴 「カメラを見る」は一覧の右クリックからも出さない（2026-08-25 ご判断）。
+  //   ⚠ 同じ機能の入口が **6 か所**あった（セッションのメニュー＋この一覧の5種類）。
+  //     1か所だけ塞ぐと、使われていない方だけが残る。
+  //   見る必要があるときは、顧客側から始めるカメラ共有を使う。
+  //   戻せるように関数は残してある。呼び出しを足せば復活する。
+  // ignore: unused_element
   MenuEntryBase<String> _viewCameraAction(BuildContext context) {
     return _connectCommonAction(
       context,
@@ -969,7 +975,6 @@ class RecentPeerCard extends BasePeerCard {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
       _transferFileAction(context),
-      _viewCameraAction(context),
       _terminalAction(context),
     ];
 
@@ -1034,7 +1039,6 @@ class FavoritePeerCard extends BasePeerCard {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
       _transferFileAction(context),
-      _viewCameraAction(context),
       _terminalAction(context),
     ];
 
@@ -1094,7 +1098,6 @@ class DiscoveredPeerCard extends BasePeerCard {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
       _transferFileAction(context),
-      _viewCameraAction(context),
       _terminalAction(context),
     ];
 
@@ -1153,7 +1156,6 @@ class AddressBookPeerCard extends BasePeerCard {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
       _transferFileAction(context),
-      _viewCameraAction(context),
       _terminalAction(context),
     ];
 
@@ -1310,7 +1312,6 @@ class MyGroupPeerCard extends BasePeerCard {
     final List<MenuEntryBase<String>> menuItems = [
       _connectAction(context),
       _transferFileAction(context),
-      _viewCameraAction(context),
       _terminalAction(context),
     ];
 
