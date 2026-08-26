@@ -369,7 +369,8 @@ class ChatModel with ChangeNotifier {
     //     windowManager.show() だけでは透明のままで、出したつもりで見えない。
     //     showCmWindow() は不透明に戻してから前に出すので、必ずこちらを通す。
     if (desktopType == DesktopType.cm) {
-      await showCmWindow();
+      // ⚠ showCmWindow() では出し切れない（main.dart の説明）。
+      await forceShowCmWindow();
     }
     String? peerId;
     if (id == clientModeID) {

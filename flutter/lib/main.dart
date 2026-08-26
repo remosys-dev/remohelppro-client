@@ -459,6 +459,42 @@ showCmWindow({bool isStartup = false}) async {
   }
 }
 
+/// 🔴 隠してある「接続の窓」を、**確実に**出す（2026-08-26）。
+///
+///   ⚠ upstream の showCmWindow() では出し切れない。穴が2つある:
+///     ① `_isCmReadyToShow` が立つ前に呼ぶと**何もしない**。
+///        接続が来た瞬間に呼ぶと、起動処理が終わっておらず取りこぼす。
+///     ② hideCmWindow() は `windowManager.hide()` まで呼んでいるのに、
+///        showCmWindow() は `show()` を呼ばない。透明を戻すだけなので
+///        **タスクバーには居るのに出てこない**（実機で発生）。
+///
+///   ★用意ができるまで待ってから、show + 不透明 + 最小化解除 + 前面 まで
+///     全部やる。ここを通らないと、隠す設定の版では**知らせが全部消える**。
+///
+/// ⚠ 使うのは「隠す設定でも必ず出さねばならない」場面だけ:
+///   ・チャットが届いた ・音声通話の着信 ・自分の画面を見せている（戻す釦）
+///   普段の表示は showCmWindow() のままでよい。
+Future<void> forceShowCmWindow() async {
+  // 用意ができるまで最大4秒待つ。⚠ 待たずに諦めると起動直後を取りこぼす。
+  for (var i = 0; i < 20; i++) {
+    if (_isCmReadyToShow) break;
+    await Future.delayed(const Duration(milliseconds: 200));
+  }
+  try {
+    await windowManager.setOpacity(1);
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    await windowManager.show();
+    await windowManager.focus();
+    await windowManager.setSizeAlignment(
+        kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+    windowOnTop(null);
+  } catch (e) {
+    debugPrint('接続の窓を出せませんでした: $e');
+  }
+}
+
 hideCmWindow({bool isStartup = false}) async {
   if (isStartup) {
     WindowOptions windowOptions = getHiddenTitleBarWindowOptions(

@@ -653,8 +653,14 @@ class ServerModel with ChangeNotifier {
       //     出さないと、お客様に自分のPCを操作させたまま**止められなくなる**。
       //     実機で発生。相談員版は本体の窓も開けないので、他に道が無い。
       //   ★止められない機能は、始められる機能より危ない。ここは例外にする。
-      if (desktopType == DesktopType.cm && (!hideCm || client.fromSwitch)) {
-        showCmWindow();
+      if (desktopType == DesktopType.cm) {
+        if (client.fromSwitch) {
+          // ⚠ showCmWindow() では出し切れない（起動直後の取りこぼしと、
+          //   hide() したのに show() を呼ばない問題）。必ず forceShowCmWindow。
+          forceShowCmWindow();
+        } else if (!hideCm) {
+          showCmWindow();
+        }
       }
       scrollToBottom();
       notifyListeners();
@@ -862,7 +868,8 @@ class ServerModel with ChangeNotifier {
             //     setOpacity(0) で透明にしてあり、前に出しても見えない。
             //     不透明に戻す showCmWindow() を通すこと。
             Future.delayed(Duration.zero, () {
-              showCmWindow();
+              // ⚠ 受ける釦はこの窓の中にしかない。確実に出す方を使う。
+              forceShowCmWindow();
             });
           }
         }
