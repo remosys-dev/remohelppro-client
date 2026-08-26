@@ -931,6 +931,66 @@ lazy_static::lazy_static! {
 ///   例: `["route","print","-4"]`
 /// ⚠ 呼べるプログラムは決め打ちの一覧に限る。ここは画面から呼ばれる入口なので、
 ///   何でも実行できる形にしておく理由が無い（増やすときはこの一覧に足す）。
+/// サポートが終わったあと、**自分の仲間のプロセスを片付ける**（2026-08-27）。
+///
+/// 🔴🔴 サポートを終了してもプロセスが残っていた（実機のタスクマネージャーで確認）。
+///
+///   アプリは画面の窓・裏方（--server）・トレイ・接続の窓（--cm）と、
+///   **複数のプロセス**で動いている。終了時に `exit(0)` しているのは
+///   **画面の窓だけ**なので、⚠ 残りは動いたまま居座る。
+///
+///   実害は2つ:
+///     ① お客様のPCに、使い終わったはずのものが残り続ける。
+///        自己削除も効かない（使用中のファイルは消せない）。
+///     ② 次にワンタイム版を起動したとき、⚠ **残骸が通信路
+///        （\\.\pipe\...）を握ったままなので接続番号が取れない**。
+///        今日ずっと出ていた「接続番号がまだ取れていません」「Loading で落ちる」の
+///        正体がこれ。再起動すると直るのは、残骸が消えるからである。
+///
+/// ★消してよい相手は「**自分と同じフォルダから動いているもの**」だけ。
+///   ⚠ 名前で消してはいけない。3製品とも表示名は「REMOHELP PRO Remote Desktop」で
+///     同じで、常駐版・相談員版まで巻き込む。実行ファイルの**置き場所**で見分ける。
+///   ⚠ 自分自身は消さない（呼んだ側が最後に自分で終わる）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn rl_kill_sibling_processes() {
+    use hbb_common::sysinfo::System;
+    // ⚠ ワンタイム版だけの後始末。常駐版・相談員版では**絶対にやらない**。
+    //   常駐で走らせると、自分のサービスを道連れにして端末に入れなくなる。
+    //   入口（flutter_ffi の rl-kill-siblings）は全機種から呼べるので、
+    //   呼ぶ側の条件だけに頼らず、ここでも断る。
+    if hbb_common::config::IS_RESIDENT_BUILD || hbb_common::config::IS_OPERATOR_BUILD {
+        log::info!("RL: 常駐版/相談員版では仲間の片付けはしません");
+        return;
+    }
+    let Ok(my_exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(my_dir) = my_exe.parent().map(|p| p.to_path_buf()) else {
+        return;
+    };
+    // ⚠ Pid の作り方は既存に合わせる（from_u32）。数値へ変換して比べない。
+    let my_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let mut killed = 0;
+    for (pid, p) in sys.processes().iter() {
+        if *pid == my_pid {
+            continue;
+        }
+        let Some(exe) = p.exe().parent() else { continue };
+        if exe != my_dir.as_path() {
+            continue;
+        }
+        if p.kill() {
+            killed += 1;
+        }
+    }
+    log::info!("RL: 同じフォルダの仲間を {killed} 個片付けました（{my_dir:?}）");
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn rl_kill_sibling_processes() {}
+
 /// ⚠ スマホ版でも**定義は残す**。呼び出し側（flutter_ffi.rs の main_get_common）は
 ///   全機種で1つなので、ここを cfg で丸ごと消すと Android のビルドが落ちる。
 ///   スマホでは何もせず空を返す（そもそもコンソールの窓が無い）。
