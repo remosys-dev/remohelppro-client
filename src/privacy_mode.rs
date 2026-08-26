@@ -324,7 +324,23 @@ async fn set_privacy_mode_state(
         .await
 }
 
+/// 🔴🔴 プライバシーモードは提供しない（2026-08-26 ご判断）。
+///
+///   実装は2つあったが、**両方とも実機で動かなかった**。
+///   黒い窓は `CreateWindowInBand`（Windows の非公開API）で作っており、
+///   「Microsoft 署名の実行ファイル」が「保護された場所」から動いている
+///   ことが条件。RuntimeBroker.exe をコピーして使う作りだが、コピー先は
+///   当社アプリのフォルダなので条件を満たせない。当社の DLL に署名しても
+///   変わらない。⚠ 非公開APIなので Windows の更新で黙って壊れる性質でもある。
+///
+/// ⚠ 相談員側（toolbar.dart の toolbarPrivacyMode）でも消してある。
+///   そちらが本体で、こちらは**相手に嘘を申告しない**ためのもの。
+///   片方だけだと、古い版の相手に繋いだときに出てしまう。
+/// 戻すなら、この空 return を消せば元の判定に戻る。
 pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
+    return Vec::new();
+    #[allow(unreachable_code)]
+    {
     #[cfg(target_os = "windows")]
     {
         let mut vec_impls = Vec::new();
@@ -371,6 +387,7 @@ pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         Vec::new()
+    }
     }
 }
 

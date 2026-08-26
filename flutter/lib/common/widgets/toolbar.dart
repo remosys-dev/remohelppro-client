@@ -822,6 +822,29 @@ List<TToggleMenu> toolbarPrivacyMode(
   final sessionId = ffi.sessionId;
   final hasPrivacyModePermission = ffiModel.permissions['privacy_mode'] != false;
 
+  // 🔴🔴 プライバシーモードは出さない（2026-08-26 ご判断）。
+  //
+  //   「お客様の画面だけ黒くする」機能。実装は2つあったが、**両方とも実機で
+  //   動かなかった**（新しい版でも `Failed to get hwnd after started`）。
+  //
+  //   ⚠ なぜ直せないか。黒い窓は `CreateWindowInBand` という Windows の
+  //     **非公開API**で作っている。最前面の特別な層に窓を出すには
+  //     「Microsoft の署名がある実行ファイル」が「保護された場所」から
+  //     動いている必要がある。そのために Windows 標準の RuntimeBroker.exe を
+  //     **コピーして**使う作りだが、コピー先は当社アプリのフォルダで、
+  //     保護された場所ではない。＝ 条件を満たせない。
+  //     当社の DLL に署名しても、この条件は変わらない。
+  //   ⚠ 非公開APIなので、Windows の更新で黙って壊れる性質のものでもある。
+  //
+  //   ★押せるのに必ず失敗するボタンは、無いより悪い。お客様の前で失敗すると
+  //     製品全体を疑われる（「モード 2」を消したのと同じ理由）。
+  //
+  //   ⚠ **相談員側で消す**こと。お客様側だけ直しても、古い版のPCに繋いだ
+  //     ときに出てしまう。ここなら相手の版に関係なく出ない。
+  //   戻すなら、この return を消せば元に戻る。
+  return [];
+  // ignore: dead_code
+
   // Backend revocation already attempts to turn privacy mode off.
   // Still keep this menu when privacy mode is active, so users can turn it off
   // if there is a sync delay, version mismatch, or off attempt failure.
