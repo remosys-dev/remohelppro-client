@@ -841,9 +841,13 @@ List<TToggleMenu> toolbarPrivacyMode(
   //
   //   ⚠ **相談員側で消す**こと。お客様側だけ直しても、古い版のPCに繋いだ
   //     ときに出てしまう。ここなら相手の版に関係なく出ない。
-  //   戻すなら、この return を消せば元に戻る。
-  return [];
-  // ignore: dead_code
+  //
+  //   🔴 2026-08-26 追記：**当社方式を作ったので出す**ようにした。
+  //     公開APIの `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` だけで
+  //     作る（src/privacy_mode/rl_black_screen.rs）。
+  //     ⚠ お客様側が古い版なら、そちらは「モード1・2」を申告してくる。
+  //       その2つは動かないので、**古い版のお客様には使わないこと**。
+  //       新しい版なら申告は「プライバシーモード」1つだけになる。
 
   // Backend revocation already attempts to turn privacy mode off.
   // Still keep this menu when privacy mode is active, so users can turn it off

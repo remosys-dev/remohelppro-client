@@ -21,6 +21,9 @@ mod win_input;
 pub mod win_mag;
 #[cfg(windows)]
 pub mod win_topmost_window;
+/// 🔴 当社方式（公開APIだけで作る黒い窓）。2026-08-26 追加。
+#[cfg(windows)]
+pub mod rl_black_screen;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -40,6 +43,8 @@ pub const PRIVACY_MODE_IMPL_WIN_MAG: &str = "privacy_mode_impl_mag";
 pub const PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE: &str =
     "privacy_mode_impl_exclude_from_capture";
 pub const PRIVACY_MODE_IMPL_WIN_VIRTUAL_DISPLAY: &str = "privacy_mode_impl_virtual_display";
+/// 当社方式。表示は「プライバシーモード」1つだけになる。
+pub const PRIVACY_MODE_IMPL_RL_BLACK: &str = "privacy_mode_impl_rl_black";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "t", content = "c")]
@@ -91,7 +96,12 @@ lazy_static::lazy_static! {
     pub static ref DEFAULT_PRIVACY_MODE_IMPL: String = {
         #[cfg(windows)]
         {
-            if win_exclude_from_capture::is_supported() {
+            // 🔴 当社方式を既定にする（2026-08-26）。
+            //   RustDesk の2方式は実機で動かなかった（非公開APIの条件を満たせない）。
+            //   詳しくは rl_black_screen.rs の冒頭。
+            if rl_black_screen::is_supported() {
+                PRIVACY_MODE_IMPL_RL_BLACK
+            } else if win_exclude_from_capture::is_supported() {
                 PRIVACY_MODE_IMPL_WIN_EXCLUDE_FROM_CAPTURE
             } else {
                 if display_service::is_privacy_mode_mag_supported() {
@@ -148,6 +158,9 @@ lazy_static::lazy_static! {
         let mut map: HashMap<&'static str, PrivacyModeCreator> = HashMap::new();
         #[cfg(windows)]
         {
+            map.insert(rl_black_screen::PRIVACY_MODE_IMPL, |impl_key: &str| {
+                Box::new(rl_black_screen::PrivacyModeImpl::new(impl_key))
+            });
             if win_exclude_from_capture::is_supported() {
                 map.insert(win_exclude_from_capture::PRIVACY_MODE_IMPL, |impl_key: &str| {
                     Box::new(win_exclude_from_capture::PrivacyModeImpl::new(impl_key))
@@ -338,7 +351,20 @@ async fn set_privacy_mode_state(
 ///   片方だけだと、古い版の相手に繋いだときに出てしまう。
 /// 戻すなら、この空 return を消せば元の判定に戻る。
 pub fn get_supported_privacy_mode_impl() -> Vec<(&'static str, &'static str)> {
-    return Vec::new();
+    // 🔴 出すのは**当社方式ひとつだけ**（2026-08-26）。
+    //   ⚠ RustDesk の2方式（モード1・モード2）は実機で動かなかったので出さない。
+    //     詳しくは rl_black_screen.rs の冒頭。
+    //   ★1つだけなら、画面の表示も「プライバシーモード」の1項目になる。
+    //     どれが動くのか選ばせない。
+    #[cfg(target_os = "windows")]
+    {
+        if rl_black_screen::is_supported() {
+            return vec![(PRIVACY_MODE_IMPL_RL_BLACK, "privacy_mode_impl_mag_tip")];
+        }
+        // ⚠ 古い Windows（10 の 2004 未満）では隠せない。
+        //   隠せないのに出すと、相談員の画面まで真っ黒になる。出さない。
+        return Vec::new();
+    }
     #[allow(unreachable_code)]
     {
     #[cfg(target_os = "windows")]
