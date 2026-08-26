@@ -646,7 +646,14 @@ class ServerModel with ChangeNotifier {
         _clients.removeAt(index_disconnected);
         tabController.remove(index_disconnected);
       }
-      if (desktopType == DesktopType.cm && !hideCm) {
+      // 🔴 「自分の画面を見せる」で繋がったときは、隠す設定でも**必ず出す**
+      //   （2026-08-26 ご指摘）。
+      //
+      //   ⚠ **見せるのをやめる道は、この窓の中にしかない**（紫の釦）。
+      //     出さないと、お客様に自分のPCを操作させたまま**止められなくなる**。
+      //     実機で発生。相談員版は本体の窓も開けないので、他に道が無い。
+      //   ★止められない機能は、始められる機能より危ない。ここは例外にする。
+      if (desktopType == DesktopType.cm && (!hideCm || client.fromSwitch)) {
         showCmWindow();
       }
       scrollToBottom();
@@ -666,7 +673,9 @@ class ServerModel with ChangeNotifier {
         onTap: () {},
         page: desktop.buildConnectionCard(client)));
     Future.delayed(Duration.zero, () async {
-      if (!hideCm) windowOnTop(null);
+      // ⚠ 「自分の画面を見せる」で繋がったときは、隠す設定でも前に出す。
+      //   戻す釦がこの窓の中にしかないため（上の説明）。
+      if (!hideCm || client.fromSwitch) windowOnTop(null);
     });
     // Only do the hidden task when on Desktop.
     if (client.authorized && isDesktop) {
