@@ -2717,7 +2717,24 @@ class _VoiceCallMenu extends StatelessWidget {
               ffi: ffi,
             );
           default:
-            return Offstage();
+            // 🔴 通話を**始める**釦をここに出す（2026-08-26 ご指摘）。
+            //
+            //   ⚠ 元は Offstage（何も出さない）で、通話を始める道は
+            //     **チャットの釦の中の小さなメニュー**にしかなかった。
+            //     「チャットの中に電話がある」と分かる人はいない。
+            //     実際に、電話のアイコンを押しても何も起きないと報告があった
+            //     （あの電話アイコンは通話中に**切るため**の物だった）。
+            //   ★始める釦と切る釦を、同じ場所に置く。
+            //   ⚠ チャットの中の「音声通話」も残す。片方だけ知っている人が
+            //     いるので、道は減らさない。
+            return _IconMenuButton(
+              assetName: 'assets/voice_call.svg',
+              tooltip: 'Voice call',
+              onPressed: () =>
+                  bind.sessionRequestVoiceCall(sessionId: ffi.sessionId),
+              color: _ToolbarTheme.blueColor,
+              hoverColor: _ToolbarTheme.hoverBlueColor,
+            );
         }
       },
     );
