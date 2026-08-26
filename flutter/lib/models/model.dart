@@ -3767,9 +3767,53 @@ class RecordingModel with ChangeNotifier {
     if (pi == null) return;
     bool value = !_start;
     if (value) {
+      // 🔴 録画を始めるときは H.264 に切り替える（2026-08-26 ご指摘）。
+      //
+      //   ⚠ 録画は**映像をそのまま容れ物に入れるだけ**で、作り直さない。
+      //     だから H.265 で繋がっていると H.265 のファイルになり、
+      //     **Windows 標準の再生アプリで開けない**（HEVC の追加コーデックが有料）。
+      //   ★録画を見るために、お客様や相談員に買い物をお願いしない。
+      //   ⚠ 止めたら元の設定に戻す。相談員が選んだ設定を勝手に書き換えたままに
+      //     しない。
+      await _preferH264ForRecording(sessionId);
       await sessionRefreshVideo(sessionId, pi);
     }
     await bind.sessionRecordScreen(sessionId: sessionId, start: value);
+    if (!value) {
+      await _restoreCodecAfterRecording(sessionId);
+    }
+  }
+
+  /// 録画前の映像方式。null は「まだ触っていない」。
+  String? _codecBeforeRecording;
+
+  Future<void> _preferH264ForRecording(SessionID sessionId) async {
+    try {
+      final cur = await bind.sessionGetOption(
+              sessionId: sessionId, arg: kOptionCodecPreference) ??
+          'auto';
+      if (cur == 'h264') return;
+      _codecBeforeRecording = cur;
+      await bind.sessionPeerOption(
+          sessionId: sessionId, name: kOptionCodecPreference, value: 'h264');
+      bind.sessionChangePreferCodec(sessionId: sessionId);
+    } catch (e) {
+      // ⚠ 切り替えられなくても録画は続ける。撮れないより、開きにくい方がまし。
+      debugPrint('録画のための映像方式の切り替えに失敗: $e');
+    }
+  }
+
+  Future<void> _restoreCodecAfterRecording(SessionID sessionId) async {
+    final before = _codecBeforeRecording;
+    _codecBeforeRecording = null;
+    if (before == null) return;
+    try {
+      await bind.sessionPeerOption(
+          sessionId: sessionId, name: kOptionCodecPreference, value: before);
+      bind.sessionChangePreferCodec(sessionId: sessionId);
+    } catch (e) {
+      debugPrint('映像方式を戻せませんでした: $e');
+    }
   }
 
   updateStatus(bool status) {

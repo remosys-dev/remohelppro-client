@@ -699,7 +699,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Take screenshot", "スクリーンショットを撮影"),
         ("Remote system info", "お客様のパソコンの情報"),
         // 録画したものを見る道（2026-08-25）。設定画面が開けないので、ここに置く。
-        ("Open recordings folder", "録画したものを開く"),
+        ("Open recordings folder", "録画ファイル開く"),
         ("Taking screenshot", "スクリーンショットを撮影中"),
         ("screenshot-merged-screen-not-supported-tip", "複数のディスプレイのスクリーンショットの結合は、現在サポートされていません。単一のディスプレイに切り替えてもう一度お試しください。"),
         ("screenshot-action-tip", "スクリーンショットを続行する方法を選択してください。"),

@@ -2121,15 +2121,16 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
             '遠隔接続を終了しますか？',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          const SizedBox(height: 8),
-          Text(
-            isResident
-                ? 'この接続を終了します。\n'
-                    'お客様のパソコンには引き続き常駐していますので、\n'
-                    '次からもお客様の操作なしでおつなぎできます。'
-                : 'この接続を終了し、お客様の画面のアプリも終了します。\n'
-                    'もう一度つなぐには、お客様に認証コードを入れ直していただく必要があります。',
-          ),
+          // 🔴 説明を削った（2026-08-26 ご指摘）。
+          //
+          //   ⚠ 常駐は**何も起きない**（次もこちらだけで繋げる）ので、
+          //     説明する必要が無い。読ませるだけ無駄。
+          //   ★ワンタイムだけ1行残す。押すと**お客様に手間が生まれる**という、
+          //     押す前に知っておくべき事実だから。長い説明にはしない。
+          if (!isResident) ...[
+            const SizedBox(height: 8),
+            Text('もう一度つなぐには、お客様に認証コードを入れ直していただきます。'),
+          ],
         ],
       ),
       actions: [
