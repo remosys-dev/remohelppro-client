@@ -15,6 +15,7 @@ import 'remohelppro_resident.dart' show RemohelpproResidentCard;
 import 'remohelppro_reconnect.dart'
     show
         armReboot,
+        hasResumeToken,
         tryResume,
         prepareRebootResume,
         clearRebootResume,
@@ -94,6 +95,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   bool _prelogonBusy = false;
   /// 常駐が入っているせいで繋がらない状態か（逃げ道のボタンを出すため）。
   bool _residentBlocking = false;
+  /// 「接続しています」の下に出す途中経過（接続番号の登録を待っている間）。
+  ///   ⚠ 何も出さずに長く待たせると、お客様は固まったと思って窓を閉じる。
+  String? _prepNote;
   /// 常駐を一時停止する処理の最中か。
   bool _pausing = false;
   /// このサポートのために常駐を止めたか（終わるときに戻す）。
@@ -212,6 +216,32 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       debugPrint('RL: 常駐版なので固定パスワードは触らない');
       return;
     }
+    // 🔴🔴 復帰の合言葉を持っているときは**消してはいけない**
+    //   （2026-08-27 実機で確定。両方のPCで毎回再現した）。
+    //
+    //   起動のたびにここで合言葉を `boot-乱数` に潰している。ところが
+    //   ⚠ **設定は %LOCALAPPDATA% の固定の場所に残る**ので、再起動しても
+    //     接続番号も合言葉もそのままである。相談員のビュアーは、再起動前の
+    //     合言葉のまま、番号が戻ってくるのを待って繋ぎ直す。
+    //   ＝ 本来そのまま繋がるはずのものを、こちらが**自分で潰していた**。
+    //
+    //   潰してから正しい合言葉を書き戻すまでには、
+    //     中継サーバーへの登録待ち（最大60秒）＋番号の取得（最大16秒）＋通信
+    //   がある。⚠ **その間ずっと合言葉が違う。**
+    //   ビュアーは番号が生き返った瞬間に繋ぎに来るので、必ずその窓に当たり、
+    //   「パスワードが間違っています」を出して**そこで止まる**
+    //   （一度お客様に訊く形になると、あとで正しくなっても自動では戻らない）。
+    //   ＝「再起動して続ける、を押すと必ずパスワードを訊かれる」の正体。
+    //
+    //   ★消す目的は「終了処理を通らずに落ちた前回の使い捨て合言葉を残さない」こと。
+    //     復帰の合言葉があるなら、それは**まだ終わっていない同じサポート**であり、
+    //     お客様の同意もその回に対して生きている。潰す理由が当てはまらない。
+    //   ⚠ 復帰の合言葉は1回きり・30分で失効し、サポート終了時に
+    //     clearRebootResume が消す。残り続けることはない。
+    if (hasResumeToken()) {
+      debugPrint('RL: 復帰の合言葉があるので、前回の合言葉は残す');
+      return;
+    }
     try {
       final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
       await bind.mainSetPermanentPasswordWithResult(password: 'boot-$rnd');
@@ -268,8 +298,28 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   従来どおり「認証コードを入力してください」に落ちる（＝壊さない）。
   Future<bool> _tryResumeAfterReboot() async {
     try {
-      // 被操作サービスを起動して当社サーバーへ登録し、自分のIDを得る。
-      await _startServiceAndWaitRegistered();
+      // 🔴🔴 合言葉の有無を**いちばん先に**見る（2026-08-27 実機で判明）。
+      //
+      //   元は「15秒だけ登録を待つ → 駄目なら諦める」だった。ところが
+      //   ⚠ **再起動の直後がいちばん登録に時間がかかる**。ログオンした瞬間は
+      //     回線も周辺の部品もまだ揃っていない。＝ ここで15秒で諦めるのは、
+      //     いちばん失敗しやすい所にいちばん短い砂時計を置いていたことになる。
+      //
+      //   諦めるとどうなるか（2026-08-27 実機・お客様2台とも再現）:
+      //     アプリは「認証コードを入力してください」に落ちる。
+      //     ⚠ ところが**接続番号は変わらない**（MACアドレス由来なので、
+      //       展開先が変わっても同じ番号になる → [[remohelppro-id-from-mac-address]]）。
+      //     一方この端末の合言葉は、展開先が変わったため**まっさら**である
+      //       （ワンタイム版は起動のたびに別の場所へ展開する ＝ 設定も別物）。
+      //     相談員のビュアーは、再起動前の合言葉のまま同じ番号へ繋ぎ直す。
+      //     ＝ **番号は生きているのに合言葉だけ違う** →
+      //       相談員の画面に「パスワードが間違っています」が出る。
+      //     これが「再起動して続ける、を押すと必ずパスワードを訊かれる」の正体。
+      //
+      //   ★合言葉が無ければ復帰ではないので、**待たずに**入力画面へ。
+      //   ★合言葉があるなら、お客様は席に居ない前提なので**60秒粘る**。
+      if (!hasResumeToken()) return false;
+      await _startServiceAndWaitRegistered(waitSeconds: 60);
       final myId = await _waitForMyId();
       if (myId == null) return false;
 
@@ -277,7 +327,10 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       if (res == null) return false;
 
       // 新しいワンタイムトークンを自分のパスワードにする。
-      await bind.mainSetPermanentPasswordWithResult(password: res.onetimeToken);
+      //   ⚠ 書けなかったら復帰を成立させない。書けていないのに「復帰した」と
+      //     すると、相談員の画面には**繋がるように見えて**、実際に繋ぐと
+      //     「パスワードが間違っています」になる（下の _writeOnetimePassword 参照）。
+      await _writeOnetimePassword(res.onetimeToken);
       if (!mounted) return true;
       _shortId = res.shortId;
       if (res.customerToken != null && res.customerToken!.isNotEmpty) {
@@ -864,7 +917,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     final token = (jsonDecode(gr.body) as Map)['onetimeToken'] as String;
 
     // token を自分のパスワードに設定（担当者が ID＋token で接続）
-    await bind.mainSetPermanentPasswordWithResult(password: token);
+    await _writeOnetimePassword(token);
 
     if (!mounted) return;
     _shortId = shortId;
@@ -915,7 +968,63 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   status_num: 1=登録済み（相談員から見つけられる）/ 0=接続中 / -1=未接続。
   ///   登録できていないまま「準備完了」を出すと相談員側が「IDが存在しません」に
   ///   なるため、ここで必ず実際の登録状態を確認してから先へ進む。
-  Future<void> _startServiceAndWaitRegistered() async {
+  /// その回限りの合言葉を、この端末に書き込む。
+  ///
+  /// 🔴🔴 **戻り値を捨てていた**（2026-08-27 実機で判明）。
+  ///
+  ///   `mainSetPermanentPasswordWithResult` は名前のとおり成否を返すが、
+  ///   呼び出し側は `await` するだけで**結果を見ていなかった**。
+  ///   ⚠ 書き込みは被操作サービスへの**通信路（名前付きパイプ）越し**に行われる
+  ///     （src/ui_interface.rs:644 → ipc::set_permanent_password_with_ack）。
+  ///     通信路が塞がっていれば false が返るだけで、例外は飛ばない。
+  ///
+  ///   その結果どうなるか:
+  ///     アプリは何事もなく「準備完了」を出し、サーバーには合言葉を預ける。
+  ///     相談員の画面にも `token: xxxx（自動入力）` と正しく出る。
+  ///     ところが**端末側には何も書かれていない**ので、実際に繋ぐと
+  ///     ⚠ **「パスワードが間違っています」**になる。
+  ///     ＝ 画面のどこにも失敗が出ないまま、相談員だけが弾かれる。
+  ///     2026-08-27 の実機（短ID 146298 / token Rk4cElis）がこれ。
+  ///
+  /// ★書けるまで少し粘り、それでも駄目なら**はっきり失敗させる**。
+  ///   黙って「準備完了」を出すより、やり直していただく方がずっと早い。
+  Future<void> _writeOnetimePassword(String token) async {
+    // 被操作サービスが立ち上がりきる前だと最初の1回は落ちることがある。
+    for (var i = 0; i < 6; i++) {
+      final ok = await bind.mainSetPermanentPasswordWithResult(password: token);
+      if (ok) return;
+      await Future.delayed(const Duration(milliseconds: 700));
+    }
+    throw Exception('接続の合言葉をこのパソコンに書き込めませんでした。\n'
+        'このまま進めても、担当者は「パスワードが間違っています」で\n'
+        '弾かれてしまいます。\n\n'
+        '次の順にお試しください。\n'
+        '① このアプリを一度閉じて、開き直す\n'
+        '② それでも駄目なら、パソコンを再起動する');
+  }
+
+  /// 被操作サービスを起動し、中継サーバーへの登録が済むまで待つ。
+  ///
+  /// 🔴🔴 待ち時間が**短すぎた**（2026-08-27 実機とサーバー記録で確定）。
+  ///
+  ///   元は 30回×0.5秒＝**15秒**であきらめていた。ところが、
+  ///   ⚠ 21116 が使えず **443 の逃げ道**に落ちた端末は、
+  ///     接続そのものに `CONNECT_TIMEOUT = 18秒`（libs/hbb_common/src/config.rs）
+  ///     まで掛かることがある。＝ **繋がる前にこちらが先にあきらめる**。
+  ///     どれだけ待っても成功しない、という当たり外れの正体。
+  ///
+  ///   実測（2026-08-27・お客様2台）:
+  ///     失敗した回だけ `/ws/id`（443の逃げ道）を使っていた。
+  ///     06:29:51 /ws/id 101 → 06:29:55 認証コード照合OK → **その先が一度も来ない**
+  ///     （grant-control も session-status も記録に無い＝接続番号を渡せていない）。
+  ///     2分後にアプリを開き直した回は逃げ道を使わず、そのまま成功している。
+  ///
+  ///   ★逃げ道の接続待ち(18秒)より**長く**待つ。60秒。
+  ///   ⚠ 黙って待たない。途中経過を出す（[_prepNote]）。
+  ///     何も出ないまま長く待たせると、お客様は固まったと思って窓を閉じる。
+  ///   ⚠ 再起動からの復帰だけは短いまま（15秒）。あちらは失敗しても
+  ///     「認証コードを入れてください」に落ちるだけなので、待たせる意味が無い。
+  Future<void> _startServiceAndWaitRegistered({int waitSeconds = 60}) async {
     final sm = gFFI.serverModel;
     // Android だけが「ユーザー操作でサービスを開始する」仕様（＝今回の不具合の元）。
     //   PC版は起動時に自動で登録済みなので、ここで触ると余計な
@@ -926,16 +1035,26 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       // 画面キャプチャの同意ダイアログはこの中でOSが表示する。
       await sm.startService();
     }
-    for (var i = 0; i < 30; i++) {
+    final rounds = waitSeconds * 2; // 0.5秒きざみ
+    for (var i = 0; i < rounds; i++) {
       try {
         final st =
             jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
-        if ((st['status_num'] as int) == 1) return; // 登録完了
+        if ((st['status_num'] as int) == 1) {
+          if (mounted) setState(() => _prepNote = null);
+          return; // 登録完了
+        }
       } catch (_) {
         /* 起動直後は取得できないことがあるのでリトライ */
       }
+      // 8秒を過ぎたら、待っていることが分かるように途中経過を出す。
+      //   ⚠ 秒数を出す。止まっているのか進んでいるのか、お客様に分かる形にする。
+      if (i >= 16 && i % 4 == 0 && mounted) {
+        setState(() => _prepNote = '接続の準備をしています（${i ~/ 2}秒）…');
+      }
       await Future.delayed(const Duration(milliseconds: 500));
     }
+    if (mounted) setState(() => _prepNote = null);
     // 🔴 「通信のせい」と決めつけない（2026-08-04 実機で判明）。
     //
     //   このPCに REMOHELP PRO が**インストールされている**と、
@@ -1483,6 +1602,14 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
             const Text('担当者につないでいます。少しお待ちください。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13.5, color: _muted)),
+            // 接続番号の登録を待っている間の途中経過。
+            //   ⚠ 出るのは8秒を過ぎてからだけ。普通に繋がるときは出ない。
+            if (_prepNote != null) ...[
+              const SizedBox(height: 6),
+              Text(_prepNote!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12.5, color: _faint)),
+            ],
             const SizedBox(height: 8),
           ],
         ),

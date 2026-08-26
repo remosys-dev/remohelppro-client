@@ -151,6 +151,23 @@ class ResumeResult {
   const ResumeResult(this.onetimeToken, this.shortId, this.customerToken);
 }
 
+/// 復帰の合言葉を持っているか（＝再起動から戻ろうとしているか）。
+///
+/// 🔴 これを**接続番号を待つ前に**見る（2026-08-27）。
+///   合言葉が無ければ復帰ではないので、待たずにすぐ入力画面へ。
+///   合言葉があるなら、席を離れているお客様に代わって**粘る価値がある**。
+/// ⚠ 置き場所は APP_DIR ではなく `%LOCALAPPDATA%`。
+///   ワンタイム版は起動のたびに別の場所へ展開されるので、
+///   APP_DIR に置くと再起動をまたげない。
+bool hasResumeToken() {
+  try {
+    final f = _tokenFile();
+    return f.existsSync() && f.readAsStringSync().trim().isNotEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// 起動時に呼ぶ。合言葉があれば同じセッションに戻る。
 /// 戻れたら接続に必要な一式を返す。戻れなければ null。
 Future<ResumeResult?> tryResume({
