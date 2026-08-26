@@ -33,6 +33,23 @@ const String _kApiBase = 'https://svr.remohelppro.jp';
 ///   知っているこちら側に処理を預ける形にする。
 Future<void> Function()? rlNotifySupportEnded;
 
+/// 顧客が窓の「×」を押したときに、サポートを**本当に終わらせる**ための受け口。
+///
+/// 🔴🔴 「×」は窓を隠すだけだった（2026-08-27 ご指摘・重大）。
+///
+///   本体の作りでは、主窓の「×」は `windowManager.hide()` である
+///   （desktop/widgets/tabbar_widget.dart の onWindowClose）。
+///   ＝ ⚠ **お客様が閉じたつもりでも、アプリも被操作サービスも動いたままで、
+///     一時パスワードも生きている。相談員はそのまま入れる。**
+///   お客様には「閉じた」としか見えないので、入られていることに気づけない。
+///   顧客ページに書いている「使い終わったら誰も入れません」という約束に反する。
+///
+///   ★「×」は終了と同じ扱いにする。サーバーへ終了を伝え、被操作を止め、
+///     合言葉を潰してから窓を消す（＝以降は誰も入れない）。
+///   ⚠ 確認は挟まない。挟むと、押し間違えたときに**開いたまま**が残る。
+///     もう一度サポートを受けるには認証コードを入れ直すだけでよい。
+Future<void> Function()? rlEndByCustomerOnClose;
+
 
 /// 常駐を一時停止したときに置く「戻す予定」の名前。
 ///
@@ -134,6 +151,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     // 相談員が居なくなってアプリが自分を終了する直前に、
     //   サーバーへ「終わった」と伝えるための受け口を預ける。
     rlNotifySupportEnded = _notifySupportEndedToServer;
+    // 「×」で閉じられたときも、終了と同じ後始末をする（説明は宣言の所）。
+    rlEndByCustomerOnClose = _endByCustomer;
     // 🔴 起動したら、まず前回の一時パスワードを無効にする（2026-07-29）。
     //
     //   設定は %LOCALAPPDATA% の**固定の場所**に残る。実行のたびに消えない。
@@ -415,6 +434,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   @override
   void dispose() {
     rlNotifySupportEnded = null;
+    rlEndByCustomerOnClose = null;
     _statusPoll?.cancel();
     _statusPoll = null;
     _rearm?.cancel();

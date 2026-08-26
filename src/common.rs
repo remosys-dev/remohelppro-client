@@ -916,6 +916,72 @@ lazy_static::lazy_static! {
 /// ⚠ 第三者のIP判定サイトは使わない。お客様の通信を当社の外へ出さない
 ///   （以前 STUN で同じ問題を起こしている）。
 /// ⚠ 失敗しても何もしない。IPが空になるだけで、接続には一切影響させない。
+/// 黒い窓を出さずにコマンドを実行し、標準出力を返す（2026-08-27）。
+///
+/// 🔴🔴 Dart の `Process.run` は Windows で**必ずコンソールの窓を作る**。
+///   画面のあるアプリ（GUI）から `route` や `arp` のようなコンソールの道具を
+///   呼ぶと、そのたびに黒い窓が一瞬開く。
+///   ⚠ お客様の画面には、サポートが始まった直後に**3つ続けて**出ていた
+///     （remohelppro_netinfo.dart の経路・DNS・ARP）。
+///     お客様には何が起きたのか分からず、遠隔操作そのものが怖くなる。
+///   ★Dart 側からは窓を消せない（CREATE_NO_WINDOW を渡す口が無い）。
+///     こちら（Rust）で `CREATE_NO_WINDOW` を付けて実行し、結果だけ返す。
+///
+/// 受け取る形は JSON の配列。先頭がプログラム、残りが引数。
+///   例: `["route","print","-4"]`
+/// ⚠ 呼べるプログラムは決め打ちの一覧に限る。ここは画面から呼ばれる入口なので、
+///   何でも実行できる形にしておく理由が無い（増やすときはこの一覧に足す）。
+/// ⚠ スマホ版でも**定義は残す**。呼び出し側（flutter_ffi.rs の main_get_common）は
+///   全機種で1つなので、ここを cfg で丸ごと消すと Android のビルドが落ちる。
+///   スマホでは何もせず空を返す（そもそもコンソールの窓が無い）。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn rl_run_hidden(_argv_json: &str) -> String {
+    "".to_owned()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn rl_run_hidden(argv_json: &str) -> String {
+    const ALLOWED: &[&str] = &[
+        "route", "arp", "ip", "powershell", "scutil", "cat", "reg", "netsh",
+    ];
+    let argv: Vec<String> = match serde_json::from_str(argv_json) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("RL: rl_run_hidden の引数を読めません: {e}");
+            return "".to_owned();
+        }
+    };
+    let Some((prog, args)) = argv.split_first() else {
+        return "".to_owned();
+    };
+    // 拡張子や大文字小文字の違いは吸収する（route.exe / ROUTE でも通す）。
+    let base = prog
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(prog)
+        .trim_end_matches(".exe")
+        .trim_end_matches(".EXE")
+        .to_lowercase();
+    if !ALLOWED.contains(&base.as_str()) {
+        log::warn!("RL: rl_run_hidden は {base} を実行しません（一覧にない）");
+        return "".to_owned();
+    }
+    let mut cmd = std::process::Command::new(prog);
+    cmd.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(winapi::um::winbase::CREATE_NO_WINDOW);
+    }
+    match cmd.output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(e) => {
+            log::warn!("RL: rl_run_hidden {base} に失敗: {e}");
+            "".to_owned()
+        }
+    }
+}
+
 /// ⚠ 起動時に一度だけ呼ぶ。7秒ごとに聞くような作りにしない。
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub async fn rl_refresh_global_ip() {

@@ -25,6 +25,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'package:flutter_hbb/models/platform_model.dart';
+
 // ───────────────────────────────────────────────────────────────
 // ログオン前の再接続（2026-08-01 ユーザー指示）。
 //
@@ -149,6 +151,20 @@ class ResumeResult {
   final String shortId;
   final String? customerToken;
   const ResumeResult(this.onetimeToken, this.shortId, this.customerToken);
+}
+
+/// `reg` を**黒い窓を出さずに**実行する（2026-08-27）。
+///
+/// 🔴 Dart の `Process.run` は Windows で必ずコンソールの窓を作る。
+///   ここは繋がった直後とサポート終了時に走るので、⚠ お客様の画面に
+///   黒い窓が一瞬開いていた。Rust 側の入口（rl_run_hidden）に任せる。
+/// ⚠ 失敗しても投げない。登録できなくても、再起動後に認証コードを
+///   入れ直していただければ続けられる（サポートそのものは止めない）。
+Future<void> _regHidden(List<String> args) async {
+  try {
+    await bind.mainGetCommon(
+        key: 'rl-run-hidden:${jsonEncode(['reg', ...args])}');
+  } catch (_) {}
 }
 
 /// 復帰の合言葉を持っているか（＝再起動から戻ろうとしているか）。
@@ -390,14 +406,31 @@ Future<void> prepareRebootResume() async {
       //   ⚠ 記録（.log）は残す。うまくいかなかったときに、
       //     試したかどうかを確かめられるようにするため。
       //     サポートが終わるときに clearRebootResume が消す。
-      'del /f /q "$cmdPath" >nul 2>nul',
+      //
+      // 🔴🔴 **消しながら実行してはいけない**（2026-08-27 実機のスクショで確定）。
+      //
+      //   `del` で自分を消すと、cmd.exe は**次の行を読みに戻る**。
+      //   もうファイルが無いので、お客様の画面に黒い窓が開いたまま
+      //     『バッチ ファイルが見つかりません。』
+      //     『このコマンドを処理するにはメモリ リソースが足りません。』
+      //   と出て、`C:\Windows\System32>` の入力待ちで**居座る**。
+      //   ⚠ サポート中のお客様の画面に、意味の分からない黒い窓が残る。
+      //     こちらの後始末の失敗を、お客様に見せてはいけない。
+      //   ⚠ 2026-08-25 に直したのは「登録はあるのに中身が無い」別の穴。
+      //     こちらは**中身が正しく走ったとき**に必ず起きるので、
+      //     うまくいっているときほど見えていた。
+      //
+      //   ★`(goto) 2>nul` を先に置く。cmd は命令書を閉じてから続きを実行するので、
+      //     読み戻る先が無くなり、そのまま静かに終わる（自己削除の定石）。
+      //   ⚠ 1行に続けて書くこと。行を分けると、また読み戻りが起きる。
+      '(goto) 2>nul & del /f /q "$cmdPath" >nul 2>nul',
       '',
     ].join('\r\n');
     File(cmdPath).writeAsStringSync(cmd);
 
     // RunOnce にはこの命令書を登録する。
     //   ⚠ cmd を窓なしで走らせるため /c と start を使う。
-    await Process.run('reg', [
+    await _regHidden([
       'add', _kResumeRunKey,
       '/v', _kResumeRunName,
       '/t', 'REG_SZ',
@@ -431,7 +464,7 @@ Future<void> clearRebootResume() async {
   } catch (_) {}
   if (!Platform.isWindows) return;
   try {
-    await Process.run('reg', ['delete', _kResumeRunKey, '/v', _kResumeRunName, '/f']);
+    await _regHidden(['delete', _kResumeRunKey, '/v', _kResumeRunName, '/f']);
   } catch (_) {}
   // ⚠ 命令書と、その記録も消す（2026-08-02 追加）。
   //   消し忘れると、お客様のPCに当社のファイルが残る。

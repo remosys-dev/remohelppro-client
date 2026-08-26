@@ -2891,6 +2891,11 @@ pub fn main_get_common(key: String) -> String {
         return crate::platform::linux::has_gnome_shortcuts_inhibitor_permission().to_string();
         #[cfg(not(target_os = "linux"))]
         return false.to_string();
+    } else if let Some(argv) = key.strip_prefix("rl-run-hidden:") {
+        // 黒い窓を出さずにコマンドを実行する（2026-08-27）。
+        //   Dart の Process.run は Windows で必ずコンソールの窓を作るため、
+        //   お客様の画面に黒い窓が開いていた。詳しくは common.rs の説明。
+        return crate::common::rl_run_hidden(argv);
     } else if key == "permanent-password-set" {
         return ui_interface::is_permanent_password_set().to_string();
     } else if key == "local-permanent-password-set" {

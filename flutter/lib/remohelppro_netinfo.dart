@@ -20,9 +20,28 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'package:flutter_hbb/models/platform_model.dart';
+
 /// コマンドを実行して標準出力を返す。失敗したら空文字。
+///
+/// 🔴🔴 **黒い窓を出さないこと**（2026-08-27 実機のスクショで判明）。
+///
+///   `Process.run` は Windows で**必ずコンソールの窓を作る**。
+///   ここは繋がった直後に走るので、⚠ お客様の画面に黒い窓が
+///   **3つ続けて**開いていた（経路・DNS・ARP）。
+///   お客様には何が起きたのか分からず、遠隔操作そのものが怖くなる。
+///
+///   ★Dart 側からは窓を消せない（CREATE_NO_WINDOW を渡す口が無い）ので、
+///     Rust 側の入口（common.rs の rl_run_hidden）に実行を任せる。
+///   ⚠ Windows 以外は今までどおり。窓の問題は Windows だけなので、
+///     動いているものを触らない。
 Future<String> _run(String exe, List<String> args) async {
   try {
+    if (Platform.isWindows) {
+      return await bind
+          .mainGetCommon(key: 'rl-run-hidden:${jsonEncode([exe, ...args])}')
+          .timeout(const Duration(seconds: 8));
+    }
     final r = await Process.run(exe, args, runInShell: false)
         .timeout(const Duration(seconds: 8));
     return (r.stdout ?? '').toString();

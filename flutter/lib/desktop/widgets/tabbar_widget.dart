@@ -8,6 +8,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/rl_support.dart';
+import 'package:flutter_hbb/remohelppro_pairing.dart'
+    show rlEndByCustomerOnClose;
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
@@ -433,7 +435,27 @@ class _DesktopTabState extends State<DesktopTab>
 
   @override
   void onWindowClose() async {
-    mainWindowClose() async => await windowManager.hide();
+    // 🔴🔴 顧客アプリの「×」は、隠すだけでは**遠隔接続が開いたまま**になる
+    //   （2026-08-27 ご指摘・重大）。詳しくは remohelppro_pairing.dart の
+    //   rlEndByCustomerOnClose の説明。
+    //   ⚠ お客様は閉じたつもりでも、相談員はそのまま入れる状態が残っていた。
+    //   ★顧客版だけ、終了と同じ後始末（サーバーへ連絡・被操作停止・合言葉の無効化）
+    //     をしてから窓を消す。相談員版・常駐版は今までどおり隠すだけ。
+    mainWindowClose() async {
+      if (kRlSupportShowWindow) {
+        final end = rlEndByCustomerOnClose;
+        if (end != null) {
+          try {
+            // ⚠ 待ちすぎない。この後の「終了しました」の表示と自己終了は
+            //   アプリが自分で続ける（数十秒かかる）ので、ここでは待たない。
+            await end().timeout(const Duration(seconds: 6));
+          } catch (_) {
+            // 伝えられなくても、被操作の停止と合言葉の無効化までは済んでいる。
+          }
+        }
+      }
+      await windowManager.hide();
+    }
     notMainWindowClose(WindowController windowController) async {
       if (controller.length != 0) {
         debugPrint("close not empty multiwindow from taskbar");
