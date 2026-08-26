@@ -466,6 +466,18 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     try {
       await bind.mainStopService();
     } catch (_) {}
+    // 🔴🔴 **合言葉を潰すのは、ここ**（2026-08-27 ご指示で順番を入れ替えた）。
+    //
+    //   元はこの下の「常駐を元に戻す」より**後**に置いていた。
+    //   ⚠ ところが常駐を元に戻す処理は **UAC（管理者の確認）を出して待つ**。
+    //     お客様が押さなければ、そこで止まったまま先へ進まない。
+    //     ＝ **合言葉が潰されないまま**になる。
+    //   ★「誰も入れない」を決める2つ（サービスを止める・合言葉を潰す）は、
+    //     途中で止まりうる処理より**必ず先**に済ませる。
+    try {
+      final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+      await bind.mainSetPermanentPasswordWithResult(password: 'end-$rnd');
+    } catch (_) {}
     // 再起動復帰の控えと自動起動の登録を消す。
     //   🔴 残すと、次にPCを起動したときに勝手にアプリが立ち上がる。
     //     お客様は「勝手に動いた」と受け取る。
@@ -474,13 +486,10 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     } catch (_) {}
     // サポートのために常駐を止めていたら、元に戻す。
     //   ⚠ 戻せなくても、次にパソコンを起動すれば自動で戻る。
+    //   ⚠ ここは UAC を出して待つので、**待ち続けない**（30秒で見切る）。
+    //     終了そのものは上で済んでいるので、待つ理由が無い。
     try {
-      await _resumeResidentIfPaused();
-    } catch (_) {}
-    // 一時パスワードをランダム化して無効化（同じIDへ再接続できないように）
-    try {
-      final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-      await bind.mainSetPermanentPasswordWithResult(password: 'end-$rnd');
+      await _resumeResidentIfPaused().timeout(const Duration(seconds: 30));
     } catch (_) {}
     if (mounted) setState(() {});
     // 穴B対策: ワンタイム版は終了後にプロセスを確実に終了させ、ランナーの自己削除(穴C)を発火させる。
@@ -664,20 +673,39 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   セッションを ended にし（相談員ダッシュボードにも伝わる）、被操作を停止・
   ///   一時パスワードを無効化する（＝以降は誰も操作できない）。
   Future<void> _endByCustomer() async {
+    // 🔴🔴 **先に止める。伝えるのは後**（2026-08-27 ご指示で作り直し）。
+    //
+    //   元は「サーバーへ伝える → それから止める」だった。しかも
+    //   ⚠ この `http.post` には**時間切れが無かった**。
+    //     通信が失敗するのではなく**返事が来ないまま止まる**と、
+    //     `await` はそこで待ち続け、⚠ **止める処理に一生たどり着かない**。
+    //     ＝ お客様は「終了」を押したのに、遠隔接続は開いたまま。
+    //     「通信失敗でもローカル停止は行う」と書いてあったが、
+    //     **失敗と無応答は別物**で、無応答は救えていなかった。
+    //
+    //   ★終わらせるのに通信は要らない。被操作を止めて合言葉を潰せば、
+    //     その時点で誰も入れない。サーバーへの連絡は**記録のため**であって、
+    //     終了の条件ではない。だから先に止める。
+    //   ⚠ 連絡には必ず時間切れを付ける（5秒）。届かなくても、
+    //     相談員の画面は接続が切れたことで気づける。
     final sid = _shortId;
+    await _terminateBySupportEnd();
     if (sid != null) {
       try {
-        await http.post(
-          Uri.parse('$_kApiBase/api/customer/session-end'),
-          headers: {
-            'Content-Type': 'application/json',
-            if (_custToken != null) 'x-customer-token': _custToken!,
-          },
-          body: jsonEncode({'shortId': sid}),
-        );
-      } catch (_) {/* 通信失敗でもローカル停止は行う */}
+        await http
+            .post(
+              Uri.parse('$_kApiBase/api/customer/session-end'),
+              headers: {
+                'Content-Type': 'application/json',
+                if (_custToken != null) 'x-customer-token': _custToken!,
+              },
+              body: jsonEncode({'shortId': sid}),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // 届かなくても、この端末はもう誰も入れない状態になっている。
+      }
     }
-    await _terminateBySupportEnd();
   }
 
   /// 常駐を一時停止してから、もう一度つなぎ直す。
