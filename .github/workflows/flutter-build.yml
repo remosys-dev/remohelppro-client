@@ -322,6 +322,26 @@ jobs:
           grep -q 'kRlSupportShowWindow = true;' flutter/lib/rl_support.dart || {
             echo "RL: 顧客版フラグを立てられませんでした。中止します"; exit 1; }
 
+      # 🔴 相談員版だけ通信路の名前を分ける（2026-08-26 実機で判明）。
+      #
+      #   8/19 に「常駐」と「それ以外」で分けたが、**相談員版とワンタイム版が
+      #   同じ `-once` を使ったまま**だった。相談員のPCでワンタイム版を起動すると、
+      #   先に動いている相談員版が同じ通信路を握っていて互いに拒否し合い、
+      #   「接続番号がまだ取れていません」から先へ進まない。
+      #   実機で確認：相談員版が remohelppro-once の通信路を保持していた。
+      #
+      #   ⚠ Mac の相談員版(mac-operator)も同じ。両方を対象にする。
+      - name: Operator build flag (sed)
+        if: ${{ inputs.upload-tag == 'operator' || inputs.upload-tag == 'mac-operator' }}
+        shell: bash
+        run: |
+          sed -i 's/pub const IS_OPERATOR_BUILD: bool = false;/pub const IS_OPERATOR_BUILD: bool = true;/' libs/hbb_common/src/config.rs
+          echo "--- config.rs operator flag ---"; grep -n 'IS_OPERATOR_BUILD' libs/hbb_common/src/config.rs
+          # ⚠ sed は**一致しなくても成功で終わる**ので、必ず立ったことを確かめる。
+          #   立たないと相談員版とワンタイム版が同じ通信路を奪い合う（上記）。
+          grep -q 'IS_OPERATOR_BUILD: bool = true;' libs/hbb_common/src/config.rs || {
+            echo "RL: 相談員フラグを立てられませんでした。中止します"; exit 1; }
+
       # REMOHELP PRO: 常駐版は sed で IS_RESIDENT_BUILD を true 化（無人アクセス＋電源エージェント有効）
       - name: Resident build flag (sed)
         if: ${{ inputs.resident }}

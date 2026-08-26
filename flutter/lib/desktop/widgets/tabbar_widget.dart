@@ -1324,6 +1324,18 @@ class AddButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 🔴 「＋」は出さない（2026-08-26 ご指摘）。
+    //
+    //   ⚠ この釦は `kWindowMainWindowOnTop`＝**本体の窓を前面に出す**もの。
+    //     トレイの「開く」も左クリックも塞いだのに、遠隔の画面の右上から
+    //     まだ開けてしまっていた。入口を1つ見落としていた。
+    //   ⚠ 使われている場所は5か所（遠隔・ファイル・ポート転送・カメラ・端末）。
+    //     呼び出し側を1つずつ消すと必ず取り残すので、**部品そのものを空にする**。
+    //   ★相談員は管理画面の一覧から繋ぐ。ここから新しい接続を始める道は要らない。
+    //
+    //   戻すなら、この return を消せば元の釦が復活する。
+    return const SizedBox.shrink();
+    // ignore: dead_code
     return ActionIcon(
         message: 'New Connection',
         icon: IconFont.add,

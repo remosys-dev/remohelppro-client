@@ -168,6 +168,11 @@ pub const WS_RELAY_PORT: i32 = 21119;
 pub const AGENT_API_BASE: &str = "https://svr.remohelppro.jp";
 // 常駐（無人アクセス＋電源エージェント）ビルドか。resident-build の CI が false→true に sed する。
 pub const IS_RESIDENT_BUILD: bool = false;
+/// 相談員（操作する側）ビルドか。operator-build の CI が false→true に sed する。
+///
+/// 🔴 通信路の名前を分けるためだけに要る（2026-08-26）。
+///   詳しくは下の ipc_app_namespace() の説明。
+pub const IS_OPERATOR_BUILD: bool = false;
 
 /// 上流の「管理API」を当社は立てていない（2026-08-05 実機のログで確定）。
 ///
@@ -203,11 +208,23 @@ pub const NO_UPSTREAM_API_SERVER: bool = true;
 ///   必ず同じ名前になるようにしている。
 ///
 /// ⚠ 常駐版の名前は変えない。既に配ってある常駐と互換を保つため。
+///
+/// 🔴 2026-08-26 追加の直し。**製品は3つある**。
+///   8/19 の直しは「常駐」と「それ以外」に分けただけで、
+///   ⚠ **相談員版とワンタイム版が同じ `-once` を使ったまま**だった。
+///   ＝ 相談員のPC（当社・お客様の担当者PCとも）でワンタイム版を起動すると、
+///     先に動いている相談員版が同じ通信路を握っていて、互いを
+///     「別の実行ファイル」と見なして拒否し合う（src/ipc/auth.rs）。
+///     症状は「接続番号がまだ取れていません」から先へ進まない。
+///     実機で確認：`\\.\pipe\remohelppro-once\query` を相談員版が保持していた。
+///   ★3つとも別の名前にする。「その他」でまとめない。
 #[inline]
 pub fn ipc_app_namespace() -> String {
     let app_name = APP_NAME.read().unwrap().clone();
     if IS_RESIDENT_BUILD {
         app_name
+    } else if IS_OPERATOR_BUILD {
+        format!("{app_name}-op")
     } else {
         format!("{app_name}-once")
     }

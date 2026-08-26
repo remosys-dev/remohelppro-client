@@ -6,6 +6,7 @@ import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
+import 'package:flutter_hbb/rl_support.dart';
 import 'package:get/get.dart';
 import 'package:window_manager/window_manager.dart';
 // import 'package:flutter/services.dart';
@@ -96,8 +97,18 @@ class _DesktopTabPageState extends State<DesktopTabPage> {
             backgroundColor: Theme.of(context).colorScheme.background,
             body: DesktopTab(
               controller: tabController,
+              // 🔴 お客様版では「☰」（設定）を出さない（2026-08-26 ご指摘）。
+              //
+              //   ⚠ 押すと設定の窓が開き、そこから本体の設定一式が見えてしまう。
+              //     トレイ・左クリック・「＋」を塞いだのに、ここが残っていた。
+              //     **入口は数えて全部塞ぐ**。
+              //   ⚠ 相談員版では残す。プロキシ必須のお客様のところで、
+              //     設定を触れないと**どの道からも繋がらなくなる**（実際に起きている）。
+              //     相談員版の本体の窓はそもそも開かないので、実害は無い。
               tail: Offstage(
-                offstage: bind.isIncomingOnly() || bind.isDisableSettings(),
+                offstage: kRlSupportShowWindow ||
+                    bind.isIncomingOnly() ||
+                    bind.isDisableSettings(),
                 child: ActionIcon(
                   message: 'Settings',
                   icon: IconFont.menu,
