@@ -2105,12 +2105,13 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
       return res == true;
     }
   }
-  // 🔴 常駐に繋いでいるときは、言っていることが事実と違う（2026-08-14 ご指摘）。
-  //   常駐はPCに入ったままなので、終了しても認証コードの入れ直しは要らない。
-  //   次も相談員だけで繋げる。それなのに「入れ直していただく必要があります」と
-  //   出るので、相談員が終了をためらうか、お客様に不要なお願いをしてしまう。
-  //   ⚠ ワンタイムでは今の文言が正しい（お客様のアプリごと終わる）。**分ける**。
-  final isResident = isResidentPeer(ffi);
+  // 🔴 説明は出さない（2026-08-26 ご判断）。
+  //   「終了すると何が起きるか」は顧客も相談員も分かっていること。
+  //   ここは電話をしながら押す場所なので、読ませずに形で選べるのがよい。
+  //
+  //   経緯: 8/14 に「常駐では認証コードの入れ直しは要らない」ので文言を
+  //   分けた（常駐に繋いでいるのに入れ直しを求める案内が出ていた）。
+  //   今回はその説明ごと出さないことにしたので、分ける必要も無くなった。
   final res = await dialogManager.show<bool>((setState, close, context) {
     return CustomAlertDialog(
       content: Column(
@@ -2121,16 +2122,15 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
             '遠隔接続を終了しますか？',
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          // 🔴 説明を削った（2026-08-26 ご指摘）。
+          // 🔴 説明は**全部**削った（2026-08-26 ご指摘）。
           //
-          //   ⚠ 常駐は**何も起きない**（次もこちらだけで繋げる）ので、
-          //     説明する必要が無い。読ませるだけ無駄。
-          //   ★ワンタイムだけ1行残す。押すと**お客様に手間が生まれる**という、
-          //     押す前に知っておくべき事実だから。長い説明にはしない。
-          if (!isResident) ...[
-            const SizedBox(height: 8),
-            Text('もう一度つなぐには、お客様に認証コードを入れ直していただきます。'),
-          ],
+          //   ⚠ ここは電話をしながら押す場所。読ませずに形で選べるのがよい。
+          //   常駐は終了しても何も起きない。ワンタイムはお客様に認証コードを
+          //   入れ直していただくことになるが、それは相談員が承知している前提。
+          //   ★毎回同じ文を読ませるより、押す・押さないだけにする。
+          //
+          //   説明を戻すなら、ここに isResidentPeer(ffi) で分けて1行足す。
+          const SizedBox.shrink(),
         ],
       ),
       actions: [
