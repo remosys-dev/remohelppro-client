@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/rl_support.dart';
+import 'package:flutter_hbb/remohelppro_trace.dart' show rlTrace, rlTraceSetRole;
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
@@ -42,8 +43,29 @@ Future<void> main(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 🔴 落ちた理由を残す（2026-08-27）。
+  //
+  //   ⚠ これまで、この製品には**受け止め手がひとつも無かった**。
+  //     Dart 側で例外が投げられても、記録は画面の裏に消えるだけ。
+  //     ＝ お客様のアプリが消えても、落ちたのか消されたのかも分からない。
+  //   ★ここに1行残るかどうかで切り分けられる:
+  //     行がある → 自分で落ちた。行が無い → **外から止められた**。
+  final prevOnError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails d) {
+    rlTrace('flutter_error', {
+      'e': d.exception.toString(),
+      'lib': d.library ?? '',
+    });
+    if (prevOnError != null) prevOnError(d);
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (Object e, StackTrace st) {
+    rlTrace('dart_error', {'e': e.toString()});
+    return false; // 既定の扱いは変えない（握りつぶさない）
+  };
+
   debugPrint("launch args: $args");
   kBootArgs = List.from(args);
+  rlTrace('app_start', {'args': args.isEmpty ? '' : args.first});
 
   if (!isDesktop) {
     runMobileApp();
@@ -396,6 +418,9 @@ void runMultiWindow(
 }
 
 void runConnectionManagerScreen() async {
+  // ⚠ 1本のアプリはプロセスを2つ以上持つ。どちらが書いた行かを分ける。
+  rlTraceSetRole('cm');
+  rlTrace('cm_start');
   await initEnv(kAppTypeConnectionManager);
   _runApp(
     '',

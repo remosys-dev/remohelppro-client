@@ -19,6 +19,7 @@ import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
 // 終了をサーバーへ伝える受け口（顧客アプリの接続画面が預ける）。
 import '../remohelppro_pairing.dart' show rlNotifySupportEnded;
+import '../remohelppro_trace.dart' show rlTrace, rlTraceFlushNow;
 import 'model.dart';
 
 const kLoginDialogTag = "LOGIN";
@@ -173,9 +174,19 @@ class ServerModel with ChangeNotifier {
             // RL onetime fix (build-14): ワンタイム版(kRlSupportShowWindow)は Main 終了後すみやかに
             // CM プロセスも閉じる(約2秒)。通常(フリート)は従来どおり約6秒。フリートは const=false で不変。
             final _cmCloseThreshold = kRlSupportShowWindow ? 4 : 12; // 2s or 6s
+            if (_zeroClientLengthCounter == 0) {
+              // 🔴 数え始めた瞬間を残す（2026-08-27）。
+              //   ⚠ 「消えた」ではなく「**いつ空になったか**」が知りたい。
+              rlTrace('cm_zero_clients_begin',
+                  {'threshold': _cmCloseThreshold, 'ever': _hasEverConnected});
+            }
             if (_zeroClientLengthCounter++ >= _cmCloseThreshold) {
               // RL build-16 (B): ワンタイム版(接続実績あり)は CM窓だけでなく CMプロセスを終了。
               if (kRlSupportShowWindow && _hasEverConnected) {
+                // 🔴 消える理由を残してから消える（2026-08-27）。
+                rlTrace('cm_exit_zero_clients',
+                    {'ticks': _zeroClientLengthCounter});
+                await rlTraceFlushNow(timeout: const Duration(seconds: 2));
                 exit(0); // CMプロセス全終了
               } else {
                 windowManager.close(); // フリート版: 従来どおりCM窓のみ閉じる
@@ -195,6 +206,18 @@ class ServerModel with ChangeNotifier {
           kRlSupportShowWindow &&
           _hasEverConnected) {
         if (_clients.isEmpty) {
+          if (_zeroClientLengthCounter == 0) {
+            // 🔴🔴 ここが「顧客アプリが消える」の**最有力**（2026-08-27）。
+            //
+            //   接続が空になってから30秒で、下の `exit(0)` がアプリを丸ごと
+            //   終わらせる。⚠ 相談員がまだ繋がっているつもりでも、
+            //   こちら側の数え方で空になれば、お客様のアプリは消える。
+            //   ⚠ 「自分の画面を見せる」で役を入れ替えている間も、
+            //     お客様側の接続は一度空になる。
+            //
+            //   ★まず**いつ空になったか**を残す。理由の特定はそれから。
+            rlTrace('main_zero_clients_begin', {'ever': _hasEverConnected});
+          }
           // 🔴 待つ時間を 2秒 → 30秒 に延ばした（2026-07-30 実機指摘）。
           //
           //   0.5秒ごとに見ているので 4 = 2秒だった。相談員がビュアーの窓を
@@ -211,16 +234,31 @@ class ServerModel with ChangeNotifier {
             //   伝えないと、当社の画面はいつまでも「接続中」と出る。
             //   お客様のアプリは既に消えているのに相談員には繋がって見える
             //   ＝画面が嘘をつく。実際にこの食い違いが起きていた。
+            rlTrace('main_exit_zero_clients', {
+              'ticks': _zeroClientLengthCounter,
+              'notify': rlNotifySupportEnded != null,
+            });
             final notify = rlNotifySupportEnded;
             if (notify != null) {
               try {
                 await notify();
-              } catch (_) {}
+              } catch (e) {
+                // ⚠ 握りつぶさない（2026-08-27）。ここが失敗すると、
+                //   お客様のアプリは消えたのに当社の画面は「接続中」のまま。
+                //   ＝ 相談員は繋がると思って繋がらない。実際に起きていた。
+                rlTrace('notify_end_failed', {'e': e.toString()});
+              }
+            } else {
+              // ⚠ 受け口が刺さっていない＝サーバーへ誰も終了を伝えない。
+              rlTrace('notify_end_missing');
             }
             try {
               await bind.mainCloseAllConnections();
-            } catch (_) {}
+            } catch (e) {
+              rlTrace('close_all_failed', {'e': e.toString()});
+            }
             await Future.delayed(const Duration(milliseconds: 200));
+            await rlTraceFlushNow();
             exit(0); // メインプロセス全終了 → ランナーが後始末(C)
           }
         } else {

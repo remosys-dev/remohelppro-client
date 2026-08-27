@@ -11,6 +11,8 @@ import 'package:flutter_hbb/common.dart' show gFFI;
 import 'remohelppro_livekit.dart';
 import 'rl_support.dart' show kRlSupportShowWindow;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
+import 'remohelppro_trace.dart'
+    show rlTrace, rlTraceBind, rlTraceSetRole, rlTraceFlushNow;
 import 'remohelppro_resident.dart' show RemohelpproResidentCard;
 import 'remohelppro_reconnect.dart'
     show
@@ -121,6 +123,10 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   bool _residentPaused = false;
   /// 直前に「操作を許可した」状態だったか。view_only へ戻ったことを検知するために持つ。
   bool _wasFullControl = false;
+  /// 生存確認を何回まわしたか（記録用・2026-08-27）。
+  int _pollTicks = 0;
+  /// 生存確認が連続で失敗している回数（記録用・2026-08-27）。
+  int _pollErrors = 0;
 
   bool get _codeReady => _ctrl.text.replaceAll(RegExp(r'\D'), '').length == 6;
 
@@ -433,6 +439,15 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
   @override
   void dispose() {
+    // 🔴 ポーリングが止まる経路は3つしかない（2026-08-27 コードで確認）:
+    //   ① ここ（画面が捨てられた） ② サポート終了 ③ プロセスそのものの消滅。
+    //   ⚠ ①と②は残るようにした。**残っていなければ③**＝プロセスが消えた、
+    //     と読める。これで初めて「消える」を切り分けられる。
+    rlTrace('pairing_dispose', {
+      'polling': _statusPoll != null,
+      'terminated': _terminated,
+      'ticks': _pollTicks,
+    });
     rlNotifySupportEnded = null;
     rlEndByCustomerOnClose = null;
     _statusPoll?.cancel();
@@ -451,6 +466,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Future<void> _terminateBySupportEnd() async {
     if (_terminated) return;
     _terminated = true;
+    rlTrace('terminate_by_support_end', {'ticks': _pollTicks});
     _statusPoll?.cancel();
     _statusPoll = null;
     // ⚠ 控えの取り直しも止める（2026-08-01 検証で指摘）。
@@ -533,9 +549,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         //     居ることがあるので、終わる直前にもう一度やる。
         try {
           await bind.mainGetCommon(key: 'rl-kill-siblings');
-        } catch (_) {
+        } catch (e) {
           // 片付けられなくても、自分は終わる（今までと同じ状態に戻るだけ）。
+          rlTrace('kill_siblings_failed', {'e': e.toString()});
         }
+        rlTrace('onetime_exit_after_end');
+        await rlTraceFlushNow();
         exit(0);
       });
     }
@@ -608,6 +627,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
   /// 相談員の終了を検知するポーリング（被操作が繋がったままにならないように）。
   void _startStatusPoll(String shortId) {
+    // 🔴 ここから先の出来事を、当社のサーバーでも読めるようにする（2026-08-27）。
+    //   ⚠ このポーリングが止まること自体が「アプリが消えた」の唯一の兆候だった。
+    //     止まった理由を残さない限り、何度直しても確かめようがない。
+    rlTraceSetRole('main');
+    rlTraceBind(shortId: shortId, custToken: _custToken);
+    rlTrace('poll_start');
     _statusPoll?.cancel();
     // 接続の窓（別プロセス）から「切断」が押されたときの合図を消しておく。
     //   ⚠ 前回の合図が残っていると、繋がった直後に終わってしまう。
@@ -617,16 +642,30 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       //   あちらは別プロセスなので、決まった場所の合図で受け取る。
       //   ⚠ サーバーへの問い合わせより先に見る。通信が遅くても終われるように。
       if (_consumeEndRequest()) {
+        rlTrace('poll_end_request_file');
         await _endByCustomer();
         return;
+      }
+      // 🔴 生きている印を、一定の間隔で残す（2026-08-27）。
+      //   ⚠ 4秒ごとに全部送ると量が多すぎる。1分に1回だけ「生きている」を出す。
+      //     ★これが**途切れた時刻**が、アプリが消えた時刻そのものになる。
+      _pollTicks++;
+      if (_pollTicks % 15 == 1) {
+        rlTrace('alive', {'tick': _pollTicks});
       }
       try {
         final r = await http.get(
           Uri.parse('$_kApiBase/api/customer/session-status?shortId=$shortId'),
         );
         if (r.statusCode == 200) {
+          if (_pollErrors > 0) {
+            // 繋がらなかった時間の長さを残す（どれだけ孤立していたか）。
+            rlTrace('poll_recovered', {'after': _pollErrors});
+            _pollErrors = 0;
+          }
           final j = jsonDecode(r.body) as Map;
           if (j['active'] == false) {
+            rlTrace('poll_active_false');
             await _terminateBySupportEnd();
             return;
           }
@@ -654,11 +693,22 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           //     お客様の画面に管理者の確認が何度も出る。
           if (j['prelogon'] == true && !_prelogonBusy) {
             _prelogonBusy = true;
+            rlTrace('prelogon_requested');
             unawaited(_runPrelogon(shortId));
           }
+        } else {
+          // ⚠ 200 以外を黙って捨てていた（2026-08-27）。
+          //   429（叩きすぎ）で止められていても気づけなかった。
+          rlTrace('poll_http_status', {'status': r.statusCode});
         }
-      } catch (_) {
-        /* 一時的な通信エラーは無視（次のtickで再確認） */
+      } catch (e) {
+        // ⚠ ここは「一時的な通信エラー」として握りつぶしていた。
+        //   実際には切れっぱなしでも同じ見た目になり、
+        //   何分繋がっていないのかが誰にも分からなかった。
+        _pollErrors++;
+        if (_pollErrors <= 3 || _pollErrors % 15 == 0) {
+          rlTrace('poll_error', {'n': _pollErrors, 'e': e.toString()});
+        }
       }
     });
   }
@@ -671,12 +721,17 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     PrelogonResult r;
     try {
       r = await preparePrelogonResume(shortId);
-    } catch (_) {
+    } catch (e) {
+      // ⚠ 何に失敗したのかを残す。ここが空白だったせいで、
+      //   「管理者の確認で断られた」のか「対策ソフトに止められた」のかが
+      //   区別できなかった。相談員には同じ `failed` に見える。
+      rlTrace('prelogon_exception', {'e': e.toString()});
       r = PrelogonResult.failed;
     }
     final name = r == PrelogonResult.ok
         ? 'ok'
         : (r == PrelogonResult.noAdmin ? 'noAdmin' : 'failed');
+    rlTrace('prelogon_result', {'result': name});
     try {
       await http.post(
         Uri.parse('$_kApiBase/api/customer/prelogon-result'),
@@ -686,8 +741,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         },
         body: jsonEncode({'shortId': shortId, 'result': name}),
       );
-    } catch (_) {
+    } catch (e) {
       // 返せなくても、相談員側は「返事が無い」ことで気づける（画面に出す）。
+      rlTrace('prelogon_report_failed', {'e': e.toString()});
     }
     _prelogonBusy = false;
   }
@@ -712,11 +768,17 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
               body: jsonEncode({'shortId': sid}),
             )
             .timeout(const Duration(seconds: 5));
-      } catch (_) {}
+      } catch (e) {
+        // ⚠ ここが失敗すると、当社の画面は「接続中」のまま嘘をつく。
+        //   握りつぶさずに残す（2026-08-27）。
+        rlTrace('session_end_post_failed', {'e': e.toString()});
+      }
     }
     try {
       await clearRebootResume();
-    } catch (_) {}
+    } catch (e) {
+      rlTrace('clear_resume_failed', {'e': e.toString()});
+    }
   }
 
   /// 顧客が自分で「終了する」を押したとき。
@@ -739,6 +801,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   ⚠ 連絡には必ず時間切れを付ける（5秒）。届かなくても、
     //     相談員の画面は接続が切れたことで気づける。
     final sid = _shortId;
+    rlTrace('end_by_customer', {'ticks': _pollTicks});
     await _terminateBySupportEnd();
     if (sid != null) {
       try {
