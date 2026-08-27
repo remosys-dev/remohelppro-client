@@ -1516,36 +1516,96 @@ impl<T: InvokeUiSession> Session<T> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[tokio::main(flavor = "current_thread")]
     pub async fn switch_sides(&self) {
-        match crate::ipc::connect(1000, "").await {
-            Ok(mut conn) => {
-                if conn
-                    .send(&crate::ipc::Data::SwitchSidesRequest(self.get_id()))
-                    .await
-                    .is_ok()
-                {
-                    if let Ok(Some(data)) = conn.next_timeout(1000).await {
-                        match data {
-                            crate::ipc::Data::SwitchSidesRequest(str_uuid) => {
-                                if let Ok(uuid) = Uuid::from_str(&str_uuid) {
-                                    let mut misc = Misc::new();
-                                    misc.set_switch_sides_request(SwitchSidesRequest {
-                                        uuid: Bytes::from(uuid.as_bytes().to_vec()),
-                                        ..Default::default()
-                                    });
-                                    let mut msg_out = Message::new();
-                                    msg_out.set_misc(misc);
-                                    self.send(Data::Message(msg_out));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+        // 🔴🔴 **黙って失敗するのをやめる**（2026-08-28 ご報告の調査で作り直し）。
+        //
+        //   ご報告:「自分の画面を見せる、実行しても何も起こらない」。
+        //   ⚠ 顧客側の記録を実測したところ、**合図がそもそも届いていなかった**
+        //     （`switch sides` の行が顧客のログに1行も無い）。
+        //   ＝ 止まっているのは相談員側。ところが元のコードは
+        //     ⚠ **4つの失敗を全部黙って捨てていた**:
+        //       ① 自分の受け入れ側に繋げない（log::info だけ）
+        //       ② 依頼を送れない（`.is_ok()` を見て、失敗なら何もしない）
+        //       ③ 1秒で返事が来ない（`if let Ok(Some(..))` で握りつぶし）
+        //       ④ 返ってきたものが期待と違う（`_ => {}`）
+        //   ＝ 押しても**画面に何も出ない**。相談員は原因に辿り着けない。
+        //
+        //   ★失敗したら**理由を画面に出す**。押した人が次にやることが分かる形で。
+        //   ⚠ 待ち時間も 1秒 → 3秒 に延ばす。自分の受け入れ側が立ち上がって
+        //     いる最中は1秒では足りないことがある（相手より短い砂時計を持たない）。
+        const TITLE: &str = "自分の画面を見せる";
+        let mut conn = match crate::ipc::connect(1000, "").await {
+            Ok(conn) => conn,
+            Err(err) => {
+                log::error!("switch sides: 自分の受け入れ側に繋げません: {err}");
+                self.msgbox(
+                    "custom-error",
+                    TITLE,
+                    "この端末の受け入れ側が動いていないため、画面を入れ替えられません。\n\
+                     アプリを起動し直してから、もう一度お試しください。",
+                    "",
+                );
+                return;
+            }
+        };
+        if let Err(err) = conn
+            .send(&crate::ipc::Data::SwitchSidesRequest(self.get_id()))
+            .await
+        {
+            log::error!("switch sides: 依頼を送れません: {err}");
+            self.msgbox(
+                "custom-error",
+                TITLE,
+                "切り替えの依頼を送れませんでした。もう一度お試しください。",
+                "",
+            );
+            return;
+        }
+        let str_uuid = match conn.next_timeout(3_000).await {
+            Ok(Some(crate::ipc::Data::SwitchSidesRequest(str_uuid))) => str_uuid,
+            Ok(other) => {
+                log::error!("switch sides: 期待と違う返事: {other:?}");
+                self.msgbox(
+                    "custom-error",
+                    TITLE,
+                    "切り替えの返事を受け取れませんでした。もう一度お試しください。",
+                    "",
+                );
+                return;
             }
             Err(err) => {
-                log::info!("server not started (will try to start): {}", err);
+                log::error!("switch sides: 返事がありません: {err}");
+                self.msgbox(
+                    "custom-error",
+                    TITLE,
+                    "この端末の受け入れ側から返事がありません。\n\
+                     アプリを起動し直してから、もう一度お試しください。",
+                    "",
+                );
+                return;
             }
-        }
+        };
+        let uuid = match Uuid::from_str(&str_uuid) {
+            Ok(uuid) => uuid,
+            Err(err) => {
+                log::error!("switch sides: 合図を読めません({str_uuid}): {err}");
+                self.msgbox(
+                    "custom-error",
+                    TITLE,
+                    "切り替えの合図を読み取れませんでした。もう一度お試しください。",
+                    "",
+                );
+                return;
+            }
+        };
+        log::info!("switch sides: お客様へ入れ替えを依頼します uuid={uuid}");
+        let mut misc = Misc::new();
+        misc.set_switch_sides_request(SwitchSidesRequest {
+            uuid: Bytes::from(uuid.as_bytes().to_vec()),
+            ..Default::default()
+        });
+        let mut msg_out = Message::new();
+        msg_out.set_misc(misc);
+        self.send(Data::Message(msg_out));
     }
 
     fn set_custom_resolution(&self, display: &SwitchDisplay) {
