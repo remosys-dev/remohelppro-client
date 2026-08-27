@@ -496,6 +496,17 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //   接続前に顧客が終了した場合(_hasEverConnected=false)は server_model の自動終了が働かないため、
     //   ここで保険をかける。「終了しました」を読む数秒を残してから exit(0)。
     if (kRlSupportShowWindow) {
+      // 🔴🔴 **仲間の片付けは、20秒待たずに今すぐやる**（2026-08-27 ご指摘）。
+      //
+      //   ⚠ 元は「20秒後に片付けて自分も終わる」だった。ところが
+      //     お客様も相談員も、終了した**直後**にタスクマネージャーを見る。
+      //     そこに残っていれば「終わっていない」と受け取られる。実際そうなった。
+      //   ★裏方(--server)・トレイ・接続の窓(--cm)は、終了した時点で用が無い。
+      //     20秒待つ理由があるのは「終了しました」を**読んでいただく画面**だけ。
+      //   ＝ 片付けは今すぐ、自分（画面の窓）だけ20秒残す。
+      try {
+        await bind.mainGetCommon(key: 'rl-kill-siblings');
+      } catch (_) {}
       // Mac は自己展開ランナーが無いので、アプリが自分で後始末する。
       await _selfDeleteMacApp();
       // 🔴 4秒 → 20秒（2026-08-02 実機指摘）。
@@ -518,6 +529,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         //        「Loading で落ちる」の正体。再起動で直るのは残骸が消えるから。
         //   ★消すのは「自分と同じフォルダから動いているもの」だけ。
         //     名前で消すと、表示名が同じ常駐版・相談員版まで巻き込む。
+        //   ⚠ 上で一度片付けているが、20秒の間に立ち上がり直した物が
+        //     居ることがあるので、終わる直前にもう一度やる。
         try {
           await bind.mainGetCommon(key: 'rl-kill-siblings');
         } catch (_) {
@@ -566,10 +579,47 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     }
   }
 
+  /// 接続の窓（別プロセス）が置く「終了して」の合図。
+  ///   ⚠ 置き場は %LOCALAPPDATA% の固定の場所。展開先(APP_DIR)は起動ごとに
+  ///     変わりうるので使わない（復帰の合言葉と同じ考え）。
+  File _endRequestFile() {
+    final base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+    return File('$base/REMOHELP PRO/end-requested');
+  }
+
+  void _clearEndRequest() {
+    try {
+      final f = _endRequestFile();
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  /// 合図があれば true を返し、**同時に消す**（二重に走らせない）。
+  bool _consumeEndRequest() {
+    try {
+      final f = _endRequestFile();
+      if (!f.existsSync()) return false;
+      f.deleteSync();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 相談員の終了を検知するポーリング（被操作が繋がったままにならないように）。
   void _startStatusPoll(String shortId) {
     _statusPoll?.cancel();
+    // 接続の窓（別プロセス）から「切断」が押されたときの合図を消しておく。
+    //   ⚠ 前回の合図が残っていると、繋がった直後に終わってしまう。
+    _clearEndRequest();
     _statusPoll = Timer.periodic(const Duration(seconds: 4), (_) async {
+      // 🔴 顧客が接続の窓の「切断」を押したか（2026-08-27 ご指摘）。
+      //   あちらは別プロセスなので、決まった場所の合図で受け取る。
+      //   ⚠ サーバーへの問い合わせより先に見る。通信が遅くても終われるように。
+      if (_consumeEndRequest()) {
+        await _endByCustomer();
+        return;
+      }
       try {
         final r = await http.get(
           Uri.parse('$_kApiBase/api/customer/session-status?shortId=$shortId'),

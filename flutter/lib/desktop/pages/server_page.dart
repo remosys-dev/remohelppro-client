@@ -1,6 +1,9 @@
 // original cm window in Sciter version.
 
 import 'dart:async';
+// 顧客版の「切断」で、本体へ終了の合図を置くのに使う。
+import 'dart:io' show Directory, File, Platform;
+import 'package:flutter_hbb/rl_support.dart' show kRlSupportShowWindow;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -1330,6 +1333,32 @@ class _CmControlPanel extends StatelessWidget {
 
   void handleDisconnect() {
     bind.cmCloseConnection(connId: client.id);
+    // 🔴🔴 顧客版では「切断」＝**サポートを終わらせる**（2026-08-27 ご指摘）。
+    //
+    //   ⚠ 元は今つながっている1本を切るだけだった。お客様は
+    //     「切断」を押したらサポートが終わったと受け取るのに、
+    //     実際は**アプリも被操作サービスも動いたまま・合言葉も生きたまま**で、
+    //     相談員はすぐ繋ぎ直せる。＝「×」と同じ形の穴。
+    //   ★ここ（接続の窓）は本体とは**別のプロセス**なので、
+    //     終了の一式（サーバーへ連絡・控えの片付け）を直接は呼べない。
+    //     決まった場所に合図のファイルを置き、本体がそれを見て終わらせる。
+    //   ⚠ 置き場は %LOCALAPPDATA% の固定の場所。展開先(APP_DIR)は
+    //     起動ごとに変わりうるので使わない（合言葉の控えと同じ考え）。
+    //   ⚠ 相談員版・常駐版では今までどおり「1本を切る」だけ。
+    //     常駐は切ったあとも待ち受けているのが仕事なので、終わらせてはいけない。
+    if (kRlSupportShowWindow) {
+      try {
+        final base = Platform.environment['LOCALAPPDATA'] ?? '';
+        if (base.isNotEmpty) {
+          final d = Directory('$base/REMOHELP PRO');
+          if (!d.existsSync()) d.createSync(recursive: true);
+          File('${d.path}/end-requested').writeAsStringSync(
+              DateTime.now().toIso8601String());
+        }
+      } catch (_) {
+        // 合図を置けなくても、接続は上で切れている。
+      }
+    }
   }
 
   void handleAccept(BuildContext context) {
