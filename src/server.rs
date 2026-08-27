@@ -721,8 +721,19 @@ pub async fn start_server(is_server: bool, no_server: bool) {
             //   ⚠ 古い版は番号を分けないままだが、こちらが別の範囲へ移るので
             //     **もう衝突しない**。お客様のPCに手を入れなくてよくなる。
             {
+                // 🔴🔴 ビットは**重ねない**（2026-08-27 実機で不具合を出して修正）。
+                //
+                //   最初 ワンタイムを 0x6000_0000 にした。ところがこれは
+                //   ⚠ **0x4000_0000 と 0x2000_0000 の両方が立つ**。
+                //   常駐かどうかの判定は `n & 0x2000_0000` を見ているので
+                //   （flutter/lib/common/widgets/dialog.dart の isResidentPeer）、
+                //   ⚠ **ワンタイム版が「常駐」と誤判定**され、
+                //     「自分の画面を見せる」がメニューから消えた（1.4.70 で実際に発生）。
+                //   ★製品ごとの印は**単独のビット**にする。重ねると、
+                //     どこか1か所で `& ビット` を見ている所が必ず壊れる。
+                const PRODUCT_MASK: u32 = 0xE000_0000;
                 const OPERATOR_ID_BIT: u32 = 0x4000_0000;
-                const ONETIME_ID_BIT: u32 = 0x6000_0000;
+                const ONETIME_ID_BIT: u32 = 0x8000_0000;
                 // 常駐は上で済んでいる。ここは常駐以外の2つだけ。
                 let (bit, who) = if hbb_common::config::IS_OPERATOR_BUILD {
                     (OPERATOR_ID_BIT, "相談員版")
@@ -733,9 +744,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
                     let cur = hbb_common::config::Config::get_id();
                     match cur.parse::<u32>() {
                         // ⚠ 「立っていない」ではなく「一致しない」で見る。
-                        //   相談員(0x4000_0000)とワンタイム(0x6000_0000)は
-                        //   ビットが重なるので、片方が立っているだけでは判定できない。
-                        Ok(n) if (n & 0x6000_0000) != bit => {
+                        //   自分の印と**完全に一致**しないときだけ作り直す。
+                        //   ⚠ 1.4.70 で付けてしまった 0x6000_0000 も、ここで自動的に直る。
+                        Ok(n) if (n & PRODUCT_MASK) != bit => {
                             let fixed = (n & 0x1FFF_FFFF) | bit;
                             log::info!(
                                 "RL: {}の接続番号が旧式でした。{} → {} に作り直します\

@@ -2017,7 +2017,16 @@ bool isResidentPeer(FFI? ffi) {
     if (ffi.ffiModel.pi.platform != kPeerPlatformWindows) return false;
     final n = int.tryParse(ffi.id.trim());
     if (n == null) return false;
-    return (n & 0x20000000) != 0;
+    // 🔴🔴 「そのビットが立っているか」ではなく「**製品の印が一致するか**」で見る
+    //   （2026-08-27 実機で不具合を出して修正）。
+    //
+    //   ⚠ ワンタイム版に 0x6000_0000 を付けた 1.4.70 で、ここが true になり
+    //     **ワンタイム版が「常駐」と誤判定**された。
+    //     結果「自分の画面を見せる」がメニューから消えた。
+    //   ★印は上位3ビット。常駐は 0x2000_0000「だけ」が立っている状態。
+    //     相談員 0x4000_0000 ／ ワンタイム 0x8000_0000（src/server.rs）。
+    //   ⚠ 印を増やすときは、必ず**単独のビット**にすること。
+    return (n & 0xE0000000) == 0x20000000;
   } catch (_) {
     return false;
   }
