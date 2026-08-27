@@ -20,6 +20,7 @@ import '../mobile/pages/server_page.dart';
 // 終了をサーバーへ伝える受け口（顧客アプリの接続画面が預ける）。
 import '../remohelppro_pairing.dart' show rlNotifySupportEnded;
 import '../remohelppro_trace.dart' show rlTrace, rlTraceFlushNow;
+import '../utils/multi_window_manager.dart' show rustDeskWinManager;
 import 'model.dart';
 
 const kLoginDialogTag = "LOGIN";
@@ -205,7 +206,22 @@ class ServerModel with ChangeNotifier {
       if (desktopType == DesktopType.main &&
           kRlSupportShowWindow &&
           _hasEverConnected) {
-        if (_clients.isEmpty) {
+        // 🔴🔴 「自分の画面を見せる」の最中は、**数え始めてはいけない**
+        //   （2026-08-27 ご報告「顧客側で何も起きない」の調査で判明）。
+        //
+        //   役を入れ替えると、お客様の側では
+        //     ・こちらへ来ていた接続が切れる（＝ _clients が空になる）
+        //     ・代わりに**こちらから相談員へ繋ぎに行く窓**が開く
+        //   ところが下の数えは「入ってくる接続」しか見ていないため、
+        //   ⚠ **見せている最中の30秒後に、お客様のアプリが丸ごと終了する。**
+        //   相談員の画面からは「顧客が消えた」ようにしか見えない。
+        //
+        //   ★出ていく窓が1つでも開いているなら、このお客様はまだ
+        //     サポートの最中である。終わらせない。
+        final hasOutgoingWindow = rustDeskWinManager
+            .getActiveWindows()
+            .any((w) => w != kMainWindowId);
+        if (_clients.isEmpty && !hasOutgoingWindow) {
           if (_zeroClientLengthCounter == 0) {
             // 🔴🔴 ここが「顧客アプリが消える」の**最有力**（2026-08-27）。
             //

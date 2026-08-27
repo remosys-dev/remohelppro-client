@@ -3462,13 +3462,43 @@ impl Connection {
                                 self.lr.my_id.clone(),
                                 uuid.clone(),
                             );
-                            crate::run_me(vec![
+                            // 🔴🔴 起動の失敗を捨てていた（2026-08-27 ご指摘の調査で発見）。
+                            //
+                            //   「自分の画面を見せる」を押すと、お客様の側では
+                            //   ⚠ **自分をもう1つ起動する**ことで役を入れ替える。
+                            //   その起動が失敗しても `.ok()` で捨てていたため、
+                            //   ⚠ **どこにも何も出ないまま接続だけが切れる**。
+                            //   相談員には「顧客の画面が消えただけ」に見え、
+                            //   お客様の画面では何も起きない。実際にそう報告された。
+                            //
+                            //   ★失敗の理由を必ず記録に残す。ここが空白だと、
+                            //     対策ソフトに止められたのか、実行ファイルが
+                            //     見つからないのかの区別すらできない。
+                            let spawned = crate::run_me(vec![
                                 "--connect",
                                 &self.lr.my_id,
                                 "--switch_uuid",
                                 uuid.to_string().as_ref(),
-                            ])
-                            .ok();
+                            ]);
+                            match &spawned {
+                                Ok(child) => log::info!(
+                                    "switch sides: 入れ替えのために自分を起動した (pid={})",
+                                    child.id()
+                                ),
+                                Err(e) => log::error!(
+                                    "switch sides: 自分を起動できなかった: {e}. \
+                                     お客様の画面には何も出ないため、接続は切らない"
+                                ),
+                            }
+                            // ⚠ 起動できていないのに接続を切ると、お客様は
+                            //   **何も出ないまま置き去り**になる。切るのは成功したときだけ。
+                            if spawned.is_err() {
+                                crate::server::remove_pending_switch_sides_uuid(
+                                    &self.lr.my_id,
+                                    &uuid,
+                                );
+                                return true;
+                            }
                             self.on_close("switch sides", false).await;
                             return false;
                         }

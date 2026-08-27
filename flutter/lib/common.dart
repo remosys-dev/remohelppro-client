@@ -41,6 +41,7 @@ import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'models/model.dart';
 import 'models/platform_model.dart';
 import 'rl_support.dart';
+import 'remohelppro_trace.dart' show rlTrace;
 
 import 'package:flutter_hbb/native/win32.dart'
     if (dart.library.html) 'package:flutter_hbb/web/win32.dart';
@@ -2485,7 +2486,13 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
     String? password = param["password"];
     if (password != null) args.addAll(['--password', password]);
     String? switch_uuid = param["switch_uuid"];
-    if (switch_uuid != null) args.addAll(['--switch_uuid', switch_uuid]);
+    if (switch_uuid != null) {
+      args.addAll(['--switch_uuid', switch_uuid]);
+      // 🔴 「自分の画面を見せる」の合図が、お客様のアプリに**届いた**証拠を残す
+      //   （2026-08-27）。⚠ ここに記録が無ければ、合図そのものが届いていない。
+      //   届いているのに窓が出ないのなら、原因はこの先にある。切り分けの分かれ目。
+      rlTrace('switch_sides_link_received');
+    }
     if (param["relay"] != null) args.add("--relay");
     // v1.4.6-13: Phase 4 N3 - rustdesk:// URL の peer_name クエリで CM 表示名を上書き
     // 期待形式: peer_name=鈴木 一郎|IT 部 / システム管理者|REMOHELP PRO Demo Org|<avatar_url>
