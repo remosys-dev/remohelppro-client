@@ -354,7 +354,23 @@ Future<void> prepareRebootResume() async {
     //     いるなら、重ねて起こしてはいけない。
     final myExe = Platform.resolvedExecutable.split(sep).last;
     final resumeName = dst.path.replaceAll('/', sep).split(sep).last;
-    final watchNames = <String>{myExe, resumeName, 'remohelppro.exe'}
+    // 🔴🔴 **`remohelppro.exe` の決め打ちを外した**（2026-08-27 実顧客2台で発生）。
+    //
+    //   ⚠ 名前を分ける前（〜2026-08-07）に入れた古い版が
+    //     `C:\Program Files\remohelppro\remohelppro.exe --tray` として
+    //     **ログインのたびに起動する**PCがある。
+    //   ＝ 命令書は「remohelppro.exe が動いている＝もう起きている」と判定し、
+    //     ⚠ **復帰のアプリを一度も起こさない**（記録に ALREADY-RUNNING）。
+    //     お客様がログインしても、いつまでも戻ってこない。
+    //
+    //   ⚠ 以前は古い版がサービスとしても動いていて、そちらが応答していたため
+    //     この誤判定が表に出ていなかった。サービスを止めた途端に露出した。
+    //
+    //   ★見るのは「**自分自身**」と「**控え**」の2つだけでよい。
+    //     どちらも今の版が付けた名前なので、他人の名前と衝突しない。
+    //   ⚠ 2026-08-08 に「探す名前を決め打ちにしない」と決めたのに、
+    //     この1つだけが決め打ちのまま残っていた。
+    final watchNames = <String>{myExe, resumeName}
         .where((n) => n.isNotEmpty)
         .toList();
 
