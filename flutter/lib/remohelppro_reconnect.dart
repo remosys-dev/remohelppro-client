@@ -26,6 +26,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'remohelppro_trace.dart' show rlTrace;
 
 // ───────────────────────────────────────────────────────────────
 // ログオン前の再接続（2026-08-01 ユーザー指示）。
@@ -167,6 +168,20 @@ Future<void> _regHidden(List<String> args) async {
   } catch (_) {}
 }
 
+/// 登録簿を**読む**（黒い窓を出さずに）。返ってくるのは reg の出力そのもの。
+///
+/// 🔴 書いたあとに読み返すために足した（2026-08-28）。
+///   ⚠ 書く方（[_regHidden]）は成否を返さない。読み返さない限り、
+///     「仕掛けたつもり」を見抜けない。
+Future<String> _regRead(List<String> args) async {
+  try {
+    return await bind.mainGetCommon(
+        key: 'rl-run-hidden:${jsonEncode(['reg', ...args])}');
+  } catch (e) {
+    return 'ERROR: $e';
+  }
+}
+
 /// 復帰の合言葉を持っているか（＝再起動から戻ろうとしているか）。
 ///
 /// 🔴 これを**接続番号を待つ前に**見る（2026-08-27）。
@@ -271,7 +286,13 @@ Future<void> prepareRebootResume() async {
   if (!Platform.isWindows) return;
   // ランナー（落としてきた1個のファイル）の場所。ワンタイム版のときだけ渡ってくる。
   final runner = Platform.environment['RL_RUNNER_EXE'] ?? '';
-  if (runner.isEmpty) return;
+  if (runner.isEmpty) {
+    // ⚠ ここで黙って帰ると、**再起動の控えが最初から作られない**。
+    //   相談員の画面には「再起動して続ける」が出たままなので、
+    //   押せば戻ってくると信じてしまう。必ず残す（2026-08-28）。
+    rlTrace('resume_prep_no_runner');
+    return;
+  }
   try {
     final src = File(runner);
     if (!src.existsSync()) return;
@@ -457,8 +478,36 @@ Future<void> prepareRebootResume() async {
       '/d', 'cmd /c if exist "$cmdPath" start "" /min "$cmdPath"',
       '/f',
     ]);
-  } catch (_) {
+
+    // 🔴🔴 **登録できたかを読み返す**（2026-08-28 追加）。
+    //
+    //   ⚠ ここまで、登録の成否を一度も確かめていなかった。
+    //     `_regHidden` は失敗しても黙って返るので、
+    //     「仕掛けたつもりで、何も仕掛かっていない」状態に気づけない。
+    //   ＝ お客様が再起動しても何も起きず、こちらは理由を追えない。
+    //     8/27 夜の「再起動しても繋がらない」も、ここが空白のままだった。
+    //
+    //   ★作ったと言う前に、**在ることを確かめる**。
+    final check = await _regRead([
+      'query', _kResumeRunKey,
+      '/v', _kResumeRunName,
+    ]);
+    final registered = check.contains(_kResumeRunName);
+    rlTrace('resume_prep_done', {
+      'registered': registered,
+      'cmd': File(cmdPath).existsSync(),
+      'exe': dst.existsSync(),
+      'watch': watchNames.join(' '),
+    });
+    if (!registered) {
+      // ⚠ ここに来たら、再起動しても**絶対に戻ってこない**。
+      //   黙って進まず、必ず記録に残す。
+      rlTrace('resume_prep_not_registered', {'reg': check.trim()});
+    }
+  } catch (e) {
     // 控えが作れなければ、再起動後は認証コードの入れ直しになるだけ。
+    // ⚠ ただし「なぜ作れなかったか」は残す。ここが空白だと次も推測から始まる。
+    rlTrace('resume_prep_failed', {'e': e.toString()});
   }
 }
 
