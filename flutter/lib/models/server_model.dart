@@ -686,7 +686,17 @@ class ServerModel with ChangeNotifier {
     // Only do the hidden task when on Desktop.
     if (client.authorized && isDesktop) {
       cmHiddenTimer = Timer(const Duration(seconds: 3), () {
-        if (!hideCm) windowManager.minimize();
+        // 🔴🔴 「自分の画面を見せる」で繋がったときは**引っ込めない**
+        //   （2026-08-27 判明。8/26 のご指摘「タスクバーから押しても
+        //   一瞬だけ見えて出ない」の正体）。
+        //
+        //   ⚠ すぐ上の行は `client.fromSwitch` を見て前面に出しているのに、
+        //     この3秒後の最小化は見ていなかった。
+        //     ＝ **窓を出した3秒後に、自分で引っ込めていた。**
+        //   ⚠ 戻す釦はこの窓の中にしかないので、引っ込めると
+        //     **お客様に自分のPCを操作させたまま止められなくなる**。
+        //   ★止められない機能は、始められる機能より危ない。ここは例外にする。
+        if (!hideCm && !client.fromSwitch) windowManager.minimize();
         cmHiddenTimer = null;
       });
     }
