@@ -154,14 +154,18 @@ fn notify_extract_failed(detail: &str) {
             .chain(std::iter::once(0))
             .collect()
     }
+    // ⚠ 文面は**ワンタイム（お客様）とインストールの両方**で出る（2026-08-27）。
+    //   「インストール」と決め打ちしていたが、お客様が使い捨てのアプリを
+    //   開いたときにも出るようになったので、どちらでも通じる言い方にする。
+    //   ★お客様は電話をしながらこれを読む。**やることを先に、短く**書く。
     let text = format!(
-        "インストールの準備ができませんでした。\n\n\
+        "準備ができませんでした。\n\n\
          必要なファイルを置けなかったため、中止しました。\n\
-         このまま進めると、古いものが入ってしまい、\n\
-         入れたのに何も起こらない状態になります。\n\n\
-         お手数ですが、次をお試しください。\n\
-         ・ REMOHELP PRO の画面をすべて閉じてから、もう一度実行する\n\
-         ・ それでも同じ場合は、パソコンを再起動してから実行する\n\n\
+         このまま進めても、動かない状態になります。\n\n\
+         次の順にお試しください。\n\
+         ① REMOHELP PRO の画面をすべて閉じて、もう一度開く\n\
+         ② それでも同じなら、パソコンを再起動してから開く\n\
+         ③ それでも同じなら、担当者に下の情報をお伝えください\n\n\
          ―― 担当者にお伝えいただく情報 ――\n{}",
         detail
     );
@@ -222,11 +226,22 @@ fn setup(
         }
         std::fs::remove_dir_all(&dir).ok();
     }
+    // 🔴🔴 書けなかったものは**一度だけやり直す**（2026-08-27 実顧客で発生）。
+    //
+    //   前のアプリがまだ動いていると、その部品を握ったままなので上書きできない。
+    //   握りは数百ミリ秒で外れることが多いので、間を置いて1度だけ試す。
+    //   ⚠ 何度も繰り返さない。起動が遅くなり、お客様を待たせる。
     let mut failed: Vec<String> = Vec::new();
+    let mut failed_paths: Vec<String> = Vec::new();
     for file in reader.files.iter() {
         if let Err(e) = file.write_to_file(&dir) {
-            eprintln!("RL: 展開に失敗 {} : {}", &file.path, e);
-            failed.push(format!("{} ({})", &file.path, e));
+            eprintln!("RL: 展開に失敗（1回目）{} : {}", &file.path, e);
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            if let Err(e2) = file.write_to_file(&dir) {
+                eprintln!("RL: 展開に失敗（やり直しも駄目）{} : {}", &file.path, e2);
+                failed.push(format!("{} ({})", &file.path, e2));
+                failed_paths.push(file.path.clone());
+            }
         }
     }
     if !failed.is_empty() {
@@ -249,7 +264,46 @@ fn setup(
             return None;
         }
         // ワンタイム経路は続行する（理由は setup のコメント）
-        eprintln!("RL: 展開に失敗したが、サポートを優先して続行します\n{}", detail);
+        // 🔴🔴 ワンタイムでも、**動かないと分かっているなら黙って進まない**
+        //   （2026-08-27 実顧客・4台中1台で発生）。
+        //
+        //   ⚠ 実際に起きたこと: `librustdesk.dll` を書けないまま続行し、
+        //     お客様の画面に Windows の
+        //       「librustdesk.dll は Windows 上では実行できないか、エラーを含んでいます。
+        //         エラー状態 0xc0e90002」
+        //     という**意味の分からない窓**が出た。相談員も原因に辿り着けず、
+        //     そのPCは以後まったく使えなくなった。
+        //
+        //   ★続行してよいのは「**無くても動くもの**」だけ。
+        //     実行ファイル(.exe)と部品(.dll)が欠ければアプリは必ず落ちる。
+        //     そのときは当社の言葉で理由と手順を出して**止める**。
+        //   ⚠ 翻訳や画像が欠けただけならサポートは始められるので、
+        //     従来どおり続行する（元の判断「目の前のお客様のサポートを
+        //     始められない方が困る」をここで残す）。
+        let fatal: Vec<&String> = failed_paths
+            .iter()
+            .filter(|p| {
+                let lower = p.to_lowercase();
+                lower.ends_with(".exe") || lower.ends_with(".dll")
+            })
+            .collect();
+        if !fatal.is_empty() {
+            let detail2 = format!(
+                "{}\n\n動かせない部品: {}",
+                detail,
+                fatal
+                    .iter()
+                    .map(|s| s.as_str())
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            eprintln!("RL: 動かないので中止します\n{}", detail2);
+            #[cfg(windows)]
+            notify_extract_failed(&detail2);
+            return None;
+        }
+        eprintln!("RL: 展開に失敗したが、動くので続行します\n{}", detail);
     }
     write_meta(&dir, ts);
     #[cfg(windows)]
