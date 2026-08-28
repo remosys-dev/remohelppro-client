@@ -15,7 +15,16 @@ md5 = "0.7"
 # winuser は MessageBoxW / AllowSetForegroundWindow で使う。
 #   これまで native-windows-gui 経由で有効になっていただけで、依存が変わると
 #   静かにコンパイルが通らなくなるため明示する。
-winapi = { version = "0.3", features = ["winbase", "winuser"] }
+#   synchapi / handleapi / errhandlingapi は「二重に起動させない」ための名前付き錠に使う
+#   （2026-08-28 ご指摘。落としてきた物を2回開くと2つ動き、接続番号を奪い合っていた）。
+#   ⚠ ビルド用の依存にしか入っていなかったので、本体側にも明示する。
+winapi = { version = "0.3", features = [
+    "winbase",
+    "winuser",
+    "synchapi",
+    "handleapi",
+    "errhandlingapi",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [

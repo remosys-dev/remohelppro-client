@@ -792,10 +792,128 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     }
 }
 
+
+/// すでに動いているなら、二重に起動させない。
+///
+/// 🔴🔴 落としてきた物を2回開くと、2つ動いていた（2026-08-28 実機のスクショ）。
+///
+///   ⚠ 実際に起きたこと: お客様の画面に REMOHELP PRO の窓が2つ並び、
+///     片方は「接続済み」、もう片方は「認証コードを入力」。
+///   ⚠ 接続番号は**MACアドレス由来**なので、2つとも**同じ番号**を名乗る。
+///     中継サーバーへの登録を奪い合い、相談員の接続が切れる。
+///     ＝ 「つなぎ直しています」が出る原因にもなる。
+///   ⚠ お客様は「反応が無いから、もう一度ダウンロードした」だけ。
+///     操作としてはごく自然なので、**こちらで防ぐしかない**。
+///
+///   ★Windows の「名前付きの錠」で1つに絞る。
+///     ⚠ 錠はプロセスが終われば自動で外れるので、
+///       落ちたあとに開けなくなる、という事故が起きない。
+///   ⚠ 製品ごとに別の名前にする（相談員版・常駐版を巻き込まない）。
+///   ⚠ `Local\` にする。`Global\` だと利用者をまたいで止めてしまい、
+///     複数人が使う端末で別の人が開けなくなる。
+#[cfg(windows)]
+fn acquire_single_instance() -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    // ⚠ 名前は変えないこと。変えると、古い版と新しい版が**互いを見つけられず**
+    //   二重に動く（入れ替えの最中に必ず起きる）。
+    let name = wide("Local\\REMOHELPPRO_ONETIME_RUNNER");
+    unsafe {
+        let h = winapi::um::synchapi::CreateMutexW(
+            std::ptr::null_mut(),
+            winapi::shared::minwindef::FALSE,
+            name.as_ptr(),
+        );
+        if h.is_null() {
+            // 錠を作れないときは**止めない**。
+            // ⚠ ここで止めると、錠の仕組みが使えない環境でアプリが一切起動しなくなる。
+            //   二重起動より、起動しない方が困る。
+            println!("RL: 単一起動の錠を作れませんでした（そのまま続行）");
+            return true;
+        }
+        let already =
+            winapi::um::errhandlingapi::GetLastError() == winapi::shared::winerror::ERROR_ALREADY_EXISTS;
+        if already {
+            // ⚠ 取っ手は閉じる。錠そのものは先に動いている方が持っている。
+            winapi::um::handleapi::CloseHandle(h);
+            return false;
+        }
+        // ⚠ 取っ手はわざと閉じない（CloseHandle を呼ばない）。閉じると錠が外れる。
+        //   このプロセスが終わるまで持ち続ける（終われば Windows が自動で外す）。
+        let _ = h;
+        true
+    }
+}
+
+/// すでに動いていることを、お客様に伝える。
+///
+/// ⚠ 黙って終わらない。何も起きないと「壊れている」と思われ、
+///   さらに何度も開かれる（今日ずっと直してきた形と同じ）。
+/// ★先に動いている窓を前に出してから伝える。探させない。
+#[cfg(windows)]
+fn notify_already_running() {
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    unsafe {
+        // 先に動いている窓を前面に出す（Flutter の窓の種類で探す）。
+        let cls = wide("FLUTTER_RUNNER_WIN32_WINDOW");
+        let hwnd = winapi::um::winuser::FindWindowW(cls.as_ptr(), std::ptr::null());
+        if !hwnd.is_null() {
+            winapi::um::winuser::ShowWindow(hwnd, winapi::um::winuser::SW_RESTORE);
+            winapi::um::winuser::SetForegroundWindow(hwnd);
+        }
+        let body = wide(
+            "REMOHELP PRO はすでに起動しています。\n\n\
+             開いている画面をお使いください。\n\
+             見当たらないときは、画面下のタスクバーをご確認ください。",
+        );
+        let title = wide("REMOHELP PRO");
+        winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONINFORMATION,
+        );
+    }
+}
+
 fn main() {
     // 🔴 展開より前に見る。期限切れなら一時フォルダにも何も置かず、そのまま終わる。
     if is_onetime_expired() {
         notify_onetime_expired();
+        return;
+    }
+    // 🔴🔴 **二重に起動させない**（2026-08-28 ご指摘）。
+    //   ⚠ 展開より前に見る。ここを通すと2つ目が展開を始め、1つ目の部品を
+    //     上書きしようとして「正しくないイメージ」の元にもなる。
+    #[cfg(windows)]
+    if !acquire_single_instance() {
+        // ⚠ 再起動からの復帰で起こされたときは、**黙って終わる**。
+        //
+        //   復帰の命令書は「起動したか確かめて、駄目ならもう2回試す」作りなので、
+        //   ⚠ 既に立ち上がっていると2回目・3回目がここに来る。
+        //     そこで案内を出すと、⚠ **お客様の画面に身に覚えのない窓**が出る
+        //     （しかも再起動直後、席を離れているかもしれない場面で）。
+        //   ★人が押して開いたときだけ知らせる。仕掛けが起こしたときは黙る。
+        let quiet = std::env::current_exe()
+            .map(|p| {
+                let s = p.to_string_lossy().to_lowercase();
+                s.contains("\\remohelp pro\\resume\\") || s.contains("/remohelp pro/resume/")
+            })
+            .unwrap_or(false);
+        if !quiet {
+            notify_already_running();
+        }
         return;
     }
     let mut args = Vec::new();
