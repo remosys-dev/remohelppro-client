@@ -29,6 +29,15 @@ macro_rules! my_println{
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    // 🔴 前回のサポートで戻せていない設定があれば、**まずここで戻す**（2026-08-28）。
+    //
+    //   サポート中は管理者の確認（UAC）の出方を変える。正常に終われば
+    //   切断時に戻るが、⚠ **アプリが落ちる／強制終了される形を何度も見ている。**
+    //   ＝「終わるときに戻す」だけに頼ると、お客様のPCに変更が残る。
+    //   ★次に起動したとき、控えが残っていたら必ず戻す。これが2本目の道。
+    //   ⚠ 何もしていなければ、控えが無いので一瞬で通り過ぎる。
+    #[cfg(windows)]
+    crate::rl_uac::restore_if_pending();
     // 2026-06-24: ワンタイム(ポータブル)版の設定隔離。ポータブルパッカーが展開先を RL_APP_DIR で渡す。
     //   設定/ID/ピアをそこに固定し、インストール版(%APPDATA%\...\REMOHELP PROLink)に一切触れない。
     //   → 既存インストール済みPCでワンタイムを使っても既存の遠隔接続(ID/設定)を壊さない。

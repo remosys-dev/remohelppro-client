@@ -127,6 +127,71 @@ class ToolbarState {
 ///   相談員がそれぞれ決めればよい。
 final rlToolbarVertical = false.obs;
 
+/// ツールバーの配色（2026-08-28 ご要望「メニューのアイコンを今風に／色を選べるように」）。
+///
+/// 🔴 共通するのは3つ。ここは配色を変えても動かさない（見本のとおり）。
+///   ・帯は黒 ・アイコンの絵は白 ・録画は赤／終了(×)も赤
+/// ⚠ 赤の2つを配色に含めない理由: **意味を持つ色**だから。
+///   「録る」と「終わる」は、他の釦と同じ色になると押し間違えの元になる。
+class RlToolbarPalette {
+  final String id;
+  final String name;
+  /// 釦の地の色。
+  final Color base;
+  /// 触れたときの色（少し明るく）。
+  final Color hover;
+  const RlToolbarPalette(this.id, this.name, this.base, this.hover);
+}
+
+/// 選べる配色。見本（2026-08-28）の6案をそのまま入れている。
+const List<RlToolbarPalette> kRlToolbarPalettes = [
+  RlToolbarPalette(
+      'slate', 'モダンスレート', Color(0xFF475569), Color(0xFF64748B)),
+  RlToolbarPalette(
+      'sage', 'セージグリーン', Color(0xFF6B7F72), Color(0xFF8DA398)),
+  RlToolbarPalette(
+      'teal', 'ディープティール', Color(0xFF0D9488), Color(0xFF14B8A6)),
+  RlToolbarPalette(
+      'indigo', 'インディゴ', Color(0xFF6366F1), Color(0xFF818CF8)),
+  RlToolbarPalette(
+      'warm', 'ウォームグレー', Color(0xFF6B7280), Color(0xFF9CA3AF)),
+  RlToolbarPalette(
+      'midnight', 'ミッドナイト', Color(0xFF1E293B), Color(0xFF334155)),
+];
+
+/// 保存先。⚠ この端末に持つ（相談員ごとの好み。会社で揃える必要は無い）。
+const String kRlToolbarPaletteOption = 'rl-toolbar-palette';
+
+/// いま選ばれている配色の id。⚠ 既定は見本の「おすすめ」。
+final rlToolbarPaletteId = 'slate'.obs;
+
+/// いまの配色を返す。⚠ 知らない id が保存されていても落とさない。
+RlToolbarPalette rlCurrentPalette() => kRlToolbarPalettes.firstWhere(
+      (p) => p.id == rlToolbarPaletteId.value,
+      orElse: () => kRlToolbarPalettes.first,
+    );
+
+Future<void> rlLoadToolbarPalette() async {
+  try {
+    final v = await bind.mainGetLocalOption(key: kRlToolbarPaletteOption);
+    if (v.isNotEmpty && kRlToolbarPalettes.any((p) => p.id == v)) {
+      rlToolbarPaletteId.value = v;
+    }
+  } catch (_) {
+    /* 読めなくても既定の配色で動く */
+  }
+}
+
+Future<void> rlSetToolbarPalette(String id) async {
+  if (!kRlToolbarPalettes.any((p) => p.id == id)) return;
+  rlToolbarPaletteId.value = id;
+  try {
+    await bind.mainSetLocalOption(key: kRlToolbarPaletteOption, value: id);
+  } catch (_) {
+    /* 保存できなくても、この回は切り替わっている */
+  }
+}
+
 Future<void> rlLoadToolbarVertical() async {
   try {
     rlToolbarVertical.value =

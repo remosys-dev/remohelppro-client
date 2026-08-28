@@ -148,6 +148,13 @@ fn should_use_terminal_os_login_scope(is_terminal: bool, os_login_username: &str
 lazy_static::lazy_static! {
     static ref WALLPAPER_REMOVER: Arc<Mutex<Option<WallPaperRemover>>> = Default::default();
 }
+// 🔴 サポート中だけ、管理者の確認を通しやすくする札（2026-08-28 ご判断）。
+//   ⚠ 壁紙と**まったく同じ形**にする。置く場所も戻す場所も隣に並べる。
+//     片方だけ直して、もう片方が戻らない、という形を作らない。
+#[cfg(windows)]
+lazy_static::lazy_static! {
+    static ref UAC_RELAXER: Arc<Mutex<Option<crate::rl_uac::UacRelaxer>>> = Default::default();
+}
 pub static CLICK_TIME: AtomicI64 = AtomicI64::new(0);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub static MOUSE_MOVE_TIME: AtomicI64 = AtomicI64::new(0);
@@ -2018,6 +2025,22 @@ impl Connection {
                     Err(e) => {
                         log::info!("create wallpaper remover failed: {:?}", e);
                     }
+                }
+            }
+        }
+        // 🔴 管理者の確認を、相談員から見える形にする（2026-08-28 ご判断）。
+        //
+        //   ⚠ 遠隔で困るのは UAC そのものではなく、確認が**暗くなる画面**に
+        //     出ること。あそこは相談員の画面に映らず、押すこともできない。
+        //   ⚠ `EnableLUA` は触らない（再起動しないと効かず、戻すのにも要る）。
+        //   ★戻すのは2本立て: 誰も繋がっていなくなったときと、次の起動時。
+        #[cfg(windows)]
+        {
+            let mut uac = UAC_RELAXER.lock().unwrap();
+            if uac.is_none() {
+                match crate::rl_uac::UacRelaxer::new() {
+                    Ok(r) => *uac = Some(r),
+                    Err(e) => log::warn!("RL uac: 変更できませんでした: {e}"),
                 }
             }
         }
@@ -5961,6 +5984,10 @@ extern "C" fn connection_shutdown_hook() {
     {
         *WALLPAPER_REMOVER.lock().unwrap() = None;
     }
+    #[cfg(windows)]
+    {
+        *UAC_RELAXER.lock().unwrap() = None;
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -6253,6 +6280,11 @@ mod raii {
                 #[cfg(any(target_os = "windows", target_os = "linux"))]
                 {
                     *WALLPAPER_REMOVER.lock().unwrap() = None;
+                }
+                // ⚠ 壁紙と一緒に戻す。落ちた場合の保険は起動時の restore_if_pending。
+                #[cfg(windows)]
+                {
+                    *UAC_RELAXER.lock().unwrap() = None;
                 }
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 display_service::restore_resolutions();

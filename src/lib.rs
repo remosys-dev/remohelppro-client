@@ -66,6 +66,9 @@ mod safemode;
 /// ログオン前の再接続（一時サービス）。2026-08-01 追加。
 #[cfg(windows)]
 pub mod rl_prelogon;
+/// サポート中だけ管理者の確認を通しやすくする。2026-08-28 追加（ご判断）。
+#[cfg(windows)]
+pub mod rl_uac;
 
 // 画面注釈（双方向お絵かき）の DrawAction ↔ JSON 変換
 pub mod draw_annotation;
