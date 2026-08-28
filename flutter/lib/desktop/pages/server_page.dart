@@ -1005,7 +1005,19 @@ class _CmControlPanel extends StatelessWidget {
   }
 
   buildAuthorized(BuildContext context) {
-    final bool canElevate = bind.cmCanElevate();
+    // 🔴🔴 **お客様に「管理者権限を与える」釦を押させない**（2026-08-28 ご判断）。
+    //
+    //   ⚠ お客様は「昇格」の意味が分からない（社長ご自身が分からないと言われた）。
+    //   ⚠ 押すと画面が暗くなって管理者の確認が出る。ご高齢の方には怖い体験。
+    //   ⚠⚠ **サポート中に「はい」を押させるのは、詐欺の手口と同じ形**。
+    //     お客様には「こういうときは押さないでください」と教えるべき場面なのに、
+    //     当社が押させることになる。**そこは製品として作ってはいけない**。
+    //
+    //   ★入口は**相談員側に既にある**（ツールバーの「権限の昇格をリクエストする」）。
+    //     判断は相談員が持ち、お客様は Windows が出す確認に答えるだけでよい。
+    //   ⚠ 機能そのものは残す。消したのは**お客様側の釦**だけ。
+    //   ⚠ 戻すなら、この false を bind.cmCanElevate() に戻せば元どおり。
+    const bool canElevate = false;
     final model = Provider.of<ServerModel>(context);
     final showElevation = canElevate &&
         model.showElevation &&
@@ -1162,15 +1174,20 @@ class _CmControlPanel extends StatelessWidget {
             context,
             color: MyTheme.accent,
             onClick: () {
+              // 🔴🔴 **窓を隠さない**（2026-08-28 ご指摘）。
+              //   ⚠ ご報告:「押してもタスクに隠れるだけで何も起きない」。
+              //     押した直後に窓を最小化していたため、⚠ **管理者の確認が
+              //     出ても、失敗しても、お客様には何も見えなかった**。
+              //   ★押した結果が見える所に残す。隠すのは、うまくいってからでよい。
               handleElevate(context);
-              windowManager.minimize();
             },
             icon: Icon(
               Icons.security_rounded,
               color: Colors.white,
               size: 14,
             ),
-            text: 'Elevate',
+            // ⚠ お客様に見える文字。英語のままにしない（2026-08-28）。
+            text: '管理者として許可する',
             textColor: Colors.white,
           ),
         ),
@@ -1209,7 +1226,19 @@ class _CmControlPanel extends StatelessWidget {
   }
 
   buildUnAuthorized(BuildContext context) {
-    final bool canElevate = bind.cmCanElevate();
+    // 🔴🔴 **お客様に「管理者権限を与える」釦を押させない**（2026-08-28 ご判断）。
+    //
+    //   ⚠ お客様は「昇格」の意味が分からない（社長ご自身が分からないと言われた）。
+    //   ⚠ 押すと画面が暗くなって管理者の確認が出る。ご高齢の方には怖い体験。
+    //   ⚠⚠ **サポート中に「はい」を押させるのは、詐欺の手口と同じ形**。
+    //     お客様には「こういうときは押さないでください」と教えるべき場面なのに、
+    //     当社が押させることになる。**そこは製品として作ってはいけない**。
+    //
+    //   ★入口は**相談員側に既にある**（ツールバーの「権限の昇格をリクエストする」）。
+    //     判断は相談員が持ち、お客様は Windows が出す確認に答えるだけでよい。
+    //   ⚠ 機能そのものは残す。消したのは**お客様側の釦**だけ。
+    //   ⚠ 戻すなら、この false を bind.cmCanElevate() に戻せば元どおり。
+    const bool canElevate = false;
     final model = Provider.of<ServerModel>(context);
     final showElevation = canElevate &&
         model.showElevation &&

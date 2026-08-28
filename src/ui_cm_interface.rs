@@ -1688,8 +1688,17 @@ fn cm_inner_send(id: i32, data: Data) {
 }
 
 pub fn can_elevate() -> bool {
+    // 🔴🔴 **できないことのボタンを出さない**（2026-08-28 ご指摘）。
+    //
+    //   ⚠ ご報告:「昇格を押してもタスクに隠れるだけで何も起きない」。
+    //   ⚠ いまの繋がり方（ログオン前の一時サービス）は **SYSTEM で動いている**。
+    //     ＝ 既に最上位の権限なので、⚠ **昇格する余地がそもそも無い**。
+    //     それでも釦が出ていたので、押しても何も起きなかった。
+    //   ★既に昇格しているなら出さない。押せるのに必ず何も起きない釦は、
+    //     置いてあるだけで「壊れている」と受け取られる。
     #[cfg(windows)]
-    return !crate::platform::is_installed();
+    return !crate::platform::is_installed()
+        && !crate::platform::is_elevated(None).unwrap_or(false);
     #[cfg(not(windows))]
     return false;
 }
