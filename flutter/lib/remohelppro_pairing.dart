@@ -100,6 +100,20 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   bool _ready = false;
   String? _custToken; // 顧客セッショントークン（verify-pin で受領・以降のAPIに x-customer-token で添付）
 
+  // 🔴 お客様に「どこの誰につながっているか」を見せる（2026-08-29 ご指摘）。
+  //
+  //   ⚠ これまで画面には「接続済み」としか出ておらず、
+  //     ⚠ **いまつながっている相手が、電話した相手と同じかどうかを
+  //       確かめる方法が1つも無かった。**
+  //   ★社名と**電話番号**を出す。
+  //   ⚠ 効くのは電話番号のほう。社名は偽物にも真似できるので、
+  //     それ自体は本物である証明にならない。番号があれば、
+  //     お客様が**ご自分で調べた番号と照合**できる。
+  //   ⚠ 番号が無い会社では、サーバーが null を返す（社名だけは出さない）。
+  //     体験のお申し込みでは番号を聞いていないので、null は普通に起きる。
+  String? _supportName;
+  String? _supportTel;
+
   // ステータスパネル用（接続済み表示）
   String _enteredCode = ''; // 表示用の接続コード（手入力時）
   DateTime? _connectedAt; // 接続確立時刻（接続時間の起点）
@@ -311,6 +325,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       final j = jsonDecode(pr.body) as Map;
       final shortId = j['shortId'] as String;
       _custToken = j['customerToken'] as String?;
+      // ⚠ ワンクリック接続は**認証コードの画面を通らない**ので、
+      //   ここで取らないと、お客様は最後まで相手が誰か分からないままになる。
+      _readSupportContact(j);
       await _finishRemotePairing(shortId);
     } catch (_) {
       // 通信失敗等 → 手入力にフォールバック。
@@ -433,6 +450,28 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   ///   環境変数で渡してくる。そちらを先に見る。
   ///
   /// 見つからなければ null を返し、従来どおり認証コード入力画面を出す。
+  /// サーバーが返した「お客様に見せる連絡先」を取り込む。
+  ///
+  /// ⚠ 返ってこない／`null` のこともある（会社が電話番号を入れていない）。
+  ///   そのときは**何も出さない**。社名だけを出すと、
+  ///   確かめる手立てが無いのに「それらしく見える」だけの飾りになる。
+  void _readSupportContact(Map j) {
+    try {
+      final c = j['supportContact'];
+      if (c is Map) {
+        final n = (c['name'] as String?)?.trim() ?? '';
+        final t = (c['tel'] as String?)?.trim() ?? '';
+        if (n.isNotEmpty && t.isNotEmpty) {
+          _supportName = n;
+          _supportTel = t;
+        }
+      }
+    } catch (_) {
+      // ⚠ 読めなくても接続は進める。表示のためだけの値なので、
+      //   ここで失敗して繋がらなくなる方がはるかに困る。
+    }
+  }
+
   Future<String?> _readAndConsumeDlToken() async {
     // ① 起動元（自己展開ランチャー）から渡された合言葉。
     try {
@@ -990,6 +1029,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       final mode = (vjson['mode'] as String?) ?? 'view_only';
       // 顧客セッショントークンを保存（以降の grant-control / session-end に添付する）。
       _custToken = vjson['customerToken'] as String?;
+      _readSupportContact(vjson);
 
       // モード分岐：閲覧(カメラ／画面共有)は LiveKit、操作(遠隔操作)は RustDesk。
       //   camera=カメラ配信 / view_only=画面共有 → どちらも LiveKit（操作員はブラウザ/opで視聴）。
@@ -1616,6 +1656,71 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     );
   }
 
+  /// 「いま、どこの誰につながっているか」（2026-08-29 ご指摘）。
+  ///
+  /// 🔴 これまで画面には「接続済み」としか出ていなかった。
+  ///   ⚠ **お客様には、相手が電話した相手と同じか確かめる方法が無かった。**
+  ///
+  /// 🔴🔴 **電話番号を、社名より目立たせる。**
+  ///   ⚠ 社名は偽物にも真似できる。社名だけを大きく出す形が**いちばん危ない**
+  ///     ――「それらしく見える」だけで、確かめる手立てが増えないため。
+  ///   ★番号があれば、お客様が**ご自分で調べた番号と照合**できる。
+  ///     こちらの主張ではなく、お客様の手元の情報で確かめられるのが要点。
+  ///   ⚠ だから添える一文は「合っていますか」ではなく
+  ///     **「ご自分でお調べになった番号と同じか」**と書く。
+  ///
+  /// ⚠ 番号が無ければ**何も出さない**（サーバーが null を返す）。
+  ///   体験のお申し込みでは番号を聞いていないので、普通に起きる。
+  Widget _supportContactCard() {
+    final name = _supportName;
+    final tel = _supportTel;
+    if (name == null || tel == null) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F7FF),
+        border: Border.all(color: const Color(0xFFC7DBFF)),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('つないでいる相手',
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: _muted)),
+          const SizedBox(height: 3),
+          Text(name,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1F2937))),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              const Icon(Icons.call_outlined, size: 17, color: _accent),
+              const SizedBox(width: 6),
+              // ⚠ 選んで写せるようにする。掛け直すときに手で書き写させない。
+              SelectableText(tel,
+                  style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: _accent,
+                      letterSpacing: 0.4)),
+            ],
+          ),
+          const SizedBox(height: 5),
+          const Text(
+            'ご自分でお調べになった番号と同じかどうか、ご確認ください。'
+            '\n違うときは、この画面を閉じてお手元の番号におかけください。',
+            style: TextStyle(fontSize: 11, color: _muted, height: 1.45),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _infoRow(IconData icon, String k, String v, {bool top = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1822,6 +1927,11 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 12.5, color: _faint)),
             ],
+            // 🔴 待っている間こそ出す（2026-08-29 ご指摘）。
+            //   ⚠ 繋がるまでの数十秒が、お客様がいちばん不安な時間。
+            //     ここで相手が分かれば、待つ理由がはっきりする。
+            //   ⚠ 認証コードを入れた直後なので、会社はもう分かっている。
+            _supportContactCard(),
             const SizedBox(height: 8),
           ],
         ),
@@ -1899,6 +2009,10 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                       fontWeight: FontWeight.bold,
                       color: Colors.white)),
             ),
+            // 🔴 いちばん上に置く（2026-08-29 ご指摘）。
+            //   ⚠ お客様が確かめたいのは「相手が誰か」。
+            //     下に置くと、画面を送らないと見えない＝無いのと同じになる。
+            _supportContactCard(),
             // 🔴🔴 Mac の許可を、その場で案内する（2026-08-16 ご指摘「動作が多すぎ」）。
             //
             //   Mac は繋がっても、許可が無いと**映像が出ない・操作できない**。
