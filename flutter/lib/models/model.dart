@@ -19,6 +19,7 @@ import 'package:flutter_hbb/models/cm_file_model.dart';
 import 'package:flutter_hbb/models/file_model.dart';
 import 'package:flutter_hbb/models/group_model.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
+import 'package:flutter_hbb/remohelppro_ai_analyze.dart' show rlAiConsumeScreenshot;
 import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/printer_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -489,6 +490,10 @@ class FfiModel with ChangeNotifier {
       Map<String, dynamic> evt, SessionID sessionId, String peerId) {
     timerScreenshot?.cancel();
     timerScreenshot = null;
+    // 🔴 AI分析が1枚待っているときは、⚠ **いつもの保存ダイアログを出さない**
+    //   （2026-08-28）。出すと相談員に二重の操作をさせることになる。
+    //   ⚠ 取り方は同じ道を使う。ここを分けると、片方だけ壊れたときに気づけない。
+    if (rlAiConsumeScreenshot()) return;
     final msg = evt['msg'] ?? '';
     final msgBoxType = 'custom-nook-nocancel-hasclose';
     final msgBoxTitle = 'Take screenshot';

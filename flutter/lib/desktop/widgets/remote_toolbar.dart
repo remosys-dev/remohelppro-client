@@ -26,6 +26,7 @@ import '../../models/platform_model.dart';
 import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
+import 'package:flutter_hbb/remohelppro_ai_analyze.dart';
 import 'package:flutter_hbb/utils/scale.dart';
 import 'package:flutter_hbb/common/widgets/custom_scale_base.dart';
 
@@ -687,6 +688,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       toolbarItems.add(_AnnotationMenu(ffi: widget.ffi));
     }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
+    // 🔴 AI分析（2026-08-28 ご指示）。⚠ チャットの隣に1つだけ足す。
+    //   新しい窓も新しい画面も作らない。押すと範囲を選ぶ膜が出る。
+    toolbarItems.add(_RlAiMenu(ffi: widget.ffi));
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }
@@ -3597,5 +3601,45 @@ class EdgeThicknessControl extends StatelessWidget {
     );
 
     return slider;
+  }
+}
+
+/// ツールバーの「AI分析」。
+///
+/// 🔴 押すと**範囲を選ぶ膜**が出る（2026-08-28 ご指示）。
+///   ⚠ 押した瞬間に画面全体を送らない。楽な方を既定にすると必ずそちらが使われ、
+///     お客様の個人情報が出ていく。人が囲った所だけを送る。
+/// ⚠ 分析中は押せなくする（二重に走らせない＝二重に費用が出ない）。
+class _RlAiMenu extends StatelessWidget {
+  final FFI ffi;
+  const _RlAiMenu({Key? key, required this.ffi}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: rlAi.busy,
+      builder: (context, busy, _) {
+        return _IconMenuButton(
+          assetName: null,
+          icon: busy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
+          tooltip: 'AI分析',
+          onPressed: busy
+              ? null
+              : () {
+                  rlAi.error.value = null;
+                  rlAi.selecting.value = true;
+                },
+          color: _ToolbarTheme.blueColor,
+          hoverColor: _ToolbarTheme.hoverBlueColor,
+        );
+      },
+    );
   }
 }

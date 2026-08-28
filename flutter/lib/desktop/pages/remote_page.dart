@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:flutter_hbb/remohelppro_ai_analyze.dart'
+    show RlAiSelectOverlay, RlAiPanel;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -377,7 +379,8 @@ class _RemotePageState extends State<RemotePage>
           setRemoteState: setState,
         );
 
-    bodyWidget() {
+    // 映像と、その上に重なるもの一式。
+    bodyStack() {
       return Stack(
         children: [
           Container(
@@ -441,6 +444,17 @@ class _RemotePageState extends State<RemotePage>
           ),
         ],
       );
+    }
+
+    // 🔴 AIの下書きは**右に寄せる**（2026-08-28 ご指示）。
+    //   ⚠ チャットと同じ置き方にする。新しい窓は作らない
+    //     （「窓が行方不明になる」を増やさないため）。
+    //   ⚠ 出していないときは幅0を返すので、映像の大きさは変わらない。
+    bodyWidget() {
+      return Row(children: [
+        Expanded(child: bodyStack()),
+        const RlAiPanel(),
+      ]);
     }
 
     return Scaffold(
@@ -635,6 +649,10 @@ class _RemotePageState extends State<RemotePage>
       paints.length - 1,
       Positioned.fill(child: AnnotationOverlay(ffi: _ffi)),
     );
+    // 🔴 AI分析の「範囲を選ぶ膜」（2026-08-28 ご指示）。
+    //   ⚠ お絵かきとまったく同じ置き方にする（映像の上に1枚）。
+    //     選んでいないときは空を返すので、通常の遠隔操作の邪魔をしない。
+    paints.add(RlAiSelectOverlay(ffi: _ffi));
     return Stack(
       children: paints,
     );
