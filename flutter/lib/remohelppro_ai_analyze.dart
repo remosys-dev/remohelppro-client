@@ -710,3 +710,47 @@ class RlAiPanel extends StatelessWidget {
         ),
       );
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 残り回数（押す前に分かるように）
+// ═══════════════════════════════════════════════════════════════
+
+/// この会社でAI分析が使えるか。⚠ 未確認のうちは null（ボタンを出さない）。
+final rlAiEnabled = ValueNotifier<bool?>(null);
+
+/// 今月の残り回数。⚠ 未確認は null。
+final rlAiRemaining = ValueNotifier<int?>(null);
+
+/// 今月の上限（表示用）。
+final rlAiLimit = ValueNotifier<int>(0);
+
+/// 残り回数をサーバーへ聞く。
+///
+/// 🔴 押す前に分かるようにするため（2026-08-28 ご指示）。
+///   ⚠ 「押したら断られた」では遅い。今日ずっと直してきた
+///     「黙って何も起きない／押してから知る」と同じ形なので、最初から出す。
+///   ⚠ 会社が許可していなければ **enabled=false** が返る → ボタンごと出さない。
+///     押せるのに毎回断られる釦は、置いてあるだけで邪魔になる。
+/// ⚠ 失敗しても何も壊さない（未確認のまま＝ボタンを出さないだけ）。
+Future<void> rlAiRefreshQuota(FFI ffi) async {
+  try {
+    final id = ffi.id;
+    final token = ffi.presetPassword ?? '';
+    if (id.isEmpty || token.isEmpty) return;
+    final r = await http
+        .post(
+          Uri.parse('$_kApiBase/api/customer/ai-quota-by-viewer'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'rustdeskId': id, 'token': token}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (r.statusCode != 200) return;
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    if (j['ok'] != true) return;
+    rlAiEnabled.value = j['enabled'] == true;
+    rlAiLimit.value = (j['limit'] as num?)?.toInt() ?? 0;
+    rlAiRemaining.value = (j['remaining'] as num?)?.toInt() ?? 0;
+  } catch (_) {
+    // ⚠ 聞けなくても何も壊さない。ボタンが出ないだけ。
+  }
+}

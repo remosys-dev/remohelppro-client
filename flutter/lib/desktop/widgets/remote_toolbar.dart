@@ -23,7 +23,6 @@ import 'package:window_size/window_size.dart' as window_size;
 import '../../common.dart';
 import '../../models/model.dart';
 import '../../models/platform_model.dart';
-import '../../common/shared_state.dart';
 import './popup_menu.dart';
 import './kb_layout_type_chooser.dart';
 import 'package:flutter_hbb/remohelppro_ai_analyze.dart';
@@ -242,15 +241,19 @@ class _ToolbarLayoutScope extends InheritedTheme {
 }
 
 class _ToolbarTheme {
-  static const Color blueColor = MyTheme.button;
-  static const Color hoverBlueColor = MyTheme.accent;
-  // REMOHELP PRO Phase2(モック準拠): 明るいテーマ。ツールバーは白基調＋淡いボタン。
-  //   アイコン色は背景の明度から自動決定するため(下記 iconOn)、淡色でも視認性を保つ。
-  static Color inactiveColor = const Color(0xFFEDF2F7);
-  static Color hoverInactiveColor = const Color(0xFFDCE5EE);
-  // ツールバーの帯そのもの（アプリのテーマに関係なく明るくする）
-  static const Color barColor = Color(0xFFF7FAFC);
-  static const Color barBorder = Color(0xFFE2E8F0);
+  // 🔴 配色は**選べる**（2026-08-28 ご指示・見本の6案）。
+  //   ⚠ 定数ではなく getter にする。相談員が切り替えたその場で色が変わるように。
+  //   ⚠ `const` で使っている所は寸法だけなので、色を getter にしても壊れない
+  //     （変更前に全部の使い所を数えて確かめた）。
+  static Color get blueColor => rlCurrentPalette().base;
+  static Color get hoverBlueColor => rlCurrentPalette().hover;
+  // ⚠ 淡いボタンも同じ配色にそろえる。見本は「帯は黒・釦は配色・絵は白」。
+  static Color get inactiveColor => rlCurrentPalette().base;
+  static Color get hoverInactiveColor => rlCurrentPalette().hover;
+  // ツールバーの帯そのもの。⚠ 見本のとおり黒で固定（配色では変えない）。
+  //   ⚠ 白い帯のままだと、濃い釦との差が強すぎて画面から浮く。
+  static const Color barColor = Color(0xFF0D0F12);
+  static const Color barBorder = Color(0xFF1F2937);
 
   /// 背景色の明るさからアイコン/文字色を決める（淡色地=濃い字、濃色地=白字）。
   static Color iconOn(Color background) =>
@@ -539,6 +542,8 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       widget.state.init(widget.ffi.sessionId);
       // メニューの形を読み出す。読めなければ横帯（今までどおり）。
       await rlLoadToolbarVertical();
+      // ⚠ 配色も同じ場所で読む。片方だけ読むと、次に開いたとき色だけ戻る。
+      await rlLoadToolbarPalette();
     });
 
     _debouncerHide = Debouncer<int>(
@@ -1604,6 +1609,39 @@ class _DisplayMenuState extends State<_DisplayMenu> {
               onChanged: (v) => rlSetToolbarVertical(v == true),
               ffi: ffi,
               child: Text('メニューを縦にまとめる'),
+            )),
+        // 🔴 配色を選べるようにする（2026-08-28 ご指示・見本の6案）。
+        //   ⚠ 中身は同じで見え方だけの差なので、相談員ごとに選べる形にする。
+        //     保存先はこの端末（会社で揃える必要は無い）。
+        Obx(() => SubmenuButton(
+              menuChildren: kRlToolbarPalettes
+                  .map((pal) => MenuButton(
+                        onPressed: () => rlSetToolbarPalette(pal.id),
+                        ffi: ffi,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // ⚠ 名前だけだと選べない。実際の色を見せる。
+                            Container(
+                              width: 16,
+                              height: 16,
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(
+                                color: pal.base,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                            ),
+                            Text(pal.name),
+                            if (rlToolbarPaletteId.value == pal.id)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 6),
+                                child: Icon(Icons.check, size: 14),
+                              ),
+                          ],
+                        ),
+                      ))
+                  .toList(),
+              child: Text('メニューの色（${rlCurrentPalette().name}）'),
             )),
         Divider(),
         toggles(),
@@ -3391,8 +3429,10 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
     final isFullscreen = stateGlobal.fullscreen;
     const double iconSize = 20;
 
+    // ⚠ 既定値に色を書けない（配色は実行時に決まるため）。null で受けて中で補う。
     buttonWrapper(VoidCallback? onPressed, Widget child,
-        {Color hoverColor = _ToolbarTheme.blueColor}) {
+        {Color? hoverColor}) {
+      final hover = hoverColor ?? _ToolbarTheme.blueColor;
       final bgColor = buttonStyle.backgroundColor?.resolve({});
       return TextButton(
         onPressed: onPressed,
@@ -3400,7 +3440,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
         style: buttonStyle.copyWith(
           backgroundColor: MaterialStateProperty.resolveWith((states) {
             if (states.contains(MaterialState.hovered)) {
-              return (bgColor ?? hoverColor).withOpacity(0.15);
+              return (bgColor ?? hover).withOpacity(0.15);
             }
             return bgColor;
           }),

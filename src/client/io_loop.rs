@@ -244,7 +244,26 @@ impl<T: InvokeUiSession> Remote<T> {
                             } else {
                                 if self.handler.is_restarting_remote_device() {
                                     log::info!("Restart remote device");
-                                    self.handler.msgbox("restarting", "Restarting remote device", "remote_restarting_tip", "");
+                                    // 🔴🔴 上流の案内を、当社の流れに合わせて置き換える（2026-08-28 実機）。
+                                    //
+                                    //   ⚠ 元の文面はこうだった:
+                                    //     「このメッセージボックスを閉じて、しばらくした後に
+                                    //       **パスワードを使用して再接続してください**」
+                                    //   ⚠ 当社の作りと**正面から矛盾する**。
+                                    //     ・戻ってきたら**自動でつなぎ直す**（相談員は待つだけ）
+                                    //     ・⚠ **相談員が打つパスワードは存在しない**
+                                    //       （その回限りの合言葉はアプリが持っている）
+                                    //   ＝ 案内どおりに動こうとすると、⚠ **どこにも無いパスワードを
+                                    //     探すことになる**。実機で相談員がそこで止まった。
+                                    //   ★「待てばよい」とだけ伝える。次にやることを1つに絞る。
+                                    self.handler.msgbox(
+                                        "restarting",
+                                        "お客様のパソコンを再起動しています",
+                                        "戻ってきたら自動でつなぎ直します。\n\
+                                         ふつう 4〜6分 かかります（再起動とログインの時間です）。\n\
+                                         この窓は閉じていただいて構いません。",
+                                        "",
+                                    );
                                 } else {
                                     log::info!("Reset by the peer");
                                     self.handler.msgbox("error", "Connection Error", "Reset by the peer", "");
