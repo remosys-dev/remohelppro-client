@@ -36,7 +36,15 @@ class AnnotationModel with ChangeNotifier {
   static const _sendIntervalMs = 16;
 
   /// 送信側で直線とみなして間引く許容ずれ（相手の実ピクセル）
-  static const _simplifyTolerance = 2.0;
+  ///
+  /// ⚠ 2.0 → 1.0 に詰めた（2026-08-28 ご指摘「線が滑らかでない」）。
+  ///   ここは**相手の実ピクセル**での許容だが、画面には `× scale` で描かれる。
+  ///   ＝ ⚠ **拡大して見ているほど、この誤差も一緒に拡大される。**
+  ///   曲線を描くと、その誤差が角として見えていた。
+  /// ⚠ 詰めると点が増える（通信量も増える）。1.0 は
+  ///   「16ミリ秒ごとにまとめて送る」に収まる範囲で選んでいる。
+  ///   ★角が消える主因は描画側の曲線化（_smoothPath）。ここはその補い。
+  static const _simplifyTolerance = 1.0;
 
   bool _enabled = false;
   bool _autoFade = true;
@@ -421,12 +429,43 @@ class _AnnotationPainter extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..isAntiAlias = true;
-      final path = Path()..moveTo(_lx(s.xs[0]), _ly(s.ys[0]));
-      for (var i = 1; i < s.xs.length; i++) {
-        path.lineTo(_lx(s.xs[i]), _ly(s.ys[i]));
-      }
-      c.drawPath(path, paint);
+      c.drawPath(_smoothPath(s), paint);
     }
+  }
+
+  /// ひと筆を**滑らかな線**にする。
+  ///
+  /// 🔴🔴 点と点を直線で結んでいた（2026-08-28 ご指摘「円を描くとカクカクする」）。
+  ///
+  ///   ⚠ 元は `lineTo` で順につないでいた。マウスの点は数ピクセルおきにしか
+  ///     取れず、さらに「ほぼ一直線の点は捨てる」間引き（許容2px）が入るので、
+  ///     ⚠ **曲線ほど折れ線に見える**。円を描くと多角形になる。
+  ///   ⚠ しかも表示は `画像 × scale` なので、⚠ **拡大するほど角も拡大される**。
+  ///
+  ///   ★点を**通過点**ではなく**曲がりの支点**として使う（2次ベジエ）。
+  ///     隣り合う点の**中点**どうしを結び、点そのものを制御点にすると、
+  ///     点が少なくても線がつながって見える。手書きの定番のやり方。
+  ///   ⚠ 間引きを弱めて点を増やす手もあるが、それは通信量が増えるだけで
+  ///     根本の解決にならない（相手から届く線も同じように折れているため、
+  ///     **描画側で直すのが正しい**）。
+  Path _smoothPath(_Stroke s) {
+    final n = s.xs.length;
+    final path = Path()..moveTo(_lx(s.xs[0]), _ly(s.ys[0]));
+    if (n == 2) {
+      path.lineTo(_lx(s.xs[1]), _ly(s.ys[1]));
+      return path;
+    }
+    for (var i = 1; i < n - 1; i++) {
+      final cx = _lx(s.xs[i]);
+      final cy = _ly(s.ys[i]);
+      // 次の点との中点まで、いまの点を支点にして曲げる。
+      final mx = (cx + _lx(s.xs[i + 1])) / 2;
+      final my = (cy + _ly(s.ys[i + 1])) / 2;
+      path.quadraticBezierTo(cx, cy, mx, my);
+    }
+    // 最後の点までは直線で締める（ここを曲げると筆先が伸びて見える）。
+    path.lineTo(_lx(s.xs[n - 1]), _ly(s.ys[n - 1]));
+    return path;
   }
 
   /// 相手の実座標 → こちらの表示座標。拡大・スクロールに追従させる。
