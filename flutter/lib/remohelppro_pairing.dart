@@ -349,7 +349,25 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       if (myId == null) return false;
 
       final res = await tryResume(apiBase: _kApiBase, rustdeskId: myId);
-      if (res == null) return false;
+      if (res == null) {
+        // 🔴🔴 **戻れなかったなら、仕掛けを自分で片付ける**（2026-08-28 ご指摘）。
+        //
+        //   ⚠ 実機で「1回しか落としていないのに窓が2つ出る」が起きた。
+        //     正体は、前のサポートで仕掛けた**復帰の命令書が残っていた**こと。
+        //     ログインのたびに勝手に起動し、戻れずに認証コードの画面を出す。
+        //     そこへお客様が落としてきた物を開くと、⚠ **窓が2つ並ぶ**。
+        //   ⚠ 片付けはサポート終了時に行う作りだが、⚠ **異常終了すると残る**。
+        //     今日だけでも、落ちる・強制終了される形を何度も見ている。
+        //   ★戻れなかった時点で、その仕掛けにはもう用が無い。ここで消す。
+        //     ＝ 次のログインからは勝手に立ち上がらない（自分で治る）。
+        rlTrace('resume_failed_cleanup');
+        try {
+          await clearRebootResume();
+        } catch (e) {
+          rlTrace('resume_cleanup_failed', {'e': e.toString()});
+        }
+        return false;
+      }
 
       // 新しいワンタイムトークンを自分のパスワードにする。
       //   ⚠ 書けなかったら復帰を成立させない。書けていないのに「復帰した」と
