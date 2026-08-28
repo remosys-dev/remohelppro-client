@@ -1360,7 +1360,7 @@ class _CmControlPanel extends StatelessWidget {
         .marginAll(4);
   }
 
-  void handleDisconnect() {
+  Future<void> handleDisconnect() async {
     bind.cmCloseConnection(connId: client.id);
     // 🔴🔴 顧客版では「切断」＝**サポートを終わらせる**（2026-08-27 ご指摘）。
     //
@@ -1376,6 +1376,34 @@ class _CmControlPanel extends StatelessWidget {
     //   ⚠ 相談員版・常駐版では今までどおり「1本を切る」だけ。
     //     常駐は切ったあとも待ち受けているのが仕事なので、終わらせてはいけない。
     if (kRlSupportShowWindow) {
+      // 🔴🔴 **合図を置くだけでは足りない**（2026-08-28 実機・重大）。
+      //
+      //   ⚠ ご報告:「顧客が切断してもビュアーが終わるだけでサポートが終わらない」。
+      //   ⚠ 原因: この合図を読むのは**本体のアプリ**だが、
+      //     ログオン前の再接続で繋がっているときは、⚠ **本体が動いていない**
+      //     （応答しているのは画面を持たない一時サービス）。
+      //     ＝ 合図を置いても**読む相手がいない**。
+      //   ⚠ その結果、お客様は切ったつもりでも
+      //     ・サーバーは「対応中」のまま
+      //     ・⚠ **合言葉が生きたまま**＝もう一度入れてしまえる
+      //     ワンタイムの約束（使い終わったら誰も入れない）が崩れる。
+      //
+      //   ★**この窓が自分で合言葉を潰す**。他のプロセスを当てにしない。
+      //     合言葉さえ消えれば、サーバーの表示がどうであれ**誰も入れない**。
+      //     ⚠ 順番が大事: 先に潰してから合図を置く。
+      //       合図の側で失敗しても、入口はもう閉じている。
+      try {
+        // ⚠ 空にすると「合言葉なし」＝入れない状態になる。
+        await bind.mainSetPermanentPasswordWithResult(password: '');
+      } catch (e) {
+        debugPrint('RL: 切断時に合言葉を潰せませんでした: $e');
+      }
+      try {
+        // ⚠ 被操作そのものも止める。止めないと、次の接続を待ち受け続ける。
+        await bind.mainStopService();
+      } catch (e) {
+        debugPrint('RL: 切断時に被操作を止められませんでした: $e');
+      }
       try {
         final base = Platform.environment['LOCALAPPDATA'] ?? '';
         if (base.isNotEmpty) {
@@ -1385,7 +1413,7 @@ class _CmControlPanel extends StatelessWidget {
               DateTime.now().toIso8601String());
         }
       } catch (_) {
-        // 合図を置けなくても、接続は上で切れている。
+        // 合図を置けなくても、入口は上で閉じている。
       }
     }
   }

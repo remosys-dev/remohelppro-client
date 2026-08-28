@@ -2036,7 +2036,21 @@ impl Connection {
         //   ★戻すのは2本立て: 誰も繋がっていなくなったときと、次の起動時。
         #[cfg(windows)]
         {
+            // ⚠⚠ **ワンタイム版だけ**（2026-08-28 ご指示「他は壊さないでね」）。
+            //
+            //   ⚠ 常駐版は、お客様の**業務用PCに入れっぱなし**の物。
+            //     そこの UAC の出方を、接続のたびに黙って変えてはいけない。
+            //     ⚠ 会社の情報システム部門の設定を、当社が上書きすることになる。
+            //   ⚠ 相談員版（自分の画面を見せるときに被操作になる）でも変えない。
+            //     相談員のPCの防御を下げる理由が無い。
+            //   ★ワンタイムは「その回だけ・終わったら何も残らない」物なので、
+            //     その回に限って緩め、終わったら戻す——という筋が通る。
+            let onetime = !hbb_common::config::IS_RESIDENT_BUILD
+                && !hbb_common::config::IS_OPERATOR_BUILD;
             let mut uac = UAC_RELAXER.lock().unwrap();
+            if !onetime {
+                log::info!("RL uac: 常駐版/相談員版では設定を変えません");
+            } else
             if uac.is_none() {
                 match crate::rl_uac::UacRelaxer::new() {
                     Ok(r) => *uac = Some(r),
