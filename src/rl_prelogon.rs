@@ -35,7 +35,7 @@
 
 #![cfg(windows)]
 
-use hbb_common::{bail, log, ResultType};
+use hbb_common::{bail, config::Config, log, ResultType};
 use std::{
     io::Write,
     os::windows::process::CommandExt,
@@ -59,6 +59,72 @@ pub fn marker_in(dir: &Path) -> PathBuf {
     dir.join("rl-prelogon.txt")
 }
 
+/// 一時サービス（LocalSystem）が**実際に読む**設定の置き場所。
+///
+/// 🔴🔴 ここが「サービスは動くのに繋がらない」の正体だった（2026-08-28 実測で確定）。
+///
+///   一式を複製すれば設定も渡ると考えていたが、⚠ **渡っていなかった。**
+///   `Config::path()` は Windows では `APP_DIR` を見ず、
+///   `patch()` が SYSTEM のとき ServiceProfiles へ差し替える。
+///   ＝ サービスは複製した設定を**一度も読まず**、
+///     ⚠ **自分で新しい接続番号と合言葉を作ってしまう。**
+///   実物で確認:
+///     C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\remohelppro\config\
+///     に、お客様のアプリとは別の enc_id / password が出来ていた。
+///   相談員が繋ぐと **「パスワードが間違っています」**。
+///
+///   ★複製に頼らず、**サービスが必ず読む1か所へ、こちらから直接書き込む。**
+///   ⚠ 書く側（ここ）と読む側（サービス）が、同じ計算で同じ場所を指すこと。
+///     関数の戻り値ではなく**この関数1つ**に集約する。
+pub fn service_config_dir() -> PathBuf {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    PathBuf::from(root)
+        .join("ServiceProfiles")
+        .join("LocalService")
+        .join("AppData")
+        .join("Roaming")
+        .join(crate::get_app_name())
+        .join("config")
+}
+
+/// いま動いているアプリの設定を、一時サービスが読む場所へ写す。
+///
+/// 🔴 これで初めて「同じ接続番号・同じ合言葉」でサービスが登録される。
+///
+/// ⚠ 合言葉と接続番号は暗号化されているが、鍵は **端末単位**（`get_uuid()` 由来）で
+///   利用者ごとではない。＝ そのまま写して復号できる（2026-08-28 コードで確認）。
+/// ⚠ 写すのは設定だけ。記録（log）や一時ファイルは持ち込まない。
+fn copy_identity_to_service_config() -> ResultType<()> {
+    let src = Config::path("");
+    let dst = service_config_dir();
+    std::fs::create_dir_all(&dst)?;
+    let mut copied = 0usize;
+    for entry in std::fs::read_dir(&src)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy().to_string();
+        // ⚠ `.toml` だけを写す。控え（.bak）や記録は持ち込まない。
+        if !name_str.to_lowercase().ends_with(".toml") {
+            continue;
+        }
+        match std::fs::copy(entry.path(), dst.join(&name)) {
+            Ok(_) => copied += 1,
+            Err(e) => log::warn!("RL prelogon: 設定を写せません {name_str}: {e}"),
+        }
+    }
+    if copied == 0 {
+        bail!("設定を1つも写せませんでした（{}）", src.display());
+    }
+    log::info!(
+        "RL prelogon: 身分を写しました {copied} 件 → {}",
+        dst.display()
+    );
+    Ok(())
+}
+
 /// サーバーに一度も届かないまま、この時間が過ぎたら自分を消す。
 ///
 /// 🔴 これは「作った時刻からの制限時間」ではない。**最後に届いた時刻から**数える。
@@ -76,6 +142,14 @@ pub struct Marker {
     /// ここを過ぎたら、通信の可否にかかわらず消す。**最後の歯止め**であって、
     /// 普段の終わり方ではない（普段はサーバーの「終わった」で消える）。
     pub hard_limit: u64,
+    /// 複製元（お客様のアプリ）が名乗っていた接続番号。
+    ///
+    /// 🔴 サービスが起動したとき、**自分の番号がこれと一致するか**を確かめる。
+    ///   ⚠ 違っていたら、相談員は繋いだつもりで**別の入口**に繋がる。
+    ///     「繋がるが別のPC」は、この機能で最も起きてはいけない壊れ方。
+    ///   ★一致しなければ、サービスは黙って続けず**自分を消す**。
+    /// ⚠ 古い目印（2行しかない）でも読めるように Option にする。
+    pub expect_id: Option<String>,
 }
 
 pub fn read_marker(dir: &Path) -> Option<Marker> {
@@ -83,12 +157,18 @@ pub fn read_marker(dir: &Path) -> Option<Marker> {
     let mut it = s.lines();
     let short_id = it.next()?.trim().to_string();
     let hard_limit = it.next()?.trim().parse::<u64>().ok()?;
+    // ⚠ 3行目は後から足したもの。無くても読めること（古い目印との両立）。
+    let expect_id = it
+        .next()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     if short_id.is_empty() {
         return None;
     }
     Some(Marker {
         short_id,
         hard_limit,
+        expect_id,
     })
 }
 
@@ -125,6 +205,8 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
         let mut f = std::fs::File::create(marker_in(&dst))?;
         writeln!(f, "{short_id}")?;
         writeln!(f, "{hard_limit}")?;
+        // 🔴 3行目＝いま名乗っている接続番号。サービスが自分を照合するために使う。
+        writeln!(f, "{}", Config::get_id())?;
     }
 
     // 🔴 実行ファイルの名前を決め打ちしない（2026-08-06）。
@@ -140,6 +222,19 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
     let exe = dst.join(&my_name);
     if !exe.exists() {
         bail!("copied exe not found: {}", exe.display());
+    }
+
+    // 🔴🔴 **身分を、サービスが実際に読む場所へ写す**（2026-08-28）。
+    //
+    //   ⚠ ここまでの複製だけでは渡らない。サービスは LocalSystem で動くので
+    //     `C:\Windows\ServiceProfiles\...` を読み、複製した設定を**一度も見ない**。
+    //     ＝ 自分で新しい番号と合言葉を作り、相談員が繋ぐと
+    //       「パスワードが間違っています」になる（実機で確認済み）。
+    //   ★写せなければ、サービスを作っても**必ず繋がらない**。
+    //     作ってから気づく形にせず、ここで止めて跡を消す。
+    if let Err(e) = copy_identity_to_service_config() {
+        let _ = std::fs::remove_dir_all(&dst);
+        bail!("身分を渡せませんでした: {e}");
     }
 
     // sc create → start。失敗したら黙って諦めず、複製も消して跡を残さない。
@@ -232,6 +327,24 @@ pub fn self_remove_and_exit() -> ! {
 /// ⚠ 呼ぶ前に、必ず「目印がある」ことを確かめること。
 ///   目印が無い実行ファイルは常駐版か相談員版なので、ここに来てはいけない。
 pub fn start_watchdog(m: Marker) {
+    // 🔴🔴 **自分が何者かを、動き出す前に確かめる**（2026-08-28 追加）。
+    //
+    //   ⚠ 一時サービスは LocalSystem で動くため、設定の受け渡しに失敗すると
+    //     **自分で新しい接続番号を作ってしまう**。そのまま登録すると、
+    //     相談員は繋いだつもりで**別の入口**に繋がる。
+    //     ＝「繋がるが別のPC」。この機能で最も起きてはいけない壊れ方。
+    //   ★一致しなければ、黙って続けず**自分を消す**。
+    //     繋がらない方がまだ良い。理由は記録に残す。
+    if let Some(expect) = m.expect_id.as_deref() {
+        let mine = Config::get_id();
+        if mine != expect {
+            log::error!(
+                "RL prelogon: 接続番号が複製元と違う（期待 {expect} / 自分 {mine}）。別の入口になるため、自分を消します"
+            );
+            self_remove_and_exit();
+        }
+        log::info!("RL prelogon: 接続番号の照合 OK（{mine}）");
+    }
     // ③ 最後の歯止め。電源を抜かれて翌日起動でも、ここで消える。
     if now_unix() >= m.hard_limit {
         log::info!("RL prelogon: hard limit already passed at start");
