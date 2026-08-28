@@ -48,6 +48,15 @@ use std::{
 ///   同じ名前だと、片方を消したときにもう片方を巻き込む。
 pub const SERVICE_NAME: &str = "REMOHELPPRO_PRELOGON";
 
+/// 一時サービスが動かす実行ファイルの名前。
+///
+/// 🔴 **お客様のアプリ（`remohelppro-support.exe`）と同じ名前にしないこと。**
+///   同じだと、復帰の命令書が一時サービスを見て
+///   「アプリはもう起きている」と誤認し、⚠ **一度も起こさない**
+///   （2026-08-29 実機で確定。記録に ALREADY-RUNNING の1行だけが残る）。
+/// ⚠ 常駐の `taskkill /F /IM remohelppro-agent.exe` とも重ならないこと。
+pub const PRELOGON_EXE_NAME: &str = "remohelppro-prelogon.exe";
+
 /// 置き場所。サービスは SYSTEM で動くので、利用者ごとの場所は使えない。
 pub fn svc_dir() -> PathBuf {
     let base = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
@@ -190,12 +199,52 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
     if !is_elevated() {
         bail!("not elevated");
     }
-    // 前回の残りがあれば先に片付ける。重ねて作らない。
+    // 🔴🔴 **前の複製が消えないまま、新しいものを重ねていた**（2026-08-29 実機で確定）。
+    //
+    //   ⚠ 実際に起きたこと。お客様のPCで、一時サービスが動かしていたのは
+    //     `1.4.74` の実行ファイルだった（新しいアプリは 1.4.77）。
+    //     `sc stop` は**戻ってきた時点ではまだ止まっていない**。
+    //     止まっていないと実行ファイルは掴まれたままで、
+    //     `remove_dir_all` も上書きも失敗する。
+    //   ⚠ ところが結果を `let _ =` で捨てていたので、⚠ **失敗しても素通り**。
+    //     `copy_dir` も「copy skipped」を記録に書くだけで先へ進む。
+    //     ＝ **古い実行ファイルのまま**サービスが作られる。
+    //
+    //   ⚠ なぜそれで「パスワードが間違っています」になるか:
+    //     古い版はアプリ名が `remohelppro`、新しい版は `remohelppro-support`。
+    //     サービスが読む設定の場所は**アプリ名で決まる**ので、
+    //     こちらが新しい名前の場所へ身分を写しても、
+    //     ⚠ **古い実行ファイルは古い名前の場所を見る**。
+    //     身分が見つからず、自分で新しい合言葉を作ってしまう。
+    //
+    //   ★止まるまで待つ。消せなければ**進まない**。
+    //     中途半端に作ると、繋がらない理由がどこにも出ない形になる。
     let _ = remove_service_only();
+    wait_service_gone(Duration::from_secs(20));
 
     let dst = svc_dir();
     if dst.exists() {
-        let _ = std::fs::remove_dir_all(&dst);
+        // ⚠ 一度で消えないことがある（掴んでいる相手が終わりきっていない）。
+        //   少し待って数回試す。それでも駄目なら諦めて**止まる**。
+        let mut last_err = None;
+        for _ in 0..10 {
+            match std::fs::remove_dir_all(&dst) {
+                Ok(_) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+        if let Some(e) = last_err {
+            bail!(
+                "前の複製を消せませんでした（{}）: {e}。古いまま作ると必ず繋がりません",
+                dst.display()
+            );
+        }
     }
     std::fs::create_dir_all(&dst)?;
     copy_dir(src_dir, &dst)?;
@@ -215,13 +264,51 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
     //   ここで `remohelppro.exe` と決め打ちすると、複製の中に見つからず
     //   **ログオン前の接続が丸ごと動かなくなる**。
     //   ★いま動いている自分の名前をそのまま使う。名前を変えても壊れない。
-    let my_name = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+    let my_exe = std::env::current_exe()?;
+    let my_name = my_exe
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| format!("{}.exe", crate::get_app_name()));
-    let exe = dst.join(&my_name);
-    if !exe.exists() {
-        bail!("copied exe not found: {}", exe.display());
+    let copied = dst.join(&my_name);
+    if !copied.exists() {
+        bail!("copied exe not found: {}", copied.display());
+    }
+
+    // 🔴🔴 **複製に別の名前を付ける**（2026-08-29 実機で確定した回帰）。
+    //
+    //   ⚠ 実際に起きたこと。再起動して戻ってくるはずが、戻ってこなかった。
+    //     お客様の画面にはコマンドプロンプトの窓だけが残った。
+    //     復帰の記録には **ALREADY-RUNNING** の1行だけ。
+    //   ⚠ 正体: 復帰の命令書は「`remohelppro-support.exe` が動いていれば
+    //     もう起きている」と判断する。⚠ **一時サービスの複製が、
+    //     まったく同じ名前だった。** ＝ サービス自身を見て
+    //     「アプリはもう起きている」と誤認し、⚠ **一度も起こさなかった。**
+    //
+    //   ★複製は `remohelppro-prelogon.exe` にする。**別物には別の名前を付ける。**
+    //     ⚠ お客様のアプリと同じ名前にしてよいことは1つも無い。
+    //       見分けが要る場面（復帰・後始末・タスクマネージャー）で必ず混ざる。
+    //   ⚠ この名前は復帰の命令書が見る名前と**重ならないこと**。
+    //     変えるときは remohelppro_reconnect.dart の watchNames も一緒に見る。
+    let exe = dst.join(PRELOGON_EXE_NAME);
+    if copied != exe {
+        if let Err(e) = std::fs::rename(&copied, &exe) {
+            let _ = std::fs::remove_dir_all(&dst);
+            bail!("複製に名前を付けられません: {e}");
+        }
+    }
+
+    // 🔴 **中身が今のアプリと同じか確かめる**（2026-08-29 追加）。
+    //   ⚠ 上の掃除が失敗していると、古い実行ファイルが残ったまま先へ進んでしまう。
+    //     古い版はアプリ名が違い、⚠ **設定を読む場所ごと違う**ので、
+    //     身分を写しても届かず「パスワードが間違っています」になる。
+    //   ★大きさが違えば別物。ここで止める。作ってから気づく形にしない。
+    {
+        let a = std::fs::metadata(&my_exe)?.len();
+        let b = std::fs::metadata(&exe)?.len();
+        if a != b {
+            let _ = std::fs::remove_dir_all(&dst);
+            bail!("複製が今の版と違います（{a} と {b}）。古いまま作ると必ず繋がりません");
+        }
     }
 
     // 🔴🔴 **身分を、サービスが実際に読む場所へ写す**（2026-08-28）。
@@ -292,6 +379,31 @@ fn copy_dir(src: &Path, dst: &Path) -> ResultType<()> {
 fn remove_service_only() -> bool {
     sc(&["stop", SERVICE_NAME]);
     sc(&["delete", SERVICE_NAME])
+}
+
+/// サービスが**本当に消えるまで**待つ。
+///
+/// 🔴 `sc stop` / `sc delete` は「受け付けた」で戻る。⚠ **止まった保証は無い。**
+///   止まっていない間は実行ファイルが掴まれたままなので、
+///   複製を消すことも上書きすることもできない（2026-08-29 実機で確定）。
+/// ⚠ 待ち切れなくても、ここでは止めない。判断は呼んだ側（消せたかどうか）で行う。
+fn wait_service_gone(limit: Duration) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < limit {
+        // `sc query` は、登録が無ければ失敗する＝消えた合図。
+        if !sc(&["query", SERVICE_NAME]) {
+            log::info!(
+                "RL prelogon: 前のサービスが消えました（{:.1}秒）",
+                start.elapsed().as_secs_f32()
+            );
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    log::warn!(
+        "RL prelogon: 前のサービスが {}秒で消えませんでした",
+        limit.as_secs()
+    );
 }
 
 /// 自分を消して終わる。**サービスの中から呼ぶ。**

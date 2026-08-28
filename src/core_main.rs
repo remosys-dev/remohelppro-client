@@ -573,6 +573,19 @@ pub fn core_main() -> Option<Vec<String>> {
             return None;
         } else if args[0] == "--service" {
             log::info!("start --service");
+            // 🔴🔴 UAC を戻し損ねていないか、動いている間ずっと見張る（2026-08-29）。
+            //
+            //   ご指示「常駐にする。しかし**サポート終了後削除する**」。
+            //   ⚠ 常駐は入れっぱなしなので、起動時の保険だけでは
+            //     ⚠ **次に再起動するまで緩いまま**になる。それは許されない。
+            //   ★サポート中は印の時刻が新しくなり続ける。3分古ければ
+            //     「終わっている」と見なして戻す。
+            //   ⚠ 触っていなければ控えが無いので、一瞬で通り過ぎる（無害）。
+            #[cfg(windows)]
+            std::thread::spawn(|| loop {
+                crate::rl_uac::restore_if_stale(std::time::Duration::from_secs(180));
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            });
             // 一時サービスなら、起動のたびに見張りを立て直す。
             //   ⚠ 「届かない時間」の砂時計はここで0に戻る（＝再起動で止まっていた
             //     時間を数えない）。詳しくは rl_prelogon.rs の頭。

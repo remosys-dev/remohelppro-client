@@ -351,6 +351,9 @@ Future<void> prepareRebootResume() async {
     //   ⚠ `find` は**フルパスで呼ぶ**。PATH に別の find があると
     //     そちらが呼ばれて、判定が常に「見つからない」になる。
     //     （実際、検証中に他の find が呼ばれて誤判定した）
+    //   ⚠ 2026-08-29: 探すのは `tasklist` の出力ではなく、PowerShell が
+    //     書いた合図の文字にした（下の runningCheck）。
+    //     ⚠ `tasklist` は名前しか見られず、⚠ **一時サービスと見分けられない。**
     const findExe = r'%SystemRoot%\System32\find.exe';
 
     // 🔴🔴 探す名前を決め打ちにしない（2026-08-08 実機で確定）。
@@ -396,12 +399,65 @@ Future<void> prepareRebootResume() async {
         .toList();
 
     // どれか1つでも動いていれば「起動済み」。
-    String runningCheck(String label) => watchNames
-        .map((n) => [
-              'tasklist /FI "IMAGENAME eq $n" | $findExe /I "$n" >nul',
-              'if not errorlevel 1 goto :$label',
-            ].join('\r\n'))
-        .join('\r\n');
+    //
+    // 🔴🔴 **名前だけで見てはいけない**（2026-08-29 実機で確定）。
+    //
+    //   ⚠ 実際に起きたこと。再起動しても戻ってこず、お客様の画面には
+    //     コマンドプロンプトの窓だけが残った。記録は **ALREADY-RUNNING** の1行。
+    //   ⚠ 正体: ログオン前の接続に使う**一時サービスの複製が、
+    //     お客様のアプリと同じ名前**だった。名前だけで見ていたので、
+    //     サービス自身を見て「もう起きている」と誤判定し、
+    //     ⚠ **アプリを一度も起こさなかった。**
+    //
+    //   ★見分けるのは「**同じ画面（セッション）で動いているか**」。
+    //     お客様のアプリはログインした人の画面（session 1 以上）で動く。
+    //     サービスは session 0。⚠ この番号は**管理者でなくても読める**
+    //     （実行ファイルの場所は SYSTEM のものが読めないので使えない）。
+    //
+    //   ⚠ 判定できないときは「動いていない」側に倒す（＝起こしにいく）。
+    //     二重に起こしても、ランナー側の錠で2つ目は静かに終わるので害が無い。
+    //     ⚠ 逆に倒すと、今回のように**永久に起きない**。
+    // Get-Process は拡張子なしの名前を取る。
+    final psNames = watchNames
+        .map((n) => n.toLowerCase().endsWith('.exe')
+            ? n.substring(0, n.length - 4)
+            : n)
+        .map((n) => "'$n'")
+        .join(',');
+    final runPath = base + sep + 'rl-run.txt';
+
+    // 一時サービスの置き場所。⚠ ここから動いているものは**アプリではない**。
+    //   rl_prelogon.rs の svc_dir() と同じ場所を指すこと。
+    const prelogonDir = r'*\REMOHELP PRO\prelogon\*';
+
+    // ⚠ 結果は**終了コードで受け取らない**。
+    //   PowerShell 自体が失敗したときも 1 を返すので、
+    //   「失敗」と「動いている」が同じ値になり、⚠ **区別できない。**
+    //   ★合図の文字をファイルに書かせて、それを探す。
+    //     書けていなければ「動いていない」＝起こしにいく（安全な側に倒れる）。
+    //     ⚠ 二重に起こしても、ランナー側の錠で2つ目は静かに終わる（害が無い）。
+    //     ⚠ 逆に倒すと、今回のように**永久に起きない**。
+    // ⚠ `for /f '...'` は使わない。中の PowerShell に `'` が入ると
+    //   囲みが壊れる（cmd の引用の罠）。
+    //
+    // 🔴🔴 **見るのは「どこから動いているか」**（2026-08-29 実測でここに落ち着いた）。
+    //   ⚠ セッション番号では分かれない。**実測**したところ、
+    //     サービスは自分の子を利用者の画面（session 1）にも出していた。
+    //     ＝ 番号では一時サービスとアプリを見分けられない。
+    //   ★① 場所が読めない（＝SYSTEM のもの）は数えない
+    //     ② 一時サービスの置き場所から動いているものは数えない
+    //     残ったものだけが「お客様のアプリ」。
+    String runningCheck(String label) => [
+          'powershell -NoProfile -ExecutionPolicy Bypass -Command '
+              '"\$ErrorActionPreference=\'SilentlyContinue\'; '
+              '\$c=@(Get-Process -Name $psNames -ErrorAction SilentlyContinue '
+              '| Where-Object { \$_.Path -and \$_.Path -notlike \'$prelogonDir\' }).Count; '
+              'if (\$c -gt 0) { \'RLYES c=\' + \$c } else { \'RLNO c=0\' }" '
+              '> "$runPath" 2>nul',
+          'type "$runPath" >> "$logPath" 2>nul',
+          '$findExe "RLYES" < "$runPath" >nul 2>nul',
+          'if not errorlevel 1 goto :$label',
+        ].join('\r\n');
 
     String tryOnce(String n) => [
           'ping -n 21 127.0.0.1 >nul',
@@ -428,6 +484,9 @@ Future<void> prepareRebootResume() async {
       'echo [%date% %time%] OK >> "$logPath"',
       'goto :end',
       ':running',
+      // ⚠ 何を見て「起きている」と判断したかは、上の runningCheck が
+      //   RLYES/RLNO と個数を記録に残している（2026-08-29 追加）。
+      //   前回は理由が残らず、誤判定だと分かるまでに実機の調査が要った。
       'echo [%date% %time%] ALREADY-RUNNING >> "$logPath"',
       ':end',
       // 🔴🔴 登録を**自分で消してから**、命令書を消す（2026-08-25 実機で修正）。
@@ -536,7 +595,9 @@ Future<void> clearRebootResume() async {
   //   「使い終わったら消える」という約束はここまで含む。
   try {
     final d = _resumeDir().path.replaceAll('/', r'\');
-    for (final n in ['rl-resume.cmd', 'rl-resume.log']) {
+    // ⚠ rl-run.txt は起動済みかどうかの判定に使う一時ファイル（2026-08-29）。
+    //   これも当社が置いた物なので、一緒に消す。
+    for (final n in ['rl-resume.cmd', 'rl-resume.log', 'rl-run.txt']) {
       final f = File('$d\\$n');
       if (f.existsSync()) f.deleteSync();
     }

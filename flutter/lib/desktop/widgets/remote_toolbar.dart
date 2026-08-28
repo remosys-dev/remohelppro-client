@@ -3637,34 +3637,95 @@ class EdgeThicknessControl extends StatelessWidget {
 ///   ⚠ 押した瞬間に画面全体を送らない。楽な方を既定にすると必ずそちらが使われ、
 ///     お客様の個人情報が出ていく。人が囲った所だけを送る。
 /// ⚠ 分析中は押せなくする（二重に走らせない＝二重に費用が出ない）。
-class _RlAiMenu extends StatelessWidget {
+class _RlAiMenu extends StatefulWidget {
   final FFI ffi;
   const _RlAiMenu({Key? key, required this.ffi}) : super(key: key);
 
   @override
+  State<_RlAiMenu> createState() => _RlAiMenuState();
+}
+
+class _RlAiMenuState extends State<_RlAiMenu> {
+  @override
+  void initState() {
+    super.initState();
+    // 🔴 押す前に残数が分かるように、繋がった時点で聞いておく（2026-08-28 ご指示）。
+    //   ⚠「押したら断られた」では遅い。今日ずっと直してきた
+    //     「黙って何も起きない／押してから知る」と同じ形なので、最初から出す。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      rlAiRefreshQuota(widget.ffi);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<bool>(
-      valueListenable: rlAi.busy,
-      builder: (context, busy, _) {
-        return _IconMenuButton(
-          assetName: null,
-          icon: busy
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
-                )
-              : const Icon(Icons.auto_awesome, size: 16, color: Colors.white),
-          tooltip: 'AI分析',
-          onPressed: busy
-              ? null
-              : () {
-                  rlAi.error.value = null;
-                  rlAi.selecting.value = true;
-                },
-          color: _ToolbarTheme.blueColor,
-          hoverColor: _ToolbarTheme.hoverBlueColor,
+    return ValueListenableBuilder<bool?>(
+      valueListenable: rlAiEnabled,
+      builder: (context, enabled, _) {
+        // ⚠ 会社が許可していない／設定が無いときは**ボタンごと出さない**。
+        //   押せるのに毎回断られる釦は、置いてあるだけで邪魔になる。
+        //   ⚠ 確認できていないうち（null）も出さない。
+        if (enabled != true) return const SizedBox.shrink();
+        return ValueListenableBuilder<bool>(
+          valueListenable: rlAi.busy,
+          builder: (context, busy, _) {
+            return ValueListenableBuilder<int?>(
+              valueListenable: rlAiRemaining,
+              builder: (context, remaining, _) {
+                final left = remaining ?? 0;
+                // ⚠ 残りが少ないほど色を変える。押す前に気づけるように。
+                final tone = left <= 0
+                    ? const Color(0xFF9C2C24)
+                    : left <= 10
+                        ? const Color(0xFF9A6614)
+                        : _ToolbarTheme.blueColor;
+                return _IconMenuButton(
+                  assetName: null,
+                  icon: busy
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(Icons.auto_awesome,
+                                size: 16, color: Colors.white),
+                            // ⚠ 残数を釦の上に小さく出す。開かないと分からない所に置かない。
+                            Positioned(
+                              right: -6,
+                              bottom: -6,
+                              child: Text(
+                                '$left',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  height: 1,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                  tooltip: left <= 0
+                      ? 'AI分析（今月の残りがありません）'
+                      : 'AI分析（今月あと $left 回）',
+                  // ⚠ 使い切っていても押せるようにする。押せば理由が画面に出るので、
+                  //   「押せない釦」より「理由が分かる」方がよい。
+                  onPressed: busy
+                      ? null
+                      : () {
+                          rlAi.error.value = null;
+                          rlAi.selecting.value = true;
+                        },
+                  color: tone,
+                  hoverColor: _ToolbarTheme.hoverBlueColor,
+                );
+              },
+            );
+          },
         );
       },
     );
