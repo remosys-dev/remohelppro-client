@@ -951,6 +951,49 @@ lazy_static::lazy_static! {
 ///   ⚠ 名前で消してはいけない。3製品とも表示名は「REMOHELP PRO Remote Desktop」で
 ///     同じで、常駐版・相談員版まで巻き込む。実行ファイルの**置き場所**で見分ける。
 ///   ⚠ 自分自身は消さない（呼んだ側が最後に自分で終わる）。
+/// ワンタイム版が残した設定と記録を消す。
+///
+/// 🔴🔴 **「使い終わったら何も残らない」を本当に守る**（2026-08-28 ご指摘）。
+///
+///   ⚠ ワンタイム版は利用者フォルダの `config` に**接続番号と合言葉**を書く
+///     （`RL_APP_DIR` による隔離は Windows では効いていなかった。同日判明）。
+///     消さないと、サポートが終わってもお客様のPCに残り続ける。
+///
+///   ⚠ **これはアプリ名を分けたからできる**（`remohelppro-support`）。
+///     分ける前は相談員版と同じフォルダだったので、消すと巻き添えになった。
+///   ★だから、消す前に**必ず名前を確かめる**。
+///     ⚠ 常駐版・相談員版では絶対に動かさない。呼び出し側の条件だけに頼らず、
+///       ここでも断る（rl_kill_sibling_processes と同じ流儀）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn rl_remove_onetime_data() {
+    use hbb_common::config;
+    if config::IS_RESIDENT_BUILD || config::IS_OPERATOR_BUILD {
+        log::info!("RL: 常駐版/相談員版では設定を消しません");
+        return;
+    }
+    let name = crate::get_app_name();
+    // ⚠ 名前が分かれていないなら消さない。相談員版と同じ場所を消してしまう。
+    //   ＝ 名前を分ける前の版に戻しても、事故が起きない形にしておく。
+    if !name.contains("-support") {
+        log::info!("RL: アプリ名が分かれていないので設定は消しません（{name}）");
+        return;
+    }
+    let Some(dir) = config::Config::path("").parent().map(|p| p.to_path_buf()) else {
+        return;
+    };
+    // ⚠ 念のため、消す場所にアプリ名が入っていることを確かめる。
+    //   万一 path() の作りが変わっても、無関係な所を消さない。
+    if !dir.to_string_lossy().contains(&name) {
+        log::warn!("RL: 消す場所が想定と違います（{}）。何もしません", dir.display());
+        return;
+    }
+    match std::fs::remove_dir_all(&dir) {
+        Ok(_) => log::info!("RL: ワンタイムの設定と記録を消しました {}", dir.display()),
+        // ⚠ 消せなくても止めない（記録は使用中で掴まれていることがある）。
+        Err(e) => log::warn!("RL: 設定を消せません {}: {e}", dir.display()),
+    }
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn rl_kill_sibling_processes() {
     use hbb_common::sysinfo::System;

@@ -571,6 +571,20 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           // 片付けられなくても、自分は終わる（今までと同じ状態に戻るだけ）。
           rlTrace('kill_siblings_failed', {'e': e.toString()});
         }
+        // 🔴 設定と記録も消す（2026-08-28 ご指摘「サポート終了後は削除が必要」）。
+        //
+        //   ⚠ ワンタイム版は利用者フォルダに**接続番号と合言葉**を書いている。
+        //     展開先へ隔離するつもりだったが、⚠ Windows では効いていなかった。
+        //     消さないと、お客様のPCに残り続ける＝「何も残らない」の約束に反する。
+        //   ⚠ **アプリ名を分けたから消せる**（remohelppro-support）。
+        //     分ける前は相談員版と同じフォルダで、消すと巻き添えになった。
+        //   ⚠ 常駐版・相談員版では Rust 側で断るので、ここから呼んでも安全。
+        //   ★消すのは**最後**。記録を先に消すと、この後の失敗が残らない。
+        try {
+          await bind.mainGetCommon(key: 'rl-wipe-onetime');
+        } catch (e) {
+          rlTrace('wipe_onetime_failed', {'e': e.toString()});
+        }
         rlTrace('onetime_exit_after_end');
         await rlTraceFlushNow();
         exit(0);

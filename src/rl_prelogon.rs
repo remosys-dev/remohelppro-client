@@ -303,6 +303,23 @@ pub fn self_remove_and_exit() -> ! {
     log::info!("RL prelogon: removing myself");
     let dir = svc_dir();
     let d = dir.to_string_lossy().to_string();
+    // 🔴🔴 **写した身分も一緒に消す**（2026-08-28 ご指摘「サポート終了後は削除が必要」）。
+    //
+    //   ⚠ 一時サービスに接続番号と合言葉を渡すため、
+    //     `C:\Windows\ServiceProfiles\LocalService\...\config` へ設定を写している。
+    //   ⚠ サービスと複製フォルダだけ消して**ここを残すと**、
+    //     お客様のPCに **接続番号と合言葉が入ったファイルが残り続ける**。
+    //     ワンタイムの「使い終わったら何も残らない」という約束に反する。
+    //   ★消えるのはサービスだけではない。**持ち込んだ物は全部持ち帰る。**
+    //   ⚠ 消せなくても止まらない（下の後始末は必ず走らせる）。
+    let cfg = service_config_dir();
+    match std::fs::remove_dir_all(&cfg) {
+        Ok(_) => log::info!("RL prelogon: 写した身分を消しました {}", cfg.display()),
+        Err(e) => log::warn!(
+            "RL prelogon: 写した身分を消せません {}: {e}",
+            cfg.display()
+        ),
+    }
     // 自分が動いている間はフォルダを消せない。消えるまで繰り返す。
     // sc delete は「実行中」でも登録を消せるので先に打つ。
     let line = format!(

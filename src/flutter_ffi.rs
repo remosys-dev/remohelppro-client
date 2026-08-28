@@ -2896,6 +2896,12 @@ pub fn main_get_common(key: String) -> String {
         //   残すと次回の通信路を握ったままになる（common.rs の説明を参照）。
         crate::common::rl_kill_sibling_processes();
         return "ok".to_owned();
+    } else if key == "rl-wipe-onetime" {
+        // 🔴 サポートが終わったら、設定と記録も消す（2026-08-28 ご指摘）。
+        //   ⚠「使い終わったら何も残らない」を本当に守るため。
+        //   ⚠ 常駐版・相談員版では中で断るので、ここから呼んでも安全。
+        crate::common::rl_remove_onetime_data();
+        return "ok".to_owned();
     } else if let Some(argv) = key.strip_prefix("rl-run-hidden:") {
         // 黒い窓を出さずにコマンドを実行する（2026-08-27）。
         //   Dart の Process.run は Windows で必ずコンソールの窓を作るため、

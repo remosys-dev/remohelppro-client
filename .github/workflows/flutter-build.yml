@@ -322,6 +322,39 @@ jobs:
           grep -q 'kRlSupportShowWindow = true;' flutter/lib/rl_support.dart || {
             echo "RL: 顧客版フラグを立てられませんでした。中止します"; exit 1; }
 
+      # 🔴🔴 ワンタイム版のアプリ名を分ける（2026-08-28 ご判断）。
+      #
+      #   ⚠ これまで、ワンタイム版と**相談員版が同じ場所**を使っていた:
+      #       %APPDATA%\remohelppro\config   … 設定（接続番号・合言葉）
+      #       %APPDATA%\remohelppro\log      … 記録
+      #     分けてあったのは通信路と実行ファイル名だけ。
+      #
+      #   ⚠ そのせいで2つ困っていた:
+      #     ① ワンタイムは「使い終わったら何も残らない」が約束なのに、
+      #        **設定と記録を消せない**（消すと相談員版まで巻き込む）。
+      #        ＝ お客様のPCに接続番号と合言葉が残り続けていた。
+      #     ② 調査のとき、どちらの製品の記録か分からない
+      #        （実際 2026-08-28 に、それで一度読み違えた）。
+      #
+      #   ★常駐（remohelppro-agent・2026-08-07）と**まったく同じやり方**で分ける。
+      #     APP_NAME の1語を変えるだけで、設定・記録・通信路が全部ついてくる。
+      #
+      #   ⚠ 接続番号は **MACアドレス由来**なので、名前を分けても**同じ値**になる。
+      #     そちらは別途ビットで分ける仕組みが既に入っている（server.rs）。
+      #   ⚠ `remohelppro://` の独自URLは**相談員版**の話なので、ここでは影響しない。
+      #   ⚠ 既に配ったワンタイム版が残していった %APPDATA%\remohelppro は、
+      #     この版では**触らない**（相談員版と見分けが付かないため）。
+      - name: RL onetime app name (sed)
+        if: ${{ inputs.support_show_window }}
+        shell: bash
+        run: |
+          sed -i 's/RwLock::new("remohelppro".to_owned())/RwLock::new("remohelppro-support".to_owned())/' libs/hbb_common/src/config.rs
+          echo "--- config.rs APP_NAME ---"; grep -n 'APP_NAME: RwLock' libs/hbb_common/src/config.rs
+          # ⚠ sed は一致しなくても成功で終わる。必ず確かめて、変わっていなければ止める。
+          #   ここが空振りすると、相談員版と同じフォルダを使う版が配られる。
+          grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-support".to_owned());' libs/hbb_common/src/config.rs || {
+            echo "RL: ワンタイム版のアプリ名を分けられませんでした。中止します"; exit 1; }
+
       # 🔴 相談員版だけ通信路の名前を分ける（2026-08-26 実機で判明）。
       #
       #   8/19 に「常駐」と「それ以外」で分けたが、**相談員版とワンタイム版が
