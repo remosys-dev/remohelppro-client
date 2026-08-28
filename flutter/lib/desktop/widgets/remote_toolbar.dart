@@ -1030,31 +1030,18 @@ class _AnnotationMenuState extends State<_AnnotationMenu> {
         //   押しても見た目が変わらないと、相談員は「効かない」と判断して
         //   もう一度押す＝**入れて即座に戻す**ことになる（実際に0.5秒間隔で
         //   2回押された記録が残っていた）。見た目の変化は機能の一部。
-        icon: SizedBox(
-          width: 18,
-          height: 18,
-          child: Center(
-            child: Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: laserMark, width: 2),
-              ),
-              child: laserOn
-                  ? Center(
-                      child: Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: laserMark,
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-          ),
+        // 🔴🔴 **丸をやめる**（2026-08-28 ご指摘）。
+        //
+        //   ⚠ 隣が「描き」なので、丸い絵は **「丸を描く」** としか読めない。
+        //     実機で「まるが描けるかと思った」と言われた。
+        //   ⚠ 前の直しは「見えない」を直すためのものだったが、
+        //     見えるようにした結果、⚠ **別の意味に読める絵**になっていた。
+        //   ★「指し示す」ことが伝わる絵にする。丸は使わない。
+        //     ⚠ 字形の埋め込みに頼らない方針は引き継ぐ（Material の標準の絵）。
+        icon: Icon(
+          laserOn ? Icons.my_location : Icons.near_me_outlined,
+          size: 18,
+          color: laserMark,
         ),
         // ⚠ ここも下のラベルになる。短く、押せば効く名前にする。
         //   （長い説明を入れると隣のボタンと繋がって読めてしまう）
