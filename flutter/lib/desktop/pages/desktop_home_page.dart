@@ -60,6 +60,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   final GlobalKey _childKey = GlobalKey();
   /// 顧客用の画面の中身。窓の高さをこれに合わせる（2026-08-29）。
   final GlobalKey _supportKey = GlobalKey();
+  /// ⚠ 顧客用の窓の高さを見張る。中身は自分で作り直されないので、
+  ///   こちらから見に行く必要がある（build の説明を参照）。
+  Timer? _supportFitTimer;
 
   @override
   Widget build(BuildContext context) {
@@ -243,6 +246,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     //   ⚠ 幅は変えない。お客様が広げた幅を勝手に戻さない。
     if (kRlSupportShowWindow) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitSupportWindow());
+      // 🔴🔴 **繰り返し合わせ直す**（2026-08-29 実機で判明）。
+      //
+      //   ⚠ ご報告「①の大きさのままなので、②くらいに広がるように」。
+      //   ⚠ 正体: ここ（外側）は**画面が作り直されたときにしか動かない**。
+      //     ところが接続後の中身（接続時間の時計・つないでいる相手・
+      //     常駐の案内）は**カードの内部だけを作り直す**ので、
+      //     ⚠ **外側は一度も呼ばれない。** ＝ 最初の小さいまま止まる。
+      //   ★1秒ごとに見に行く。⚠ **大きさが変わっていなければ何もしない**ので、
+      //     繰り返しても負担にならない（下の 4px の判定）。
+      _supportFitTimer ??=
+          Timer.periodic(const Duration(seconds: 1), (_) => _fitSupportWindow());
     }
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
@@ -1111,6 +1125,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
   @override
   void dispose() {
+    // ⚠ 見張りを止める。止めないと窓が閉じたあとも動き続ける。
+    _supportFitTimer?.cancel();
+    _supportFitTimer = null;
     _uniLinksSubscription?.cancel();
     Get.delete<RxBool>(tag: 'stop-service');
     _updateTimer?.cancel();
