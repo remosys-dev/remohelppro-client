@@ -893,6 +893,11 @@ struct FoundWindow {
 }
 
 /// 窓を1つずつ見て、当社のワンタイム版が持っている窓だけを拾う。
+///
+/// 共有識別子OK: 窓の種類（FLUTTER_RUNNER_WIN32_WINDOW）は RustDesk 系の全製品で
+///   共通なので、それだけでは絞れない。窓を持っているプロセスの実行ファイルの隣に
+///   CI が置く目印 `remohelppro-onetime.flag` があることまで確かめて、
+///   当社のワンタイム版だけに絞っている。
 #[cfg(windows)]
 unsafe extern "system" fn enum_onetime_window(
     hwnd: winapi::shared::windef::HWND,
