@@ -15,25 +15,32 @@
 //        いちばん悪い組み合わせになる。お客様のPCを、当社の都合で
 //        **再起動しないと元に戻らない状態**にしてはいけない。
 //
-// ■ どこで効くか（2026-08-29 実測で確定）
+// ■ 誰が変えるか（2026-08-29 実測で確定・ご判断「A案」）
 //   ⚠ この設定は `HKLM` にあり、**管理者でないと書けない**。
-//     ワンタイム（持ち運び版）はログインした人の権限で動くので**書けない**。
+//   ⚠ ここで一度取り違えた。「ワンタイムには管理者権限が無い」と考えたが、
+//     ⚠ **同じアプリの中に、権限の違う部品が2つある。**
+//     画面を出している本体はログインした人の権限、
+//     画面を取り込む部品（`--run-as-system`）は SYSTEM。
+//     ＝ 変えられるのは後者。前者から呼んでいたので一度も成功していなかった。
 //     実機の記録: `変更できませんでした: アクセスが拒否されました。(os error 5)`
-//   ★効くのは**常駐版**（LocalSystem のサービス）。
-//     当社の既存の同種製品も同じ形で、
-//     インストール型のサービスが接続中だけ変えて終了時に戻している。
-//   ⚠ 相談員版では変えない（自社の端末の防御を下げる理由が無い）。
+//
+//   常駐   … サービス（LocalSystem）が、接続のたびに変える（connection.rs）
+//   ワンタイム … 権限のある部品が、動いている間だけ変える（platform/windows.rs）
+//   相談員 … ⚠ **変えない**（自社の端末の守りを下げる理由が無い）
 //
 // ■ 絶対条件：必ず元に戻すこと（ご指示「サポート終了後削除する」）
 //   ⚠ 「終わるときに戻す」だけでは戻らない。アプリが
 //     落ちる／強制終了される／片付けで殺される形を何度も見ている。
-//   ⚠ **常駐は入れっぱなし**なので、起動時の保険が効くのは次の再起動。
-//     それでは遅い。だから見張りを足した。
-//   ★変える**前に**元の値をファイルに残し、戻す道を4本用意する。
-//     ① 誰も繋がっていなくなったとき（正常系）
-//     ② プロセスが終わるとき（shutdown hook）
+//   ⚠ とくにワンタイムは**終わると自分を消す**。
+//     ＝ こちらの実行ファイルを当てにした戻し方は、必ず破綻する。
+//   ★変える**前に**元の値をファイルに残し、戻る道を5本用意する。
+//     ① 誰も繋がっていなくなったとき（正常系・常駐）
+//     ② プロセスが終わるとき（Drop / shutdown hook）
 //     ③ 次に起動したとき、控えが残っていたら戻す（core_main）
 //     ④ 常駐の見張りが、印の時刻が古いのを見つけたとき（restore_if_stale）
+//     ⑤ ⚠ **Windows 自身に置いた予定**（arm_deadman）。
+//        ①〜④が全部死んでも、止まってから30分で必ず戻る。
+//        ⚠ 予定の中身は `reg` だけ。**当社の実行ファイルに依存しない。**
 //   ⚠ 1本に頼らない。1本でも通れば戻る形にする。
 
 #![cfg(windows)]
@@ -141,8 +148,38 @@ pub fn relax_for_session() -> ResultType<()> {
         bail!("UAC の設定を変えられません（{msg}）");
     }
 
+    // 🔴 変えたら、**同じ呼吸で置き土産を置く**（2026-08-29 ご判断「A案」）。
+    //   ⚠ ここを別の場所に離すと、間で落ちたときに
+    //     「変えたのに戻す手立てが無い」という最悪の状態ができる。
+    arm_deadman(&read_backup());
+
     log::info!("RL uac: サポート中の設定にしました（{changed} 件・確認は普通の画面に出ます）");
     Ok(())
+}
+
+/// 控えを読む。⚠ 読み方を1か所に集める（戻す側と置き土産の側で食い違わせない）。
+fn read_backup() -> Vec<(String, Option<u32>)> {
+    let Ok(text) = std::fs::read_to_string(backup_path()) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            let name = name.trim();
+            if !VALUES.contains(&name) {
+                return None;
+            }
+            let value = value.trim();
+            Some((
+                name.to_string(),
+                if value == "none" {
+                    None
+                } else {
+                    value.parse::<u32>().ok()
+                },
+            ))
+        })
+        .collect()
 }
 
 /// 元に戻す。控えが無ければ何もしない（＝触っていない）。
@@ -151,33 +188,23 @@ pub fn restore() -> ResultType<()> {
     if !path.exists() {
         return Ok(());
     }
-    let text = std::fs::read_to_string(&path)?;
     let key = policy_key(true)?;
-    for line in text.lines() {
-        let Some((name, value)) = line.split_once('=') else {
-            continue;
-        };
-        let name = name.trim();
-        if !VALUES.contains(&name) {
-            continue;
-        }
-        let value = value.trim();
-        let r = if value == "none" {
+    for (name, value) in read_backup() {
+        let r = match value {
             // ⚠ 元は「値が無かった」。0 を書き戻すのではなく**消す**。
-            key.delete_value(name).map_err(|e| e.to_string())
-        } else {
-            match value.parse::<u32>() {
-                Ok(v) => key.set_value(name, &v).map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            }
+            None => key.delete_value(&name).map_err(|e| e.to_string()),
+            Some(v) => key.set_value(&name, &v).map_err(|e| e.to_string()),
         };
         match r {
-            Ok(_) => log::info!("RL uac: {name} を元に戻しました（{value}）"),
+            Ok(_) => log::info!("RL uac: {name} を元に戻しました（{value:?}）"),
             Err(e) => log::error!("RL uac: {name} を戻せません: {e}"),
         }
     }
     // ⚠ 戻し終えてから控えを消す。先に消すと、途中で落ちたときに戻せなくなる。
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(heartbeat_path());
+    // ⚠ 置き土産も片付ける。残すと、次のサポート中に割り込んで戻してしまう。
+    disarm_deadman();
     log::info!("RL uac: 元の設定に戻しました");
     Ok(())
 }
@@ -194,6 +221,94 @@ pub fn restore_if_pending() {
     if let Err(e) = restore() {
         log::error!("RL uac: 起動時の戻しに失敗しました: {e}");
     }
+}
+
+/// 万一のときに Windows 自身へ戻させる「置き土産」の名前。
+const DEADMAN_TASK: &str = "REMOHELPPRO_UAC_RESTORE";
+
+/// 元の値へ戻す `reg` の一行を作る。
+///
+/// ⚠ 「値が無かった」ことも表せるようにする。0 を書き戻すのと**意味が違う**。
+fn reg_restore_cmd(values: &[(String, Option<u32>)]) -> String {
+    let key = format!(r"HKLM\{POLICY_KEY}");
+    let mut parts: Vec<String> = values
+        .iter()
+        .map(|(name, v)| match v {
+            Some(v) => format!(
+                "reg add \"{key}\" /v {name} /t REG_DWORD /d {v} /f >nul 2>&1"
+            ),
+            None => format!("reg delete \"{key}\" /v {name} /f >nul 2>&1"),
+        })
+        .collect();
+    // ⚠ 戻したら自分（予定）も消す。残すと、次のサポート中に割り込んで戻してしまう。
+    parts.push(format!("schtasks /delete /tn {DEADMAN_TASK} /f >nul 2>&1"));
+    parts.join(" & ")
+}
+
+/// 🔴🔴 **こちらが消えても、Windows が戻す**（2026-08-29 ご判断「A案」）。
+///
+///   ⚠ ワンタイムは「その場限り」の物なので、⚠ **強制終了されると
+///     戻す人が誰もいなくなる。** お客様のPCの守りを弱めたまま、
+///     当社が二度と触れない——これがいちばん避けたい形だった。
+///
+///   ★Windows の「予定」に、元の値へ戻す命令そのものを置く。
+///     ⚠ **当社の実行ファイルに一切依存しない**（`reg` だけを使う）。
+///       ワンタイムは終わると自分を消すので、自分を呼ぶ予定にすると
+///       ファイルが無くなった時点で戻せなくなる。
+///     ⚠ 元の値は、置くときに分かっているので命令に**焼き込む**。
+///
+///   ★生きている間は、この予定の時刻を先へ押し続ける（下の心臓の鼓動）。
+///     ＝ 止まった瞬間から30分で必ず戻る。長いサポートの途中で
+///       割り込むことはない。
+fn arm_deadman(values: &[(String, Option<u32>)]) {
+    use chrono::{Duration as CDur, Local};
+    let at = Local::now() + CDur::minutes(30);
+    let cmd = reg_restore_cmd(values);
+    // ⚠ 日付も渡す。時刻だけだと日をまたぐときに「今日の過去の時刻」になる。
+    let args = [
+        "/create".to_string(),
+        "/tn".to_string(),
+        DEADMAN_TASK.to_string(),
+        "/sc".to_string(),
+        "once".to_string(),
+        "/sd".to_string(),
+        at.format("%Y/%m/%d").to_string(),
+        "/st".to_string(),
+        at.format("%H:%M").to_string(),
+        "/tr".to_string(),
+        format!("cmd /c {cmd}"),
+        "/ru".to_string(),
+        "SYSTEM".to_string(),
+        "/rl".to_string(),
+        "HIGHEST".to_string(),
+        "/f".to_string(),
+    ];
+    match run_hidden("schtasks", &args) {
+        Ok(true) => log::info!("RL uac: 30分後に元へ戻す予定を置きました"),
+        Ok(false) => log::warn!("RL uac: 戻す予定を置けませんでした（schtasks が失敗）"),
+        Err(e) => log::warn!("RL uac: 戻す予定を置けませんでした: {e}"),
+    }
+}
+
+fn disarm_deadman() {
+    let args = [
+        "/delete".to_string(),
+        "/tn".to_string(),
+        DEADMAN_TASK.to_string(),
+        "/f".to_string(),
+    ];
+    let _ = run_hidden("schtasks", &args);
+}
+
+/// 黒い窓を出さずにコマンドを動かす。
+/// ⚠ お客様の画面に一瞬でも窓を出さない（サポート中に何度も走るため）。
+fn run_hidden(exe: &str, args: &[String]) -> std::io::Result<bool> {
+    use std::os::windows::process::CommandExt;
+    Ok(std::process::Command::new(exe)
+        .args(args)
+        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+        .status()?
+        .success())
 }
 
 /// 「まだサポート中」を書き続ける印。
@@ -256,9 +371,21 @@ impl UacRelaxer {
         let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let flag = alive.clone();
         // ⚠ 生きている間だけ印を新しくし続ける。⚠ **止まれば古くなる**のが要点。
+        //
+        // 🔴 置き土産（Windows の予定）の時刻も、生きている間だけ先へ押す。
+        //   ⚠ 押さないと、長いサポートの**途中で勝手に元へ戻る**。
+        //   ★止まった瞬間から30分で必ず戻る、という形にそろえる。
+        //   ⚠ 押す間隔（10分）は、予定の猶予（30分）より**十分短く**すること。
+        //     近づけると、押す前に予定が走って途中で戻る。
         std::thread::spawn(move || {
+            let mut ticks: u32 = 0;
             while flag.load(std::sync::atomic::Ordering::Relaxed) {
                 touch_heartbeat();
+                // 30秒ごとに回るので、20回＝10分ごとに押し直す。
+                if ticks % 20 == 0 {
+                    arm_deadman(&read_backup());
+                }
+                ticks = ticks.wrapping_add(1);
                 std::thread::sleep(std::time::Duration::from_secs(30));
             }
         });

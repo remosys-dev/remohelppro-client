@@ -271,9 +271,26 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       if (ro is! RenderBox || !ro.hasSize) return;
       // タイトルバーの分。⚠ これを足さないと、足すたびに少しずつ足りなくなる。
       final want = ro.size.height + kDesktopRemoteTabBarHeight + 10;
-      // ⚠ 画面より大きくしない。小さいノートPCで窓が画面からはみ出す。
-      final screen = MediaQuery.of(context).size.height;
-      final h = want.clamp(360.0, screen - 60 < 360 ? 360.0 : screen - 60);
+      // 🔴🔴 **上限は「画面」の高さで取る。窓の高さではない**（2026-08-29 実機で判明）。
+      //
+      //   ⚠ 最初 `MediaQuery.of(context).size.height` を使った。⚠ **これは
+      //     窓の高さ**（パソコンの画面の高さではない）。
+      //   ＝ 窓が小さいと上限も小さくなり、⚠ **窓は永久に広がらない。**
+      //     ご報告「認証コードの画面が下に広がらない」の正体。
+      //   ★実際の画面の大きさを聞く（window_size）。取れなければ広めの既定値。
+      //   ⚠ 取れないときに小さい値へ倒さないこと。倒すと同じ罠に戻る。
+      double screen = 1000;
+      try {
+        final s = (await window_size.getWindowInfo()).screen;
+        if (s != null) {
+          final f = s.visibleFrame;
+          if (f.height > 200) screen = f.height;
+        }
+      } catch (_) {
+        // ⚠ 取れなくても既定値で先へ進む。ここで諦めると窓が広がらない。
+      }
+      final maxH = (screen - 60) < 360.0 ? 360.0 : (screen - 60);
+      final h = want.clamp(360.0, maxH);
       // ⚠ 1px 単位の揺れで呼び直さない。
       if ((h - _supportWindowHeight).abs() < 4) return;
       _supportWindowHeight = h;

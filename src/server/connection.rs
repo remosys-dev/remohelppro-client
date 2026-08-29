@@ -2059,10 +2059,16 @@ impl Connection {
             //     ② プロセスが終わるとき（shutdown hook）
             //     ③ 次に起動したとき、控えが残っていたら戻す（core_main）
             //   ⚠ 常駐は入れっぱなしなので ③ が効くまで長い。だから ① を必ず通す。
-            let allow = !hbb_common::config::IS_OPERATOR_BUILD;
+            //   ⚠ ここで扱うのは**常駐だけ**（2026-08-29）。
+            //     ワンタイムは、権限のある部品（--run-as-system）の側で緩める。
+            //     ⚠ ここは**ログインした人の権限**で動いているので、
+            //       ワンタイムから呼んでも必ず断られる。呼ぶだけ無駄で、
+            //       記録に失敗が並んで本当の失敗が埋もれる。
+            //     詳しくは platform/windows.rs の elevate_or_run_as_system。
+            let allow = hbb_common::config::IS_RESIDENT_BUILD;
             let mut uac = UAC_RELAXER.lock().unwrap();
             if !allow {
-                log::info!("RL uac: 相談員版では設定を変えません");
+                log::info!("RL uac: 常駐版以外は、ここでは設定を変えません");
             } else if uac.is_none() {
                 match crate::rl_uac::UacRelaxer::new() {
                     Ok(r) => *uac = Some(r),

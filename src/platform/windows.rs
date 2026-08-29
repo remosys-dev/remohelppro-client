@@ -2565,7 +2565,40 @@ pub fn elevate_or_run_as_system(is_setup: bool, is_elevate: bool, is_run_as_syst
     if is_root() {
         if is_run_as_system {
             log::info!("run portable service");
+            // 🔴🔴 **UAC を緩めるのは、権限のあるここ**（2026-08-29 ご判断「A案」）。
+            //
+            //   ⚠ 元は接続したときに、画面を出している本体から呼んでいた。
+            //     ところが本体は**ログインした人の権限のまま**動いており、
+            //     `HKLM` を書けない。実機の記録:
+            //       RL uac: 変更できませんでした: アクセスが拒否されました。(os error 5)
+            //     ＝ ⚠ **一度も成功していなかった。**
+            //   ⚠ ご指摘のとおり、ワンタイムにも**管理者の部分はある**。
+            //     ここ（--run-as-system）は SYSTEM で動くので書ける。
+            //     私はアプリ全体を「権限が無い」と取り違えていた。
+            //
+            //   ⚠ 常駐版・相談員版はここを通らない（別の道でサービスを持つ）。
+            //     常駐は connection.rs 側で、接続のたびに緩める。
+            //   ⚠ 戻すのは3本立て:
+            //     ① この部品が終わるとき（下の `_uac` が落ちる）
+            //     ② 次に起動したとき（core_main の restore_if_pending）
+            //     ③ ⚠ **Windows に置いた予定**（rl_uac の置き土産）。
+            //        ①②が全部死んでも、30分で必ず戻る。
+            //        ワンタイムは終わると自分を消すので、③が無いと
+            //        **戻す者が誰も居なくなる**。
+            //   ⚠ 相談員版では触らない（自社の端末の守りを下げる理由が無い）。
+            let _uac = if hbb_common::config::IS_OPERATOR_BUILD {
+                None
+            } else {
+                match crate::rl_uac::UacRelaxer::new() {
+                    Ok(r) => Some(r),
+                    Err(e) => {
+                        log::warn!("RL uac: 変更できませんでした: {e}");
+                        None
+                    }
+                }
+            };
             crate::portable_service::server::run_portable_service();
+            drop(_uac);
         }
     } else {
         match is_elevated(None) {
