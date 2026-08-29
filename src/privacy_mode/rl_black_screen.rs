@@ -152,7 +152,27 @@ fn spawn_window_thread() {
             // ⚠ NOACTIVATE … 出しても入力の焦点を奪わない。奪うと、相談員が
             //   操作している最中に文字が入らなくなる。
             // ⚠ TOOLWINDOW … Alt+Tab の一覧に出さない。
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            //
+            // 🔴🔴 TRANSPARENT … **クリックを素通りさせる**（2026-08-29 実機で判明）。
+            //
+            //   ⚠ ご報告:「プライバシーモードにすると顧客PCは真っ黒になるが、
+            //     相談員はマウスは動くけどクリックができない」。
+            //   ⚠ 正体: この窓は画面いっぱいの**最前面**にある。
+            //     ＝ 相談員のクリックは、下のアプリではなく**この黒い窓が
+            //       受け取っていた**。マウスの矢印は動くので、
+            //       「動くのに押せない」という分かりにくい壊れ方になる。
+            //   ⚠ `NOACTIVATE` は「焦点を奪わない」だけで、
+            //     ⚠ **クリックを通す指定ではない**。ここを取り違えていた。
+            //   ★`WS_EX_TRANSPARENT` を足す。当たり判定から外れ、
+            //     クリックは下のアプリに届く。
+            //   ⚠ `WS_EX_LAYERED` と対で使う。TRANSPARENT だけだと
+            //     描画の扱いが変わり、黒く塗られないことがある。
+            //     下で不透明度を 255（完全に不透明）に設定する。
+            WS_EX_TOPMOST
+                | WS_EX_TOOLWINDOW
+                | WS_EX_NOACTIVATE
+                | WS_EX_LAYERED
+                | WS_EX_TRANSPARENT,
             class.as_ptr(),
             title.as_ptr(),
             WS_POPUP,
@@ -173,6 +193,17 @@ fn spawn_window_thread() {
         // 🔴 これが肝。この窓だけを画面キャプチャから外す。
         //   ⚠ 失敗したら**窓を出してはいけない**。相談員の画面まで真っ黒になり、
         //     何も見えないまま操作することになる（お客様より危ない状態）。
+        // 🔴 完全に不透明にする（2026-08-29）。
+        //   ⚠ `WS_EX_LAYERED` を付けた窓は、不透明度を決めるまで
+        //     **何も描かれない**ことがある。＝ お客様の画面が黒くならない。
+        //   ★255 ＝ 透けない。クリックを通すのは `WS_EX_TRANSPARENT` の役目で、
+        //     見た目の透明度とは**別の話**。ここを混同しないこと。
+        if SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA) == 0 {
+            log::error!("REMOHELP PRO: 黒い窓を不透明にできませんでした。使いません");
+            DestroyWindow(hwnd);
+            return;
+        }
+
         if SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE_) == 0 {
             log::error!(
                 "REMOHELP PRO: 画面キャプチャからの除外に失敗しました。黒い窓は使いません"
