@@ -113,6 +113,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   //     体験のお申し込みでは番号を聞いていないので、null は普通に起きる。
   String? _supportName;
   String? _supportTel;
+  String? _supportOperator; // 担当者名（2026-08-29 ご指示で追加）
 
   // ステータスパネル用（接続済み表示）
   String _enteredCode = ''; // 表示用の接続コード（手入力時）
@@ -466,6 +467,15 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           _supportTel = t;
         }
       }
+      // 担当者名。⚠ 返し方が2つある（verify-pin は入れ子、pair-init は平ら）。
+      //   どちらの経路でも同じ画面を出すので、両方を見る。
+      final op = j['operator'];
+      final opName = op is Map
+          ? (op['name'] as String?)?.trim() ?? ''
+          : (j['operatorName'] as String?)?.trim() ?? '';
+      // ⚠ 「担当者」は名前が無いときの既定値。それを名前として出さない
+      //   （「担当 担当者」という間の抜けた表示になる）。
+      if (opName.isNotEmpty && opName != '担当者') _supportOperator = opName;
     } catch (_) {
       // ⚠ 読めなくても接続は進める。表示のためだけの値なので、
       //   ここで失敗して繋がらなくなる方がはるかに困る。
@@ -1483,9 +1493,22 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                         size: 12, color: Colors.white),
                   ),
                   const SizedBox(width: 9),
-                  const Expanded(
-                    child: Text('REMOHELP PRO ― リモートサポート',
-                        style: TextStyle(
+                  // 🔴 会社が分かっていれば、帯にも社名を出す（2026-08-29 ご指示）。
+                  //   ⚠ お客様が最初に目をやるのはここ。
+                  //     製品名より「どこの会社か」の方が、お客様には意味がある。
+                  //   ⚠ 分かるのは**認証コードを入れた後**。
+                  //     入れる前は今までどおり製品名のまま
+                  //     （全社共通の入口では、他社のお客様に別会社の名前が
+                  //       見えてしまうため。2026-08-18 の決めごと）。
+                  //   ⚠ 長い社名でも崩れないよう、はみ出したら「…」で切る。
+                  Expanded(
+                    child: Text(
+                        _supportName == null
+                            ? 'REMOHELP PRO ― リモートサポート'
+                            : '$_supportName ― リモートサポート',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF374151))),
@@ -1656,18 +1679,20 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     );
   }
 
-  /// 「いま、どこの誰につながっているか」（2026-08-29 ご指摘）。
+  /// いまつながっている会社・電話番号・担当者（2026-08-29 ご指摘）。
   ///
   /// 🔴 これまで画面には「接続済み」としか出ていなかった。
-  ///   ⚠ **お客様には、相手が電話した相手と同じか確かめる方法が無かった。**
+  ///   お客様から見て、相手が誰なのかが分からなかった。
   ///
-  /// 🔴🔴 **電話番号を、社名より目立たせる。**
-  ///   ⚠ 社名は偽物にも真似できる。社名だけを大きく出す形が**いちばん危ない**
-  ///     ――「それらしく見える」だけで、確かめる手立てが増えないため。
-  ///   ★番号があれば、お客様が**ご自分で調べた番号と照合**できる。
-  ///     こちらの主張ではなく、お客様の手元の情報で確かめられるのが要点。
-  ///   ⚠ だから添える一文は「合っていますか」ではなく
-  ///     **「ご自分でお調べになった番号と同じか」**と書く。
+  /// 🔴🔴 **不安を煽る書き方をしない**（2026-08-29 ご指示）。
+  ///   ⚠ 最初は「ご自分でお調べになった番号と同じかご確認ください」
+  ///     「違うときは画面を閉じて…」と添えていた。⚠ **これは逆効果。**
+  ///     ご高齢のお客様に、いま繋がっている相手を疑わせる文になっていた。
+  ///     ＝ 安心させるつもりが、**不安にさせていた**。
+  ///   ★出すのは**事実だけ**。会社名・電話番号・担当者名。
+  ///     判断はお客様に委ねる。こちらから疑い方を教えない。
+  ///   ⚠ 見出し（「つないでいる相手」）も要らない。
+  ///     何が書いてあるかは見れば分かる。言葉が増えるほど読まれなくなる。
   ///
   /// ⚠ 番号が無ければ**何も出さない**（サーバーが null を返す）。
   ///   体験のお申し込みでは番号を聞いていないので、普通に起きる。
@@ -1675,6 +1700,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     final name = _supportName;
     final tel = _supportTel;
     if (name == null || tel == null) return const SizedBox.shrink();
+    final op = _supportOperator;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 12),
@@ -1687,10 +1713,6 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('つないでいる相手',
-              style: TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w600, color: _muted)),
-          const SizedBox(height: 3),
           Text(name,
               style: const TextStyle(
                   fontSize: 14,
@@ -1710,12 +1732,19 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                       letterSpacing: 0.4)),
             ],
           ),
-          const SizedBox(height: 5),
-          const Text(
-            'ご自分でお調べになった番号と同じかどうか、ご確認ください。'
-            '\n違うときは、この画面を閉じてお手元の番号におかけください。',
-            style: TextStyle(fontSize: 11, color: _muted, height: 1.45),
-          ),
+          // ⚠ 担当者名は分かるときだけ出す。
+          //   分からないときに「担当者」とだけ出しても、何も伝わらない。
+          if (op != null) ...[
+            const SizedBox(height: 5),
+            Row(
+              children: [
+                const Icon(Icons.person_outline, size: 16, color: _muted),
+                const SizedBox(width: 6),
+                Text('担当  $op',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF4B5563))),
+              ],
+            ),
+          ],
         ],
       ),
     );
