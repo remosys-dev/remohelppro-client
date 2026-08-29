@@ -18,12 +18,17 @@ md5 = "0.7"
 #   synchapi / handleapi / errhandlingapi は「二重に起動させない」ための名前付き錠に使う
 #   （2026-08-28 ご指摘。落としてきた物を2回開くと2つ動き、接続番号を奪い合っていた）。
 #   ⚠ ビルド用の依存にしか入っていなかったので、本体側にも明示する。
+#   processthreadsapi / winnt は「その窓を持っているのが当社のワンタイム版か」を
+#   確かめるために使う（OpenProcess / QueryFullProcessImageNameW）。
+#   ⚠ 2026-08-29: 窓の種類だけで探して**他製品の窓を前に出していた**ため追加。
 winapi = { version = "0.3", features = [
     "winbase",
     "winuser",
     "synchapi",
     "handleapi",
     "errhandlingapi",
+    "processthreadsapi",
+    "winnt",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

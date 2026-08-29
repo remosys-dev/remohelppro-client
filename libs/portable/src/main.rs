@@ -576,7 +576,7 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
     //   CI が置く目印ファイルの有無で判定すれば、名前を変えても影響しない。
     let is_onetime = path
         .parent()
-        .map(|d| d.join("remohelppro-onetime.flag").exists())
+        .map(|d| d.join(ONETIME_FLAG).exists())
         .unwrap_or(false);
     // run executable
     let mut cmd = Command::new(&path);
@@ -850,6 +850,115 @@ fn acquire_single_instance() -> bool {
     }
 }
 
+/// 目印ファイルの名前。CI がワンタイム版の展開物にだけ同梱する。
+///
+/// ⚠ ここを変えるときは、下の `is_onetime` の判定と**必ず一緒に**変える。
+///   片方だけ変えても、エラーは出ずに静かに効かなくなる。
+#[cfg(windows)]
+const ONETIME_FLAG: &str = "remohelppro-onetime.flag";
+
+/// プロセス番号から、その実行ファイルの場所を得る。
+///
+/// ⚠ 取れないことがある（権限・すでに終了）。取れなければ `None` を返し、
+///   ⚠ **その窓は「当社のものではない」として扱う**（安全側に倒す）。
+#[cfg(windows)]
+fn process_image_path(pid: u32) -> Option<std::path::PathBuf> {
+    use winapi::um::handleapi::CloseHandle;
+    use winapi::um::processthreadsapi::OpenProcess;
+    use winapi::um::winbase::QueryFullProcessImageNameW;
+    use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(h);
+        if ok == 0 || len == 0 {
+            return None;
+        }
+        Some(std::path::PathBuf::from(String::from_utf16_lossy(
+            &buf[..len as usize],
+        )))
+    }
+}
+
+/// `EnumWindows` に渡す入れ物。見つけた窓と、それが見えているかを持ち帰る。
+#[cfg(windows)]
+struct FoundWindow {
+    hwnd: winapi::shared::windef::HWND,
+    visible: bool,
+}
+
+/// 窓を1つずつ見て、当社のワンタイム版が持っている窓だけを拾う。
+#[cfg(windows)]
+unsafe extern "system" fn enum_onetime_window(
+    hwnd: winapi::shared::windef::HWND,
+    lparam: winapi::shared::minwindef::LPARAM,
+) -> winapi::shared::minwindef::BOOL {
+    use winapi::um::winuser::{GetClassNameW, GetWindowThreadProcessId, IsWindowVisible};
+    let mut cls = [0u16; 128];
+    let n = GetClassNameW(hwnd, cls.as_mut_ptr(), cls.len() as i32);
+    if n <= 0 {
+        return 1;
+    }
+    if String::from_utf16_lossy(&cls[..n as usize]) != "FLUTTER_RUNNER_WIN32_WINDOW" {
+        return 1;
+    }
+    let mut pid: u32 = 0;
+    GetWindowThreadProcessId(hwnd, &mut pid);
+    if pid == 0 {
+        return 1;
+    }
+    // ★ここが要。窓の種類ではなく「誰が持っているか」で見分ける。
+    let is_ours = match process_image_path(pid) {
+        Some(exe) => match exe.parent() {
+            Some(dir) => dir.join(ONETIME_FLAG).exists(),
+            None => false,
+        },
+        None => false,
+    };
+    if !is_ours {
+        return 1;
+    }
+    let out = &mut *(lparam as *mut FoundWindow);
+    let visible = IsWindowVisible(hwnd) != 0;
+    // 見えている窓を優先する。最小化・隠してある窓しか無いときは、それを使う。
+    if out.hwnd.is_null() || (visible && !out.visible) {
+        out.hwnd = hwnd;
+        out.visible = visible;
+    }
+    // 見えている窓が見つかったら、そこで打ち切る。
+    if out.visible {
+        return 0;
+    }
+    1
+}
+
+/// 先に動いている「当社ワンタイム版」の窓を探す。無ければ null。
+///
+/// ⚠ 見つからないときは **何も前に出さない**。
+///   ここで種類だけの検索に戻すと、また他製品の窓を掴む。
+///   窓が出せなくても、案内の文言が「タスクバーをご確認ください」と伝える。
+/// ⚠ 継続用（keep_mode）のビルドには目印を置いていないので、ここでは見つからない。
+///   継続用は配布から外してあるため、いまは実害なし。配布を戻すときは要検討。
+#[cfg(windows)]
+fn find_onetime_window() -> winapi::shared::windef::HWND {
+    let mut found = FoundWindow {
+        hwnd: std::ptr::null_mut(),
+        visible: false,
+    };
+    unsafe {
+        winapi::um::winuser::EnumWindows(
+            Some(enum_onetime_window),
+            &mut found as *mut FoundWindow as winapi::shared::minwindef::LPARAM,
+        );
+    }
+    found.hwnd
+}
+
 /// すでに動いていることを、お客様に伝える。
 ///
 /// ⚠ 黙って終わらない。何も起きないと「壊れている」と思われ、
@@ -865,9 +974,19 @@ fn notify_already_running() {
             .collect()
     }
     unsafe {
-        // 先に動いている窓を前面に出す（Flutter の窓の種類で探す）。
-        let cls = wide("FLUTTER_RUNNER_WIN32_WINDOW");
-        let hwnd = winapi::um::winuser::FindWindowW(cls.as_ptr(), std::ptr::null());
+        // 先に動いている窓を前面に出す。
+        //
+        // 🔴 2026-08-29 修正: ここは種類だけで探していた。
+        //   `FindWindowW("FLUTTER_RUNNER_WIN32_WINDOW", NULL)`
+        //   ⚠ この窓の種類は **RustDesk 系（Flutter）の全製品で同じ**。
+        //     実機で数えたところ RemosysLink の窓が同じ種類で並んでいた。
+        //   ＝ 種類だけで探すと ⚠ **まったく別の製品の窓を前に出す**。
+        //     お客様には「これが REMOHELP PRO です」と見えるため、
+        //     別のアプリを操作させることになる（2026-08-29 実機で発生）。
+        //   ★窓を持っているプロセスの実行ファイルの隣に、CI が置く目印
+        //     `remohelppro-onetime.flag` があるかどうかで確かめる。
+        //     ＝ 実行ファイルの名前を変えても、他製品と取り違えない。
+        let hwnd = find_onetime_window();
         if !hwnd.is_null() {
             winapi::um::winuser::ShowWindow(hwnd, winapi::um::winuser::SW_RESTORE);
             winapi::um::winuser::SetForegroundWindow(hwnd);
