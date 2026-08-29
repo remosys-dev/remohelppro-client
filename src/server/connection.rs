@@ -153,7 +153,6 @@ lazy_static::lazy_static! {
 //     片方だけ直して、もう片方が戻らない、という形を作らない。
 #[cfg(windows)]
 lazy_static::lazy_static! {
-    static ref UAC_RELAXER: Arc<Mutex<Option<crate::rl_uac::UacRelaxer>>> = Default::default();
 }
 pub static CLICK_TIME: AtomicI64 = AtomicI64::new(0);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2028,54 +2027,19 @@ impl Connection {
                 }
             }
         }
-        // 🔴 管理者の確認を、相談員から見える形にする（2026-08-28 ご判断）。
+        // 🔴🔴 UAC は**ここでは触らない**（2026-08-29 ご指示で作り直し）。
         //
-        //   ⚠ 遠隔で困るのは UAC そのものではなく、確認が**暗くなる画面**に
-        //     出ること。あそこは相談員の画面に映らず、押すこともできない。
-        //   ⚠ `EnableLUA` は触らない（再起動しないと効かず、戻すのにも要る）。
-        //   ★戻すのは2本立て: 誰も繋がっていなくなったときと、次の起動時。
-        #[cfg(windows)]
-        {
-            // 🔴🔴 **常駐版で行う**（2026-08-29 ご指示「常駐にする。しかし
-            //   サポート終了後削除する」）。
-            //
-            //   ⚠ 前は「ワンタイムだけ」にしていた。⚠ **これは効かない場所だった。**
-            //     UAC の設定は `HKLM\...\Policies\System` にあり、
-            //     ⚠ **管理者でないと書けない。** ワンタイムは持ち運び版で、
-            //     ログインした人の権限のまま動く。実機の記録:
-            //       RL uac: 変更できませんでした: アクセスが拒否されました。(os error 5)
-            //     ＝ 一度も成功していなかった。
-            //   ★常駐は LocalSystem のサービスとして動くので書ける。
-            //     ⚠ 当社の既存の同種製品も同じ形で、
-            //       インストール型のサービスが接続中だけ変えて、終了時に戻している。
-            //
-            //   ⚠ 相談員版では**変えない**。相談員のPCの防御を下げる理由が無い
-            //     （「自分の画面を見せる」ときに被操作になるが、そこは自社の端末）。
-            //   ⚠ ワンタイムでも呼ぶだけは呼ぶ。管理者として動いている場合は
-            //     効くし、効かなければ何も変えずに終わる（控えも残さない）。
-            //
-            //   ★戻すのは3本立て。⚠ **1本に頼らない**（今日だけでも落ちる形を何度も見た）。
-            //     ① 誰も繋がっていなくなったとき（正常系）
-            //     ② プロセスが終わるとき（shutdown hook）
-            //     ③ 次に起動したとき、控えが残っていたら戻す（core_main）
-            //   ⚠ 常駐は入れっぱなしなので ③ が効くまで長い。だから ① を必ず通す。
-            //   ⚠ ここで扱うのは**常駐だけ**（2026-08-29）。
-            //     ワンタイムは、権限のある部品（--run-as-system）の側で緩める。
-            //     ⚠ ここは**ログインした人の権限**で動いているので、
-            //       ワンタイムから呼んでも必ず断られる。呼ぶだけ無駄で、
-            //       記録に失敗が並んで本当の失敗が埋もれる。
-            //     詳しくは platform/windows.rs の elevate_or_run_as_system。
-            let allow = hbb_common::config::IS_RESIDENT_BUILD;
-            let mut uac = UAC_RELAXER.lock().unwrap();
-            if !allow {
-                log::info!("RL uac: 常駐版以外は、ここでは設定を変えません");
-            } else if uac.is_none() {
-                match crate::rl_uac::UacRelaxer::new() {
-                    Ok(r) => *uac = Some(r),
-                    Err(e) => log::warn!("RL uac: 変更できませんでした: {e}"),
-                }
-            }
-        }
+        //   ご指示「常駐はUAC完全解除、ワンタイムは解除後終了時に戻す」。
+        //     常駐       … サービスが立ち上がったときに**切ったままにする**
+        //                  （core_main の `--service` → rl_uac::disable_permanently）
+        //     ワンタイム … 権限のある部品（`--run-as-system`）が緩めて、
+        //                  終わったら戻す（platform/windows.rs）
+        //   ⚠ どちらも**接続のたび**ではなくなった。ここに残すと二重に動く。
+        //
+        //   ⚠ 1.4.61 は、ここで接続のたびに常駐を緩めていた。その版では
+        //     戻す道が4本しかなく、⚠ **ディスクが満杯だと1本も働かない。**
+        //     実機で「切ったまま戻っていない」状態を作った（2026-08-29）。
+        //     ＝ 接続のたびに触る形そのものをやめる。
     }
 
     fn peer_keyboard_enabled(&self) -> bool {
@@ -6016,10 +5980,6 @@ extern "C" fn connection_shutdown_hook() {
     {
         *WALLPAPER_REMOVER.lock().unwrap() = None;
     }
-    #[cfg(windows)]
-    {
-        *UAC_RELAXER.lock().unwrap() = None;
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -6314,10 +6274,6 @@ mod raii {
                     *WALLPAPER_REMOVER.lock().unwrap() = None;
                 }
                 // ⚠ 壁紙と一緒に戻す。落ちた場合の保険は起動時の restore_if_pending。
-                #[cfg(windows)]
-                {
-                    *UAC_RELAXER.lock().unwrap() = None;
-                }
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 display_service::restore_resolutions();
                 #[cfg(windows)]
