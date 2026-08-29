@@ -58,6 +58,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   final RxBool _block = false.obs;
 
   final GlobalKey _childKey = GlobalKey();
+  /// 顧客用の画面の中身。窓の高さをこれに合わせる（2026-08-29）。
+  final GlobalKey _supportKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +224,26 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         ],
       ),
     );
+    // 🔴🔴 窓の高さを中身に合わせる（2026-08-29 ご指摘）。
+    //
+    //   ⚠ ご報告:「④ の部分の余白がない。上と下に余白を合わして入れてほしい」。
+    //   ⚠ 正体は余白の設定ではない。**窓が中身より短く、下が切れていた**。
+    //     カードには上下 16px の余白が付いているのに、下の余白ごと
+    //     窓の外へ出ていたので「余白が無い」ように見えていた。
+    //     ＝ 余白を足しても、切れる位置が変わるだけで直らない。
+    //   ⚠ さらに、下にある「オンライン状態」と「このアプリについて」も
+    //     見えていなかった。**AGPL の表示が読めない**のは、そのままにできない。
+    //
+    //   ⚠ 起きた理由: 顧客用の画面だけ、窓の大きさを測る仕組みを通っていなかった
+    //     （通常のホームは _childKey で測って合わせている）。
+    //     ＝ 中身を足すたびに、黙って下が切れていく作りだった。
+    //
+    //   ★中身の高さを測って、窓をそれに合わせる。
+    //   ⚠ 画面より大きくしない（小さい画面のPCで窓が画面外へ出る）。
+    //   ⚠ 幅は変えない。お客様が広げた幅を勝手に戻さない。
+    if (kRlSupportShowWindow) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fitSupportWindow());
+    }
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
       child: Container(
@@ -230,11 +252,37 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
-            children: [content],
+            children: [KeyedSubtree(key: _supportKey, child: content)],
           ),
         ),
       ),
     );
+  }
+
+  /// 顧客用の窓を、中身がちょうど収まる高さにする。
+  ///
+  /// ⚠ 何度も呼ばれる（画面が描き変わるたび）。**変わったときだけ**動かす。
+  ///   毎回 setSize を呼ぶと、窓がわずかに震え続ける。
+  /// ⚠ 高さだけ。幅はお客様が変えたものを尊重する。
+  double _supportWindowHeight = 0;
+  Future<void> _fitSupportWindow() async {
+    try {
+      final ro = _supportKey.currentContext?.findRenderObject();
+      if (ro is! RenderBox || !ro.hasSize) return;
+      // タイトルバーの分。⚠ これを足さないと、足すたびに少しずつ足りなくなる。
+      final want = ro.size.height + kDesktopRemoteTabBarHeight + 10;
+      // ⚠ 画面より大きくしない。小さいノートPCで窓が画面からはみ出す。
+      final screen = MediaQuery.of(context).size.height;
+      final h = want.clamp(360.0, screen - 60 < 360 ? 360.0 : screen - 60);
+      // ⚠ 1px 単位の揺れで呼び直さない。
+      if ((h - _supportWindowHeight).abs() < 4) return;
+      _supportWindowHeight = h;
+      final cur = await windowManager.getSize();
+      await windowManager.setSize(Size(cur.width, h));
+    } catch (e) {
+      // ⚠ 大きさを変えられなくても、画面そのものは出す。
+      debugPrint('RL: 顧客用の窓の高さを合わせられませんでした: $e');
+    }
   }
 
   Widget _buildBlock({required Widget child}) {
