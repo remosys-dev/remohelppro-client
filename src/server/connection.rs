@@ -4848,6 +4848,37 @@ impl Connection {
         let data = ipc::Data::Close;
         self.tx_to_cm.send(data).ok();
         self.port_forward_socket.take();
+
+        // 🔴🔴 「自分の画面を見せる」が**ただ切れた**ときも、ビュアーを戻す
+        //   （2026-08-30 ご指摘）。
+        //
+        //   ⚠ 実機の記録:
+        //     12:04:58 入れ替えを依頼 → 12:07:44 接続が**ただ切れた**
+        //     → ⚠ **自動で戻らず**、12:09:15 に相談員が手で「もう一度開く」
+        //   ⚠ 正しく「見せるのをやめる」を押した場合（reason="switch sides"）は、
+        //     その処理の中で既に自分を起動しているので、ここでは何もしない。
+        //   ＝ ⚠ **押せなかったとき・お客様側で切れたとき**の帰り道がこれ。
+        //
+        //   ⚠ 二重に起動しないこと。reason で見分ける（"switch sides" は除く）。
+        //   ⚠ 失敗しても握りつぶさない。記録に残す（空白だと何も分からなくなる）。
+        #[cfg(feature = "flutter")]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        //   ⚠ **相談員版だけ**。お客様のPCで勝手にビュアーが開いては困る
+        //     （お客様は「操作する側」になる道具を持っていない）。
+        if hbb_common::config::IS_OPERATOR_BUILD
+            && self.from_switch
+            && reason != "switch sides"
+        {
+            let peer = self.lr.my_id.clone();
+            log::info!("switch sides: 入れ替えの接続が切れた（{reason}）。ビュアーを戻します peer={peer}");
+            match crate::run_me(vec!["--connect", &peer]) {
+                Ok(child) => log::info!("switch sides: ビュアーを戻した (pid={})", child.id()),
+                Err(e) => log::error!(
+                    "switch sides: ビュアーを戻せなかった: {e}. \
+                     相談員はコンソールの「もう一度開く」を押す必要がある"
+                ),
+            }
+        }
     }
 
     // The `reason` should be consistent with `check_if_retry` if not empty

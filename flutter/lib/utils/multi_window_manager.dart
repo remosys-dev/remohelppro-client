@@ -171,9 +171,24 @@ class RustDeskMultiWindowManager {
         overrideType: type,
       ));
     }
-    if (isMacOS) {
-      Future.microtask(() => windowController.show());
-    }
+    // 🔴🔴 窓を**必ず前に出す**（2026-08-30 ご指摘）。
+    //
+    //   ⚠ 元は `if (isMacOS)` だけだった。＝ Windows では窓を作るだけで、
+    //     見せる処理をしていなかった。
+    //   ⚠ Windows は、前面に居ないプログラムが窓を出そうとすると
+    //     **前面化を拒否してタスクバーを点滅させるだけ**にする。
+    //     相談員はブラウザ（コンソール）を見ているので必ずこれに当たる。
+    //   ＝ ご報告「もう一度開く で戻っても全画面にならずタスクバーに隠れる。
+    //     アイコンを押さないと見えない」の正体。
+    //   ★作ったら見せる。見せたら前に出す。Mac だけの話ではない。
+    Future.microtask(() async {
+      try {
+        await windowController.show();
+        await windowController.focus();
+      } catch (e) {
+        debugPrint('接続の窓を前に出せませんでした: $e');
+      }
+    });
     registerActiveWindow(windowId);
     windows.add(windowId);
     return windowId;
@@ -194,7 +209,20 @@ class RustDeskMultiWindowManager {
             type, remoteId, msg, windows, screenRect != null);
         return MultiWindowCallResult(windowId, null);
       } else {
-        return call(type, methodName, msg);
+        final res = await call(type, methodName, msg);
+        // 🔴 既にある窓に足したときも**前に出す**（2026-08-30）。
+        //   ⚠ 新しく作るときだけ前に出しても、2回目以降は
+        //     タスクバーで点滅するだけになる。同じ症状が残る。
+        for (final windowId in windows) {
+          try {
+            final c = WindowController.fromWindowId(windowId);
+            await c.show();
+            await c.focus();
+          } catch (e) {
+            debugPrint('接続の窓を前に出せませんでした($windowId): $e');
+          }
+        }
+        return res;
       }
     } else {
       if (_inactiveWindows.isNotEmpty) {
