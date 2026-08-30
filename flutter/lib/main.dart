@@ -521,6 +521,21 @@ Future<void> forceShowCmWindow() async {
 }
 
 hideCmWindow({bool isStartup = false}) async {
+  // 🔴 **誰が隠したのか**を必ず残す（2026-08-30）。
+  //   ⚠ 呼ぶ側を1つずつ塞いできたが、3回とも直らなかった。
+  //     ＝ 塞いだ所とは**別の呼び出し**が効いている可能性がある。
+  //     呼び出し元をそのまま記録に残せば、次の1回で確定する。
+  try {
+    rlTrace('cm_hide', {
+      'startup': isStartup,
+      'from': StackTrace.current
+          .toString()
+          .split('\n')
+          .skip(1)
+          .take(3)
+          .join(' | '),
+    });
+  } catch (_) {}
   if (isStartup) {
     WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
         size: kConnectionManagerWindowSizeClosedChat);
