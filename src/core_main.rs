@@ -27,6 +27,63 @@ macro_rules! my_println{
 /// [Note]
 /// If it returns [`None`], then the process will terminate, and flutter gui will not be started.
 /// If it returns [`Some`], then the process will continue, and flutter gui will be started.
+/// ★★ 戻すときはここを `false` にする（2026-08-30 ご指示「戻せるようにも準備して」）。
+///
+/// `true`  … ワンタイム版の設定を `C:\Users\Public\Documents\...` に置く。
+///           一時サービス（LocalSystem）と**同じ場所**を見るので、
+///           身分を写す処理が要らなくなる。
+/// `false` … これまでどおり `%APPDATA%`。写して渡す形に戻る。
+///
+/// ⚠ この1つを変えるだけで完全に元へ戻る。他の場所は触らなくてよい。
+#[cfg(windows)]
+const RL_PUBLIC_CONFIG: bool = true;
+
+/// ワンタイム版のときだけ、設定の置き場所を差し替える。
+///
+/// ⚠ 判定は **CI が同梱する目印ファイル**で行う（実行ファイルの隣）。
+///   名前で判定すると、名前を変えた瞬間に静かに壊れる（過去に実際に壊れた）。
+///   一時サービスの複製にも目印は一緒に写るので、サービス側も同じ場所を見る。
+/// ⚠ 消すときの安全確認（`rl_remove_onetime_data`）は「消す場所にアプリ名が
+///   入っているか」を見るので、**置き場所にもアプリ名を入れる**。
+///   入れ忘れると、⚠ **合言葉入りのファイルがお客様のPCに残り続ける。**
+#[cfg(windows)]
+fn rl_apply_public_config() {
+    if !RL_PUBLIC_CONFIG {
+        return;
+    }
+    // ⚠ 常駐版・相談員版では**絶対にやらない**。呼ぶ側の条件だけに頼らない。
+    if config::IS_RESIDENT_BUILD || config::IS_OPERATOR_BUILD {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    // 共有識別子OK: 名前ではなく、CI が置く目印ファイルの有無で当社の
+    //   ワンタイム版だけに絞っている。他製品の実行ファイルの隣には存在しない。
+    if !dir.join("remohelppro-onetime.flag").exists() {
+        return;
+    }
+    let public = std::env::var("PUBLIC").unwrap_or_else(|_| "C:\\Users\\Public".to_string());
+    let name = config::APP_NAME.read().unwrap().clone();
+    let base = std::path::PathBuf::from(public)
+        .join("Documents")
+        .join("REMOHELP PRO")
+        .join(&name)
+        .join("config");
+    if let Err(e) = std::fs::create_dir_all(&base) {
+        // ⚠ 作れないなら**何もしない**（従来どおり %APPDATA% を使う）。
+        //   中途半端に指定して、書けない場所を見に行かせない。
+        log::warn!("RL: 共有の設定置き場を作れません {}: {e}", base.display());
+        return;
+    }
+    let s = base.to_string_lossy().to_string();
+    log::info!("RL: 設定の置き場所を共有にしました {s}");
+    *config::SHARED_CONFIG_DIR.write().unwrap() = s;
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
     // 🔴 前回のサポートで戻せていない設定があれば、**まずここで戻す**（2026-08-28）。
@@ -54,6 +111,22 @@ pub fn core_main() -> Option<Vec<String>> {
             *config::APP_DIR.write().unwrap() = d;
         }
     }
+    // 🔴🔴 ワンタイム版の設定を「全員が読める場所」へ置く（2026-08-30 ご判断）。
+    //
+    //   ⚠ なぜ要るか: 一時サービスは LocalSystem で動くので、
+    //     `%APPDATA%` を**一度も読めない**。そのため設定を写して渡していたが、
+    //     写しそこねると「サービスは動くのに永久に見つからない」という
+    //     最も分かりにくい壊れ方をする（実機で複数回発生）。
+    //     同じ場所を見せれば、写す処理そのものが要らなくなる。
+    //
+    //   ⚠ 危険は小さい（ご指摘のとおり）: 実行ファイルは数分で自分を消し、
+    //     中身は「そのPCに繋ぐための番号と合言葉」だけ。読める人は既にその
+    //     PCの前に座っている。⚠ **常駐版・相談員版では絶対に使わない。**
+    //
+    //   ★戻し方: 下の `RL_PUBLIC_CONFIG` を false にするだけ（2026-08-30 ご指示）。
+    //     戻すと、これまでどおり `%APPDATA%` を使い、写す処理が復活する。
+    #[cfg(windows)]
+    rl_apply_public_config();
     // ログオン前の再接続（一時サービス）として動く場合（2026-08-01）。
     //   サービスに環境変数は渡らないので、**実行ファイルの隣の目印**で判断する。
     //   目印があるときだけ、設定とIDをその場所に固定する。

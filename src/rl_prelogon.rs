@@ -59,8 +59,95 @@ pub const PRELOGON_EXE_NAME: &str = "remohelppro-prelogon.exe";
 
 /// 置き場所。サービスは SYSTEM で動くので、利用者ごとの場所は使えない。
 pub fn svc_dir() -> PathBuf {
+    svc_root().join("current")
+}
+
+/// 置き場所の親。⚠ ここに `current` と、消せなかったときの逃がし先が並ぶ。
+fn svc_root() -> PathBuf {
     let base = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
     PathBuf::from(base).join("REMOHELP PRO").join("prelogon")
+}
+
+/// 前の一時サービスの**残ったプロセス**を片付ける。
+///
+/// 🔴🔴 2026-08-30 実機で確定した失敗の直接の原因。
+///   `sc delete` は登録を消すだけで、⚠ **動いているプロセスは残る。**
+///   実機では前夜に作った `remohelppro-prelogon.exe` が **4本**生きていた。
+///   掴まれている間は実行ファイルを消せず、作り直しが
+///   `前の複製を消せませんでした` で止まっていた。
+///   ⚠ しかも残った古い版は**同じ接続番号を名乗る**ので、
+///     放置すると新しい方と奪い合いになる。
+///
+/// 共有識別子OK: プロセス名では見分けない。RustDesk 系は当社だけで5製品あり、
+///   名前も表示名も重なる。⚠ **実行ファイルが当社の一時サービスの置き場所の
+///   下にあるかどうか**だけで絞るので、他製品を巻き込まない。
+///   （自分自身は、まだこの下では動いていないので当たらない）
+fn kill_leftover_prelogon() {
+    use hbb_common::sysinfo::System;
+    let root = svc_root();
+    let my_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let mut killed = 0usize;
+    for (pid, p) in sys.processes().iter() {
+        if *pid == my_pid {
+            continue;
+        }
+        if !p.exe().starts_with(&root) {
+            continue;
+        }
+        if p.kill() {
+            killed += 1;
+        } else {
+            log::warn!("RL prelogon: 残っていた {:?} を止められません", p.exe());
+        }
+    }
+    if killed > 0 {
+        log::info!("RL prelogon: 残っていた前の複製を {killed} 個止めました");
+        // 掴みが外れるまでの猶予。止めた直後はまだ開いていることがある。
+        std::thread::sleep(Duration::from_millis(1500));
+    }
+}
+
+/// 置き場所を用意する。⚠ **消せなくても止まらない。**
+///
+/// 🔴 これまでは、消せなければ `bail!` していた（2026-08-30 実機で発生）。
+///   ⚠ 消せない理由は「誰かが掴んでいる」だけなので、
+///     **別の場所に作れば済む**。止める理由にはならない。
+///   ★片付けは best-effort。作れることを優先する。
+fn prepare_dst() -> ResultType<PathBuf> {
+    let root = svc_root();
+    std::fs::create_dir_all(&root)?;
+
+    // 使い終わった古い置き場所を、掃除できる分だけ掃除する（失敗は無視）。
+    //   ⚠ 1.4.83 以前は root の直下に実行ファイルを置いていた。その残骸も拾う。
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                let _ = std::fs::remove_dir_all(&p);
+            } else {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+
+    let first = svc_dir();
+    if !first.exists() {
+        return Ok(first);
+    }
+    // 消えなかった。⚠ **同じ場所を奪い合わない。**新しい名前で作る。
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let alt = root.join(format!("s{stamp}"));
+    let _ = std::fs::remove_dir_all(&alt);
+    log::warn!(
+        "RL prelogon: 前の置き場所を消せなかったので、別の場所を使います {}",
+        alt.display()
+    );
+    Ok(alt)
 }
 
 /// 目印。これがあるときだけ、その実行ファイルは「一時サービス」として振る舞う。
@@ -221,31 +308,12 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
     //     中途半端に作ると、繋がらない理由がどこにも出ない形になる。
     let _ = remove_service_only();
     wait_service_gone(Duration::from_secs(20));
+    // 🔴 登録を消しても**プロセスは残る**。残っていると実行ファイルを掴んだままで、
+    //   さらに古い版が同じ接続番号を名乗って新しい方と奪い合う（2026-08-30 実機）。
+    kill_leftover_prelogon();
 
-    let dst = svc_dir();
-    if dst.exists() {
-        // ⚠ 一度で消えないことがある（掴んでいる相手が終わりきっていない）。
-        //   少し待って数回試す。それでも駄目なら諦めて**止まる**。
-        let mut last_err = None;
-        for _ in 0..10 {
-            match std::fs::remove_dir_all(&dst) {
-                Ok(_) => {
-                    last_err = None;
-                    break;
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-            }
-        }
-        if let Some(e) = last_err {
-            bail!(
-                "前の複製を消せませんでした（{}）: {e}。古いまま作ると必ず繋がりません",
-                dst.display()
-            );
-        }
-    }
+    // ⚠ 消せなくても止まらない。別の場所に作って先へ進む。
+    let dst = prepare_dst()?;
     std::fs::create_dir_all(&dst)?;
     copy_dir(src_dir, &dst)?;
 
@@ -319,7 +387,22 @@ pub fn install(src_dir: &Path, short_id: &str, hard_limit: u64) -> ResultType<()
     //       「パスワードが間違っています」になる（実機で確認済み）。
     //   ★写せなければ、サービスを作っても**必ず繋がらない**。
     //     作ってから気づく形にせず、ここで止めて跡を消す。
-    if let Err(e) = copy_identity_to_service_config() {
+    //
+    //   🔴 2026-08-30: 設定を**全員が読める場所**に置く形にしたときは、
+    //     写す必要が無い（サービスも同じ場所を読む）。写すと、消し忘れた分だけ
+    //     合言葉入りのファイルがお客様のPCに残る。
+    //     ⚠ 戻したとき（RL_PUBLIC_CONFIG=false）は、ここが自動で復活する。
+    let shared = Config::path("");
+    let is_shared = !hbb_common::config::SHARED_CONFIG_DIR
+        .read()
+        .unwrap()
+        .is_empty();
+    if is_shared {
+        log::info!(
+            "RL prelogon: 設定は共有の場所なので写しません（{}）",
+            shared.display()
+        );
+    } else if let Err(e) = copy_identity_to_service_config() {
         let _ = std::fs::remove_dir_all(&dst);
         bail!("身分を渡せませんでした: {e}");
     }
@@ -413,7 +496,14 @@ fn wait_service_gone(limit: Duration) {
 ///   その書き方を知らないため**何もせず終わる**。必ず `raw_arg` を使う。
 pub fn self_remove_and_exit() -> ! {
     log::info!("RL prelogon: removing myself");
-    let dir = svc_dir();
+    // 🔴 **自分がいる場所**を消す（2026-08-30）。
+    //   ⚠ 置き場所は既定の1つとは限らない。前の複製が消せなかったときは
+    //     別の名前で作る。`svc_dir()` を決め打ちで消すと、
+    //     ⚠ **自分は残り、関係のない場所を消しにいく。**
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(svc_dir);
     let d = dir.to_string_lossy().to_string();
     // 🔴🔴 **写した身分も一緒に消す**（2026-08-28 ご指摘「サポート終了後は削除が必要」）。
     //

@@ -109,6 +109,20 @@ lazy_static::lazy_static! {
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("rd.remohelppro.jp".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
     pub static ref APP_NAME: RwLock<String> = RwLock::new("remohelppro".to_owned());
+    /// 設定の置き場所を、利用者ごとの場所ではなく**全員が読める場所**に差し替える。
+    ///
+    /// 🔴🔴 2026-08-30 ご判断。ワンタイム版だけで使う。
+    ///
+    ///   ⚠ `Config::path()` は Windows では `%APPDATA%\<APP_NAME>` を返し、
+    ///     SYSTEM のときだけ `patch()` が `ServiceProfiles\LocalService` に
+    ///     差し替える。＝ ⚠ **利用者のアプリとサービスが違う場所を見る。**
+    ///   ⚠ そのため一時サービスへは設定を**写して**渡していたが、
+    ///     写しそこねると「サービスは動くのに永久に見つからない」という
+    ///     最も分かりにくい壊れ方をする（実機で複数回発生）。
+    ///   ★ここが空でなければ、その場所を使う。＝ 写す必要が無くなる。
+    ///
+    /// ⚠ 空のときは**これまでどおり**。常駐版・相談員版は空のまま。
+    pub static ref SHARED_CONFIG_DIR: RwLock<String> = Default::default();
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -836,6 +850,19 @@ impl Config {
             let mut path: PathBuf = APP_DIR.read().unwrap().clone().into();
             path.push(p);
             return path;
+        }
+        // 🔴 全員が読める場所を指定されていれば、そちらを使う（2026-08-30）。
+        //   ⚠ ここを通るのはワンタイム版だけ。指定が無ければ従来どおり。
+        //   ⚠ `patch()` は通さない。SYSTEM でも同じ場所を見せるのが目的なので、
+        //     ServiceProfiles へ差し替えられては意味がない。
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            let shared = SHARED_CONFIG_DIR.read().unwrap().clone();
+            if !shared.is_empty() {
+                let mut path = PathBuf::from(shared);
+                path.push(p.as_ref());
+                return path;
+            }
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
