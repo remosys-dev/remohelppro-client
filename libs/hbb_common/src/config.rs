@@ -123,6 +123,14 @@ lazy_static::lazy_static! {
     ///
     /// ⚠ 空のときは**これまでどおり**。常駐版・相談員版は空のまま。
     pub static ref SHARED_CONFIG_DIR: RwLock<String> = Default::default();
+    /// 通信路の名前に足す言葉。**同じ製品の別の一式**を分けるために使う。
+    ///
+    /// 🔴 空でなければ `ipc_app_namespace()` の末尾に付く。
+    ///   ⚠ ログオン前の一時サービス（複製）だけが使う。本体は空のまま。
+    ///   ⚠ **その一式のすべてのプロセスで同じ値になること。**
+    ///     片方だけ違うと、子が親を見つけられず黙って動かなくなる。
+    ///     ＝ 判定は「実行ファイルの隣の目印」で行う（環境変数は昇格で消える）。
+    pub static ref IPC_NAMESPACE_SUFFIX: RwLock<String> = Default::default();
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -235,12 +243,32 @@ pub const NO_UPSTREAM_API_SERVER: bool = true;
 #[inline]
 pub fn ipc_app_namespace() -> String {
     let app_name = APP_NAME.read().unwrap().clone();
-    if IS_RESIDENT_BUILD {
+    let base = if IS_RESIDENT_BUILD {
         app_name
     } else if IS_OPERATOR_BUILD {
         format!("{app_name}-op")
     } else {
         format!("{app_name}-once")
+    };
+    // 🔴🔴 同じ製品の**別の一式**も、通信路を分ける（2026-08-30 実機で確定）。
+    //
+    //   ⚠ ログオン前の一時サービスは、アプリ一式を丸ごと複製した物。
+    //     アプリ名が同じなので、ここまでは**本体とまったく同じ名前**になっていた。
+    //   ＝ 先に立った方が通信路を握り、もう一方の子プロセスがそこへ入ろうとして
+    //     実行ファイルの場所が違うため弾かれ、⚠ **1秒ごとに永久に繰り返す。**
+    //
+    //   実機の記録（2026-08-30 10:18、1秒ごとに延々）:
+    //     Rejected unauthorized connection on ipc channel due to executable mismatch
+    //       peer_exe    = C:\ProgramData\REMOHELP PRO\prelogon\remohelppro-prelogon.exe
+    //       current_exe = ...\remohelppro-support\remohelppro-support.exe
+    //   ⚠ 症状は「**接続番号が取れません**」。原因がまったく見えない形で出る。
+    //
+    //   ★製品で分けるだけでは足りない。**一式ごとに分ける。**
+    let suffix = IPC_NAMESPACE_SUFFIX.read().unwrap().clone();
+    if suffix.is_empty() {
+        base
+    } else {
+        format!("{base}-{suffix}")
     }
 }
 

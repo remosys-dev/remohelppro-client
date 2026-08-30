@@ -139,6 +139,14 @@ pub fn core_main() -> Option<Vec<String>> {
         if let Some(dir) = exe.parent() {
             if let Some(m) = crate::rl_prelogon::read_marker(dir) {
                 *config::APP_DIR.write().unwrap() = dir.to_string_lossy().to_string();
+                // 🔴🔴 通信路の名前を本体と分ける（2026-08-30 実機で確定）。
+                //
+                //   ⚠ 複製はアプリ名が本体と同じなので、通信路の名前も同じだった。
+                //     先に立った方が握り、もう一方の子プロセスが入ろうとして
+                //     実行ファイルの場所が違うため弾かれ、1秒ごとに永久に繰り返す。
+                //   ⚠ 症状は「**接続番号が取れません**」。原因が見えない形で出る。
+                //   ★この一式のすべてのプロセスが、同じ目印を見て同じ値になる。
+                *config::IPC_NAMESPACE_SUFFIX.write().unwrap() = "prelogon".to_owned();
                 _rl_prelogon = Some(m);
             }
         }
