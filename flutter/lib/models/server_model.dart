@@ -45,6 +45,32 @@ class ServerModel with ChangeNotifier {
   String _approveMode = "";
   int _zeroClientLengthCounter = 0;
   bool _hasEverConnected = false; // RL build-16 (B): 1回以上の接続実績(接続後のみ自動終了を許可)
+
+  /// 🔴🔴 「自分の画面を見せる」で出した窓は、**自動で閉じない**（2026-08-30 ご指示）。
+  ///
+  ///   ⚠ 出す方には「入れ替えなら隠す設定でも必ず出す」を 8/27 に入れた。
+  ///     ⚠ **ところが閉じる方に、同じ例外を入れていなかった。**
+  ///     ＝ 出した次の1秒で、下の見張りが閉じる。
+  ///       社長のご指摘「タスクバーに出るが、押すと一瞬で消える」はこれ。
+  ///
+  ///   ⚠ **見せるのをやめる道は、この窓の中にしかない**（紫の釦）。
+  ///     閉じられると、相談員は自分のPCを操作させたまま**止められなくなる**。
+  ///   ★止められない機能は、始められる機能より危ない。閉じる方も例外にする。
+  ///
+  ///   ⚠ 印を消すのは、その接続が**実際に終わったとき**だけ
+  ///     （`onClientRemove` / 一覧から消えたとき）。時間で消さない。
+  bool _switchSidesShown = false;
+
+  /// いま「自分の画面を見せる」で繋がっている相手が居るか。
+  ///
+  /// ⚠ 印だけに頼らない。一覧に居なくなっていたら印も落とす（取り残し防止）。
+  bool get _keepCmForSwitch {
+    if (!_switchSidesShown) return false;
+    if (_clients.any((c) => c.fromSwitch)) return true;
+    // 一覧から消えている ＝ 役目は終わった。印を落として、通常どおりに戻す。
+    _switchSidesShown = false;
+    return false;
+  }
   int _remohelpproZeroClients = 0; // REMOHELP PRO: 相談員切断後の空clients連続カウント(自動停止用)
 
   late String _emptyIdShow;
@@ -170,7 +196,13 @@ class ServerModel with ChangeNotifier {
           debugPrint("clients not match!");
           updateClientState(res);
         } else {
-          if (_clients.isEmpty) {
+          if (_clients.isEmpty && _keepCmForSwitch) {
+            // 🔴 「自分の画面を見せる」の窓は閉じない（2026-08-30 ご指示）。
+            //   ⚠ ここが1秒ごとに走るため、出した直後に閉じられていた。
+            //     ＝「タスクバーに出るが押すと一瞬で消える」の正体。
+            //   ⚠ 一覧が空でも、相手はまだ繋がっている（Rust側は conn_id を保持）。
+            //     実機の記録で確認済み（cm 側 conn_id:1712 が38秒間 生存）。
+          } else if (_clients.isEmpty) {
             hideCmWindow();
             // RL onetime fix (build-14): ワンタイム版(kRlSupportShowWindow)は Main 終了後すみやかに
             // CM プロセスも閉じる(約2秒)。通常(フリート)は従来どおり約6秒。フリートは const=false で不変。
@@ -650,7 +682,16 @@ class ServerModel with ChangeNotifier {
     }
     if (desktopType == DesktopType.cm) {
       if (_clients.isEmpty) {
-        hideCmWindow();
+        // 🔴 入れ替えの窓は閉じない（2026-08-30 ご指示）。閉じると止める道が消える。
+        if (!_keepCmForSwitch) hideCmWindow();
+      } else if (_clients.any((c) => c.fromSwitch)) {
+        // 隠す設定でも必ず出す。出す方の例外（8/27）と、ここを揃える。
+        // ⚠ **一度だけ**。forceShowCmWindow は focus と前面化まで行うので、
+        //   繰り返すと相談員が他の窓を触れなくなる。
+        if (!_switchSidesShown) {
+          _switchSidesShown = true;
+          forceShowCmWindow();
+        }
       } else if (!hideCm) {
         showCmWindow();
       }
@@ -711,6 +752,8 @@ class ServerModel with ChangeNotifier {
         if (client.fromSwitch) {
           // ⚠ showCmWindow() では出し切れない（起動直後の取りこぼしと、
           //   hide() したのに show() を呼ばない問題）。必ず forceShowCmWindow。
+          // 🔴 印を立てる。以後、この窓は**自動で閉じない**（2026-08-30 ご指示）。
+          _switchSidesShown = true;
           forceShowCmWindow();
         } else if (!hideCm) {
           showCmWindow();
@@ -880,7 +923,11 @@ class ServerModel with ChangeNotifier {
         parent.target?.invokeMethod("cancel_notification", id);
       }
       if (desktopType == DesktopType.cm && _clients.isEmpty) {
-        hideCmWindow();
+        // 🔴 入れ替えの窓は閉じない（2026-08-30 ご指示）。
+        //   ⚠ ここは相手が実際に去ったときに通る。`_keepCmForSwitch` は
+        //     一覧に fromSwitch が居なければ自分で印を落とすので、
+        //     入れ替えが本当に終わったときはこれまでどおり閉じる。
+        if (!_keepCmForSwitch) hideCmWindow();
       }
       if (isAndroid) androidUpdatekeepScreenOn();
       notifyListeners();
