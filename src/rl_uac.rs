@@ -62,7 +62,29 @@ use winreg::{enums::*, RegKey};
 const POLICY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 
 /// 触る値。⚠ ここに `EnableLUA` を足さないこと（上の説明）。
+///
+/// 🔴 常駐版だけが両方を 0 にする（＝確認を一切出さない）。
+///   常駐は誰も居ないPCに繋ぐためのものなので、押す人が居ない。
 const VALUES: &[&str] = &["PromptOnSecureDesktop", "ConsentPromptBehaviorAdmin"];
+
+/// 🔴🔴 ワンタイム版が触る値。**確認を消さない**（2026-08-30 ご判断）。
+///
+///   ⚠ これまでは常駐と同じく `ConsentPromptBehaviorAdmin = 0` も入れ、
+///     ⚠ **お客様のUACを実質無効**にしていた。1.4.61 の事故（戻せないまま
+///     切りっぱなしになる）も、戻す道を4本も要したのも、ここが原因。
+///
+///   ★2026-08-30 実機で確認: ⚠ **相談員が UAC の確認を押せた。**
+///     当社の入力は SYSTEM 権限で出ているので、Windows の権限の壁を越えられる
+///     （`server/portable_service.rs` でマウス・キーを SYSTEM 側へ渡している）。
+///     ＝ ⚠ **確認を消す必要がない。「普通の画面に出す」だけでよい。**
+///
+///   `PromptOnSecureDesktop = 0` … 確認を**暗い専用画面ではなく普通の画面**に出す。
+///     これが無いと相談員には見えず、押すこともできない（画面が真っ黒になる）。
+///
+///   ⚠ 利点: お客様のUACを無効にしない／戻す対象が1つに減る／
+///     相談員の画面が真っ黒になる件も同じ設定で直る。
+///   ⚠ 代わりに増えるのは「相談員が確認を1回押す」手間だけ。
+const VALUES_ONETIME: &[&str] = &["PromptOnSecureDesktop"];
 
 /// 元の値の控え。⚠ 利用者ごとの場所に置かない（戻すのは SYSTEM のこともある）。
 fn backup_path() -> PathBuf {
@@ -136,7 +158,11 @@ pub fn relax_for_session() -> ResultType<()> {
 
     let mut changed = 0usize;
     let mut last_err = None;
-    for name in VALUES {
+    // 🔴 ワンタイムは **確認を消さない**（2026-08-30 ご判断）。触るのは
+    //   「暗い専用画面に出さない」1つだけ。相談員が押せることを実機で確認済み。
+    //   ⚠ 控え（上）は VALUES の両方を記録している。触らなかった方を戻しても
+    //     同じ値を書くだけなので害はなく、古い版が残した 0 も戻せる。
+    for name in VALUES_ONETIME {
         match key.set_value(*name, &0u32) {
             Ok(_) => changed += 1,
             Err(e) => {
