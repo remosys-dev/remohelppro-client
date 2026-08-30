@@ -61,16 +61,21 @@ class ServerModel with ChangeNotifier {
   ///     （`onClientRemove` / 一覧から消えたとき）。時間で消さない。
   bool _switchSidesShown = false;
 
-  /// いま「自分の画面を見せる」で繋がっている相手が居るか。
+  /// いま「自分の画面を見せる」の窓を守るべきか。
   ///
-  /// ⚠ 印だけに頼らない。一覧に居なくなっていたら印も落とす（取り残し防止）。
-  bool get _keepCmForSwitch {
-    if (!_switchSidesShown) return false;
-    if (_clients.any((c) => c.fromSwitch)) return true;
-    // 一覧から消えている ＝ 役目は終わった。印を落として、通常どおりに戻す。
-    _switchSidesShown = false;
-    return false;
-  }
+  /// 🔴🔴 2026-08-30 **一度これを書き損じた**。書いたのはこうだった:
+  /// ```dart
+  /// if (_clients.any((c) => c.fromSwitch)) return true;
+  /// _switchSidesShown = false;   // 一覧が空 ＝ 役目が終わった、とみなした
+  /// return false;
+  /// ```
+  ///   ⚠ 守りたいのは⚠ **まさに一覧が空になった瞬間**なのに、
+  ///     一覧が空だと⚠ **必ず false を返す**。＝ 守りが一度も働かない。
+  ///     しかも印まで自分で消していた。実機で直っていなかった。
+  ///
+  /// ★印は**一覧を見て判断しない**。時間でも消さない。
+  ///   消すのは `onClientRemove` で、⚠ **入れ替えの相手が実際に去ったとき**だけ。
+  bool get _keepCmForSwitch => _switchSidesShown;
   int _remohelpproZeroClients = 0; // REMOHELP PRO: 相談員切断後の空clients連続カウント(自動停止用)
 
   late String _emptyIdShow;
@@ -912,6 +917,12 @@ class ServerModel with ChangeNotifier {
       if (_clients.any((c) => c.id == id)) {
         final index = _clients.indexWhere((client) => client.id == id);
         if (index >= 0) {
+          // 🔴 入れ替えの相手が**実際に去った**ときだけ、守りの印を落とす
+          //   （2026-08-30）。⚠ 一覧が空かどうかで判断しない。
+          //   一覧は途中で空になることがあり、そこで落とすと守りが働かない。
+          if (_clients[index].fromSwitch) {
+            _switchSidesShown = false;
+          }
           if (close) {
             _clients.removeAt(index);
             tabController.remove(index);
@@ -937,6 +948,9 @@ class ServerModel with ChangeNotifier {
   }
 
   Future<void> closeAll() async {
+    // 🔴 全部閉じるときは、守りの印も落とす（2026-08-30）。
+    //   ⚠ 落とさないと、入れ替えが終わった後も窓が閉じられなくなる。
+    _switchSidesShown = false;
     await Future.wait(
         _clients.map((client) => bind.cmCloseConnection(connId: client.id)));
     _clients.clear();
