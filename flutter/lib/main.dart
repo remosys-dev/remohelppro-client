@@ -457,6 +457,19 @@ void runConnectionManagerScreen() async {
 
 bool _isCmReadyToShow = false;
 
+/// 🔴🔴 「出す」と「隠す」の**競争**を止めるための札（2026-08-31 実測で判明）。
+///
+///   ⚠ 実機の記録:
+///     12:43:51.299  隠す（開始）  updateClientState から
+///     12:43:51.306  隠す（開始）  1秒ごとの見張りから
+///     12:43:51.479  出す（開始）  入れ替えの接続が来た
+///   ⚠ どれも非同期。⚠ **先に始まった「隠す」が、後から完了して勝つ。**
+///   ＝ 出したのに隠れたまま。「自分の画面を見せる」の戻る窓が出ない正体。
+///
+///   ★出すたびにこの数を進める。隠す側は、⚠ **途中で数が変わったら
+///     そこで諦める**（自分より新しい「出す」に道を譲る）。
+int _cmWindowGen = 0;
+
 showCmWindow({bool isStartup = false}) async {
   if (isStartup) {
     WindowOptions windowOptions = getHiddenTitleBarWindowOptions(
@@ -500,11 +513,16 @@ showCmWindow({bool isStartup = false}) async {
 ///   ・チャットが届いた ・音声通話の着信 ・自分の画面を見せている（戻す釦）
 ///   普段の表示は showCmWindow() のままでよい。
 Future<void> forceShowCmWindow() async {
+  // 🔴 いま出そうとしていることを宣言する（2026-08-31）。
+  //   ⚠ これより前に始まっていた「隠す」は、これを見て諦める。
+  final gen = ++_cmWindowGen;
   // 用意ができるまで最大4秒待つ。⚠ 待たずに諦めると起動直後を取りこぼす。
   for (var i = 0; i < 20; i++) {
     if (_isCmReadyToShow) break;
     await Future.delayed(const Duration(milliseconds: 200));
   }
+  // ⚠ 待っている間に、もっと新しい「出す」が始まっていたら、そちらに任せる。
+  if (gen != _cmWindowGen) return;
   try {
     await windowManager.setOpacity(1);
     if (await windowManager.isMinimized()) {
@@ -515,6 +533,28 @@ Future<void> forceShowCmWindow() async {
     await windowManager.setSizeAlignment(
         kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
     windowOnTop(null);
+
+    // 🔴 **出したあと、本当に出ているか確かめ直す**（2026-08-31）。
+    //   ⚠ 世代の札で「隠す」は諦めるようにしたが、⚠ **取りこぼしは残りうる**
+    //     （札を見る前に最後の hide() を撃ち終えている場合）。
+    //   ★600ms 後に一度だけ見に行き、透明・最小化なら出し直す。
+    //     ⚠ 変わっていなければ何もしない（窓が震えない）。
+    //   ⚠ ここで諦めると、⚠ **お客様に自分のPCを操作させたまま止められない。**
+    Future.delayed(const Duration(milliseconds: 600), () async {
+      if (gen != _cmWindowGen) return; // 新しい指示が来ていれば任せる
+      try {
+        final hidden =
+            (await windowManager.getOpacity()) != 1 ||
+                await windowManager.isMinimized() ||
+                !(await windowManager.isVisible());
+        if (!hidden) return;
+        await windowManager.setOpacity(1);
+        if (await windowManager.isMinimized()) await windowManager.restore();
+        await windowManager.show();
+        await windowManager.focus();
+        windowOnTop(null);
+      } catch (_) {}
+    });
   } catch (e) {
     debugPrint('接続の窓を出せませんでした: $e');
   }
@@ -546,10 +586,24 @@ hideCmWindow({bool isStartup = false}) async {
     await windowManager.hide();
     _isCmReadyToShow = true;
   } else if (_isCmReadyToShow) {
+    // 🔴🔴 **後から始まった「出す」に道を譲る**（2026-08-31 実測）。
+    //   ⚠ ここは非同期。`getOpacity()` を待っている間に
+    //     「自分の画面を見せる」の接続が来て forceShowCmWindow() が走ると、
+    //     ⚠ **この続きが後から動いて、出した窓を隠してしまう。**
+    //   ★入った時点の数を覚え、⚠ **待つたびに変わっていないか確かめる。**
+    //     変わっていたら何もしない。
+    final gen = _cmWindowGen;
     if (await windowManager.getOpacity() != 0) {
+      if (gen != _cmWindowGen) return;
       await windowManager.setOpacity(0);
+      if (gen != _cmWindowGen) {
+        // ⚠ 透明にした直後に「出す」が始まった。⚠ **戻してから引き下がる。**
+        await windowManager.setOpacity(1);
+        return;
+      }
       bind.mainHideDock();
       await windowManager.minimize();
+      if (gen != _cmWindowGen) return;
       await windowManager.hide();
     }
   }
