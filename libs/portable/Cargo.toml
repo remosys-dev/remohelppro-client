@@ -10,6 +10,9 @@ build = "build.rs"
 
 [dependencies]
 brotli = "3.4"
+# chrono は「30分後に元へ戻す」予定の時刻を作るのに使う（2026-08-31）。
+#   ⚠ 日をまたぐので日付も要る。時刻だけ渡すと「今日の過去の時刻」になる。
+chrono = "0.4"
 dirs = "5.0"
 md5 = "0.7"
 # winuser は MessageBoxW / AllowSetForegroundWindow で使う。

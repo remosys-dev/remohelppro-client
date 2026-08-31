@@ -1011,7 +1011,117 @@ fn notify_already_running() {
     }
 }
 
+/// 🔴🔴 **UAC の確認を「普通の画面」に出す設定だけを書いて終わる**
+///   （2026-08-31 ご判断「A案」）。
+///
+/// ■ なぜ**この1個のファイル**が書くのか
+///   ⚠ この設定を書くには管理者の権限が要り、⚠ 権限を得るには UAC を押す必要があり、
+///     ⚠ **その確認が暗い専用画面に出ている**——という堂々巡りだった。
+///     お客様は目の前にいらっしゃるので、⚠ **最初の1回だけ**押していただく。
+///   ⚠ 押していただく相手は**署名されている物**でなければならない。
+///     展開された中身の実行ファイルは署名が無く、⚠ 確認に「発行元不明」と出る。
+///     ⚠ この1個のファイルは EV 署名済みなので、⚠ **当社の会社名が出る。**
+///   ⚠ 展開もしない・中身も動かさない。⚠ **設定を書いて即座に終わる。**
+///     （写した実行ファイルを昇格させて DLL 不足で落ちた失敗の作り直し）
+///
+/// ■ 使い方（本体が昇格して呼ぶ）
+///   `--rl-uac-relax <PromptOnSecureDesktop の元の値> <ConsentPromptBehaviorAdmin の元の値>`
+///   値は `0` / `1` / `none`（値が無かった＝Windows の既定）。
+///   ⚠ 控えのファイルは**本体側が先に書いている**。ここでは戻す命令を
+///     Windows の予定に置くためだけに使う。長い文字列を引数で渡さない。
+///
+/// ■ 戻す道は3本のまま
+///   ① 相談員が昇格した後は SYSTEM 側の見張りが引き継ぐ（既存）
+///   ② ここで置く Windows の予定（30分後に必ず戻す）
+///   ③ 次に起動したときの戻し（既存）
+#[cfg(windows)]
+fn rl_uac_relax(args: &[String]) {
+    use std::os::windows::process::CommandExt;
+    const KEY: &str =
+        r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    const NAMES: [&str; 2] = ["PromptOnSecureDesktop", "ConsentPromptBehaviorAdmin"];
+    const TASK: &str = "REMOHELPPRO_UAC_RESTORE";
+    let run = |exe: &str, a: Vec<String>| -> bool {
+        Command::new(exe)
+            .args(a)
+            .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+    // ① 確認を普通の画面に出す。⚠ 触るのはこの1つだけ。
+    //   ⚠ ConsentPromptBehaviorAdmin は触らない（＝UAC は解除しない。ご判断どおり）。
+    let ok = run(
+        "reg",
+        vec![
+            "add".into(),
+            KEY.into(),
+            "/v".into(),
+            "PromptOnSecureDesktop".into(),
+            "/t".into(),
+            "REG_DWORD".into(),
+            "/d".into(),
+            "0".into(),
+            "/f".into(),
+        ],
+    );
+    println!("RL uac: PromptOnSecureDesktop=0 {}", if ok { "書けました" } else { "書けません" });
+    if !ok {
+        return;
+    }
+    // ② 戻す命令を Windows の予定に置く。⚠ 当社の実行ファイルに依存させない
+    //   （この1個のファイルは、使い終わると自分を消すため）。
+    let mut parts: Vec<String> = Vec::new();
+    for (i, name) in NAMES.iter().enumerate() {
+        match args.get(i).map(|s| s.as_str()) {
+            Some("none") | None => {
+                parts.push(format!("reg delete \"{KEY}\" /v {name} /f >nul 2>&1"))
+            }
+            Some(v) => parts.push(format!(
+                "reg add \"{KEY}\" /v {name} /t REG_DWORD /d {v} /f >nul 2>&1"
+            )),
+        }
+    }
+    parts.push(format!("schtasks /delete /tn {TASK} /f >nul 2>&1"));
+    let cmd = parts.join(" & ");
+    let at = std::time::SystemTime::now() + std::time::Duration::from_secs(30 * 60);
+    let dt: chrono::DateTime<chrono::Local> = at.into();
+    let ok2 = run(
+        "schtasks",
+        vec![
+            "/create".into(),
+            "/tn".into(),
+            TASK.into(),
+            "/sc".into(),
+            "once".into(),
+            "/sd".into(),
+            dt.format("%Y/%m/%d").to_string(),
+            "/st".into(),
+            dt.format("%H:%M").to_string(),
+            "/tr".into(),
+            format!("cmd /c {cmd}"),
+            "/ru".into(),
+            "SYSTEM".into(),
+            "/rl".into(),
+            "HIGHEST".into(),
+            "/f".into(),
+        ],
+    );
+    println!("RL uac: 戻す予定 {}", if ok2 { "置きました" } else { "置けません" });
+}
+
 fn main() {
+    // 🔴 これだけは、展開も二重起動の確認もせずに、真っ先に片づける。
+    //   ⚠ 本体が昇格して呼ぶ。⚠ 展開すると2つ目が動いてしまうので、
+    //     ⚠ **どの確認よりも前に**判断して、書いたら終わる。
+    #[cfg(windows)]
+    {
+        let a: Vec<String> = std::env::args().skip(1).collect();
+        if a.first().map(|s| s == "--rl-uac-relax").unwrap_or(false) {
+            rl_uac_relax(&a[1..]);
+            return;
+        }
+    }
     // 🔴 展開より前に見る。期限切れなら一時フォルダにも何も置かず、そのまま終わる。
     if is_onetime_expired() {
         notify_onetime_expired();

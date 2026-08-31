@@ -86,8 +86,8 @@ fn rl_apply_public_config() {
 
 /// ワンタイム版で、UAC の確認を「普通の画面」に出せるようにする準備。
 ///
-/// ⚠ 自分を1つ昇格して起動し、そちらを**見張り**として残す。
-///   見張りは、このプロセスが終わるまで設定を保ち、⚠ **終われば必ず戻す。**
+/// ⚠ お客様が落としてきた**署名済みの1個のファイル**を昇格して呼び、
+///   設定だけ書かせて終わってもらう。⚠ 展開もしないし、常駐もしない。
 #[cfg(windows)]
 fn rl_uac_prepare() {
     // 🔴 **待たせない**（2026-08-31）。
@@ -129,44 +129,39 @@ fn rl_uac_prepare_inner() {
         log::info!("RL uac: 既に普通の画面に出る状態です。確認は出しません");
         return;
     }
-    // 🔴 見張りは、⚠ **アプリのフォルダから動かしてはいけない**（2026-08-31）。
+    // 🔴🔴 **お客様が落としてきた1個のファイルに書かせる**（2026-08-31 実機の失敗で作り直し）。
     //
-    //   ⚠ 理由が2つある。どちらも実害が大きい:
-    //     ① ワンタイム版は終わるときに ⚠ **同じフォルダから動いているものを
-    //        全部止め、フォルダごと消す**（common.rs の後始末）。
-    //        見張りもそこに居ると**強制終了され、戻す処理が走らない。**
-    //     ② 動いている実行ファイルは消せないので、⚠ **フォルダが残る。**
-    //        「使い終わったら何も残らない」が壊れる。
-    //   ★一時の場所へ写してから、そちらを昇格して動かす。
-    //     ⚠ 写しても署名は付いたままなので、UAC の確認には
-    //       **当社の会社名が出る**（お客様が安心して押せる）。
-    let tmp = std::env::temp_dir()
-        .join("REMOHELP PRO")
-        .join("uac-keeper");
-    if let Err(e) = std::fs::create_dir_all(&tmp) {
-        log::warn!("RL uac: 一時の場所を作れません {}: {e}", tmp.display());
+    //   ⚠ 最初は展開先の実行ファイルを一時フォルダへ写して昇格させたが、
+    //     ⚠ **「desktop_drop_plugin.dll が見つからないため、コードの実行を
+    //     続行できません」** でお客様の画面にエラーが出た。
+    //     ＝ ⚠ **Flutter のアプリは1ファイルでは動かない。**写して動かさない。
+    //   ⚠ 展開先の実行ファイルをその場で昇格させる案も採らない。
+    //     ① 署名が無いので確認に「発行元不明」と出る（お客様を不安にさせる）
+    //     ② 動いている間、⚠ **展開先のフォルダを消せなくなる**
+    //   ★落としてきた1個のファイル（`RL_RUNNER_EXE`）は **EV署名済み**で、
+    //     ⚠ 単独で動く。⚠ 確認には**当社の会社名**が出る。
+    //     そちらに設定だけ書かせて、すぐ終わってもらう（展開もしない）。
+    let Ok(runner) = std::env::var("RL_RUNNER_EXE") else {
+        log::info!("RL uac: 元のファイルの場所が分からないため、確認は出しません");
+        return;
+    };
+    if runner.is_empty() || !std::path::Path::new(&runner).exists() {
+        log::info!("RL uac: 元のファイルが見つかりません（{runner}）。確認は出しません");
         return;
     }
-    let keeper_exe = tmp.join("remohelppro-uac-keeper.exe");
-    // ⚠ 前の見張りが動いていると写せない（使用中）。その場合は既にある物を使う。
-    if let Err(e) = std::fs::copy(&exe, &keeper_exe) {
-        if !keeper_exe.exists() {
-            log::warn!("RL uac: 見張りを写せません: {e}");
-            return;
-        }
-        log::info!("RL uac: 既にある見張りを使います（写せませんでした: {e}）");
-    }
-    let pid = std::process::id();
-    let arg = format!("--rl-uac-keeper {pid}");
-    match crate::platform::run_uac(&keeper_exe.to_string_lossy(), &arg) {
+    // ⚠ 控えは**こちら側**（昇格していない）で書く。ProgramData は利用者でも書ける。
+    //   昇格側へは元の値2つだけを数字で渡す。長い文字列は引用符で静かに壊れる。
+    let values = crate::rl_uac::write_backup_if_absent();
+    let a = crate::rl_uac::backup_as_args(&values);
+    let arg = format!("--rl-uac-relax {} {}", a.get(0).map(|s| s.as_str()).unwrap_or("none"), a.get(1).map(|s| s.as_str()).unwrap_or("none"));
+    match crate::platform::run_uac(&runner, &arg) {
         // ⚠ 「はい」を押していただけたかどうかは、この戻り値では分からない。
         //   断られた場合は false になる（ShellExecuteW が失敗を返す）。
-        Ok(true) => log::info!("RL uac: 見張りを起動しました（お客様が確認を押されました）"),
+        Ok(true) => log::info!("RL uac: 設定を書きに行きました（{arg}）"),
         Ok(false) => log::warn!(
-            "RL uac: お客様が確認を押されませんでした。\
-             相談員は UAC を押せません（サポート自体は続けられます）"
+            "RL uac: お客様が確認を押されませんでした。             相談員は UAC を押せません（サポート自体は続けられます）"
         ),
-        Err(e) => log::warn!("RL uac: 見張りを起動できません: {e}"),
+        Err(e) => log::warn!("RL uac: 確認を出せません: {e}"),
     }
 }
 
@@ -789,18 +784,6 @@ pub fn core_main() -> Option<Vec<String>> {
                 crate::rl_prelogon::start_watchdog(m);
             }
             crate::start_os_service();
-            return None;
-        } else if args[0] == "--rl-uac-keeper" {
-            // 昇格済みで呼ばれる見張り（2026-08-31 ご判断「A案」）。
-            //   使い方: --rl-uac-keeper <親のpid>
-            //   ⚠ 親（お客様のアプリ）が終わるまで、確認を普通の画面に出す設定を保つ。
-            //   ⚠ 終わったら必ず元に戻す。⚠ **exit で抜けないこと**（戻し処理が走らない）。
-            #[cfg(windows)]
-            {
-                if let Some(pid) = args.get(1).and_then(|s| s.parse::<u32>().ok()) {
-                    crate::rl_uac::keeper(pid);
-                }
-            }
             return None;
         } else if args[0] == "--rl-prelogon-install" {
             // 一時サービスを作る（昇格済みで呼ばれる）。

@@ -504,15 +504,18 @@ impl Drop for UacRelaxer {
 ///     実機で `PromptOnSecureDesktop = 1`（素の状態）を初めて見て分かった。
 ///     ＝ ⚠ 「1.4.83 は自然だった」のは版の違いではなく、**残り物**だった。
 ///
-/// ■ どうするか
-///   ⚠ お客様は**目の前にいらっしゃる**ので、最初の1回だけ押していただく。
-///   以後この端末は、確認が普通の画面に出るので、⚠ **相談員が全部できる**
-///   （再起動・プログラムの導入）。⚠ UAC は解除しない（社長のご判断どおり）。
+/// ■ 誰が書くか
+///   ⚠ **お客様が落としてきた1個のファイル**（署名済み・`RL_RUNNER_EXE`）に
+///     書かせる。⚠ 展開された中身の実行ファイルは**署名されていない**ので、
+///     昇格の確認に「発行元不明」と出てしまう（お客様に不安を与える）。
+///   ⚠ 一度は展開先の実行ファイルを写して昇格させたが、⚠ **部品（DLL）が
+///     揃わず「desktop_drop_plugin.dll が見つからない」で落ちた**（実機・私の失敗）。
+///     ＝ ⚠ **Flutter のアプリは1ファイルでは動かない。**写して動かさない。
 ///
-/// ■ 安全
-///   ⚠ 押していただけなくても**支障なく続く**。ただ相談員が押せないだけ。
-///   ⚠ 昇格した側は「見張り」として残り、⚠ **お客様のアプリが終われば必ず戻す**。
-///     さらに元の3本立て（Drop／次回起動／Windows の予定30分）もそのまま効く。
+/// ■ 受け渡し
+///   控えはここ（昇格していない側）で書く。ProgramData は利用者でも書ける。
+///   昇格側へは**元の値2つだけ**を数字で渡す。長い文字列を渡さない
+///   （Windows の引数の引用符で静かに壊れるため）。
 #[cfg(windows)]
 pub fn already_relaxed() -> bool {
     policy_key(false)
@@ -521,58 +524,50 @@ pub fn already_relaxed() -> bool {
         .map_or(false, |v| v == 0)
 }
 
-/// 昇格した側で動く見張り。親（お客様のアプリ）が生きている間だけ設定を保つ。
+/// 控えを書く（既にあれば書かない）。戻り値は VALUES の順の元の値。
 ///
-/// ⚠ 戻すのは `UacRelaxer` の `Drop`。⚠ **この関数から普通に抜けること**
-///   （`std::process::exit` で抜けると Drop が走らず、戻らない）。
+/// ⚠ 既にあるものを上書きしない。⚠ 上書きすると「変更後の値」が控えになり、
+///   二度と元へ戻せなくなる（`relax_for_session` と同じ流儀）。
 #[cfg(windows)]
-pub fn keeper(parent_pid: u32) {
-    let _relaxer = match UacRelaxer::new() {
-        Ok(r) => r,
-        Err(e) => {
-            log::error!("RL uac: 見張りを始められません: {e}");
-            return;
+pub fn write_backup_if_absent() -> Vec<(String, Option<u32>)> {
+    let current = read_current();
+    let path = backup_path();
+    if path.exists() {
+        log::info!("RL uac: 控えは既にあります（上書きしません）");
+        return current;
+    }
+    let write = || -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
         }
-    };
-    log::info!("RL uac: 見張りを始めました（親 pid={parent_pid}）");
-    loop {
-        // ⚠ 1秒ごと。⚠ **親が終わってから戻すまでを短く**する
-        //   （お客様のPCの守りを、必要より長く下げない）。
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if !process_alive(parent_pid) {
-            log::info!("RL uac: お客様のアプリが終了しました。設定を戻します");
-            break;
-        }
-        // ⚠ 誰か（別の後始末・置き土産）が戻していたら、もう一度かけ直す。
-        //   ★ここが無いと、サポートの途中で静かに元へ戻り、
-        //     以後ずっと相談員が確認を押せなくなる。
-        if !already_relaxed() {
-            if let Ok(key) = policy_key(true) {
-                for name in VALUES_ONETIME {
-                    let _ = key.set_value(*name, &0u32);
-                }
-                log::info!("RL uac: 戻されていたので、かけ直しました");
+        let mut f = std::fs::File::create(&path)?;
+        for (name, v) in &current {
+            match v {
+                Some(v) => writeln!(f, "{name}={v}")?,
+                None => writeln!(f, "{name}=none")?,
             }
         }
+        Ok(())
+    };
+    match write() {
+        Ok(_) => log::info!("RL uac: 元の値を控えました → {}", path.display()),
+        Err(e) => log::warn!("RL uac: 控えを書けません {}: {e}", path.display()),
     }
+    current
 }
 
-/// pid のプロセスがまだ動いているか。
+/// 昇格側へ渡す引数にする（`0` / `1` / `none`）。⚠ 順番は VALUES と同じ。
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
-    use winapi::um::{
-        handleapi::CloseHandle, processthreadsapi::OpenProcess, synchapi::WaitForSingleObject,
-        winbase::WAIT_OBJECT_0, winnt::SYNCHRONIZE,
-    };
-    unsafe {
-        let h = OpenProcess(SYNCHRONIZE, 0, pid);
-        if h.is_null() {
-            // ⚠ 開けない＝もう居ない、と見なす。権限で開けないことは
-            //   （親は同じお客様の起動した実行ファイルなので）実際には無い。
-            return false;
-        }
-        let r = WaitForSingleObject(h, 0);
-        CloseHandle(h);
-        r != WAIT_OBJECT_0
-    }
+pub fn backup_as_args(values: &[(String, Option<u32>)]) -> Vec<String> {
+    VALUES
+        .iter()
+        .map(|name| {
+            values
+                .iter()
+                .find(|(n, _)| n == name)
+                .and_then(|(_, v)| *v)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        })
+        .collect()
 }
