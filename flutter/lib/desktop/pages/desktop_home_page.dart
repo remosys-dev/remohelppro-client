@@ -245,7 +245,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     //   ⚠ 画面より大きくしない（小さい画面のPCで窓が画面外へ出る）。
     //   ⚠ 幅は変えない。お客様が広げた幅を勝手に戻さない。
     if (kRlSupportShowWindow) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _fitSupportWindow());
+      // 🔴🔴 **最初の1回は、少し待ってから**（2026-08-30 ご報告）。
+      //
+      //   ⚠ ご報告「枠しか出ない。マウスを動かしたら中身が出た。前は無かった」。
+      //   ⚠ 正体: 描き終わる前に窓の大きさを変えていた。Windows では
+      //     窓を作り直すと、⚠ **次の入力があるまで描き直されない**ことがある。
+      //     ＝ 枠だけ出て、中身が真っ白のまま止まる。
+      //   ★中身が描かれてから合わせる。⚠ 500ms は「見て分からない」程度で、
+      //     かつ最初の描画が確実に終わる長さ。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 500), _fitSupportWindow);
+      });
       // 🔴🔴 **繰り返し合わせ直す**（2026-08-29 実機で判明）。
       //
       //   ⚠ ご報告「①の大きさのままなので、②くらいに広がるように」。
@@ -310,6 +320,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       _supportWindowHeight = h;
       final cur = await windowManager.getSize();
       await windowManager.setSize(Size(cur.width, h));
+      // 🔴 大きさを変えたら、**必ず描き直させる**（2026-08-30）。
+      //   ⚠ これが無いと、次に何か操作されるまで真っ白のまま残る。
+      //     お客様は「固まった」と受け取る。
+      WidgetsBinding.instance.scheduleFrame();
     } catch (e) {
       // ⚠ 大きさを変えられなくても、画面そのものは出す。
       debugPrint('RL: 顧客用の窓の高さを合わせられませんでした: $e');

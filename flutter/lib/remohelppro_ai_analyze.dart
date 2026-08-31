@@ -584,7 +584,10 @@ class RlAiPanel extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Text('AIの下書き',
+                      // 🔴 「下書き」→「判断」（2026-08-30 ご指示）。
+                      //   ⚠ 下の注意書きも同時に変えること。片方だけ変えると
+                      //     画面の中で言い方が食い違う。
+                      const Text('AI判断',
                           style: TextStyle(
                               color: Colors.white,
                               fontSize: 13,
@@ -614,7 +617,7 @@ class RlAiPanel extends StatelessWidget {
                           left: BorderSide(color: Color(0xFFDDA63F), width: 3)),
                     ),
                     child: const Text(
-                      '⚠ これは下書きです。実行する前に、相談員が内容を確かめてください。',
+                      '⚠ これはAI判断です。実行する前に、相談員が内容を確かめてください。',
                       style: TextStyle(color: Color(0xFFF5E0B4), fontSize: 11),
                     ),
                   ),
