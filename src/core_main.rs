@@ -84,6 +84,92 @@ fn rl_apply_public_config() {
     *config::SHARED_CONFIG_DIR.write().unwrap() = s;
 }
 
+/// ワンタイム版で、UAC の確認を「普通の画面」に出せるようにする準備。
+///
+/// ⚠ 自分を1つ昇格して起動し、そちらを**見張り**として残す。
+///   見張りは、このプロセスが終わるまで設定を保ち、⚠ **終われば必ず戻す。**
+#[cfg(windows)]
+fn rl_uac_prepare() {
+    // 🔴 **待たせない**（2026-08-31）。
+    //   ⚠ `run_uac` は、お客様が確認に答えるまで**返ってこない**。
+    //     ここで待つと、⚠ **答えるまでアプリの画面が1つも出ない。**
+    //     起動が遅い件で既にご指摘をいただいている所なので、繰り返さない。
+    //   ★別の流れで行う。⚠ 先にアプリの画面を出してから確認を出す
+    //     （いきなり確認だけが出ると、お客様には何の確認か分からない）。
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        rl_uac_prepare_inner();
+    });
+}
+
+#[cfg(windows)]
+fn rl_uac_prepare_inner() {
+    // ⚠ 常駐版・相談員版では絶対にやらない。呼ぶ側の条件だけに頼らない。
+    if config::IS_RESIDENT_BUILD || config::IS_OPERATOR_BUILD {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    // 共有識別子OK: 名前ではなく、CI が置く目印ファイルの有無で当社の
+    //   ワンタイム版だけに絞っている。他製品の実行ファイルの隣には存在しない。
+    if !dir.join("remohelppro-onetime.flag").exists() {
+        return;
+    }
+    // ⚠ 一時サービスの複製（ログイン前の再接続）では出さない。
+    //   誰も見ていない画面に確認を出しても、押す人がいない。
+    if crate::rl_prelogon::read_marker(dir).is_some() {
+        return;
+    }
+    // ⚠ 既に「普通の画面に出す」状態なら、何も出さない。
+    if crate::rl_uac::already_relaxed() {
+        log::info!("RL uac: 既に普通の画面に出る状態です。確認は出しません");
+        return;
+    }
+    // 🔴 見張りは、⚠ **アプリのフォルダから動かしてはいけない**（2026-08-31）。
+    //
+    //   ⚠ 理由が2つある。どちらも実害が大きい:
+    //     ① ワンタイム版は終わるときに ⚠ **同じフォルダから動いているものを
+    //        全部止め、フォルダごと消す**（common.rs の後始末）。
+    //        見張りもそこに居ると**強制終了され、戻す処理が走らない。**
+    //     ② 動いている実行ファイルは消せないので、⚠ **フォルダが残る。**
+    //        「使い終わったら何も残らない」が壊れる。
+    //   ★一時の場所へ写してから、そちらを昇格して動かす。
+    //     ⚠ 写しても署名は付いたままなので、UAC の確認には
+    //       **当社の会社名が出る**（お客様が安心して押せる）。
+    let tmp = std::env::temp_dir()
+        .join("REMOHELP PRO")
+        .join("uac-keeper");
+    if let Err(e) = std::fs::create_dir_all(&tmp) {
+        log::warn!("RL uac: 一時の場所を作れません {}: {e}", tmp.display());
+        return;
+    }
+    let keeper_exe = tmp.join("remohelppro-uac-keeper.exe");
+    // ⚠ 前の見張りが動いていると写せない（使用中）。その場合は既にある物を使う。
+    if let Err(e) = std::fs::copy(&exe, &keeper_exe) {
+        if !keeper_exe.exists() {
+            log::warn!("RL uac: 見張りを写せません: {e}");
+            return;
+        }
+        log::info!("RL uac: 既にある見張りを使います（写せませんでした: {e}）");
+    }
+    let pid = std::process::id();
+    let arg = format!("--rl-uac-keeper {pid}");
+    match crate::platform::run_uac(&keeper_exe.to_string_lossy(), &arg) {
+        // ⚠ 「はい」を押していただけたかどうかは、この戻り値では分からない。
+        //   断られた場合は false になる（ShellExecuteW が失敗を返す）。
+        Ok(true) => log::info!("RL uac: 見張りを起動しました（お客様が確認を押されました）"),
+        Ok(false) => log::warn!(
+            "RL uac: お客様が確認を押されませんでした。\
+             相談員は UAC を押せません（サポート自体は続けられます）"
+        ),
+        Err(e) => log::warn!("RL uac: 見張りを起動できません: {e}"),
+    }
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
     // 🔴 前回のサポートで戻せていない設定があれば、**まずここで戻す**（2026-08-28）。
@@ -287,6 +373,22 @@ pub fn core_main() -> Option<Vec<String>> {
             }
         }
         i += 1;
+    }
+    // 🔴🔴 **お客様に、最初の1回だけ確認を押していただく**（2026-08-31 ご判断「A案」）。
+    //
+    //   ⚠ 詳しい理由は `rl_uac::keeper` の頭に書いた。要点だけ:
+    //     確認を「普通の画面」に出す設定を書くには管理者の権限が要り、
+    //     その権限を得るには確認を押す必要があり、⚠ **その確認が真っ黒の画面に
+    //     出ている**——という堂々巡りだった。お客様は目の前にいらっしゃるので、
+    //     ⚠ **最初の1回だけ**押していただき、以後は相談員が全部できるようにする。
+    //
+    //   ⚠ ワンタイム版だけ。⚠ 常駐版・相談員版は絶対に通さない
+    //     （常駐は別の道でサービスを持ち、相談員は自社の端末なので触らない）。
+    //   ⚠ 既に 0 なら**何も出さない**。2回目以降のサポートで毎回出さないため。
+    //   ⚠ 押していただけなくても支障なく続く（相談員が押せないだけ）。
+    #[cfg(windows)]
+    if args.is_empty() {
+        rl_uac_prepare();
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if args.is_empty() {
@@ -687,6 +789,18 @@ pub fn core_main() -> Option<Vec<String>> {
                 crate::rl_prelogon::start_watchdog(m);
             }
             crate::start_os_service();
+            return None;
+        } else if args[0] == "--rl-uac-keeper" {
+            // 昇格済みで呼ばれる見張り（2026-08-31 ご判断「A案」）。
+            //   使い方: --rl-uac-keeper <親のpid>
+            //   ⚠ 親（お客様のアプリ）が終わるまで、確認を普通の画面に出す設定を保つ。
+            //   ⚠ 終わったら必ず元に戻す。⚠ **exit で抜けないこと**（戻し処理が走らない）。
+            #[cfg(windows)]
+            {
+                if let Some(pid) = args.get(1).and_then(|s| s.parse::<u32>().ok()) {
+                    crate::rl_uac::keeper(pid);
+                }
+            }
             return None;
         } else if args[0] == "--rl-prelogon-install" {
             // 一時サービスを作る（昇格済みで呼ばれる）。

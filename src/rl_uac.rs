@@ -491,3 +491,88 @@ impl Drop for UacRelaxer {
         }
     }
 }
+
+/// 🔴🔴 **お客様が起動したときに、確認を1回だけ通していただく**（2026-08-31 ご判断「A案」）。
+///
+/// ■ なぜ要るか（2026-08-31 実機で確定）
+///   ⚠ この設定（`PromptOnSecureDesktop=0`）を書くには **管理者の権限が要る**。
+///   ⚠ 権限を得るには UAC の確認に「はい」を押す必要がある。
+///   ⚠ その確認は、まだ**暗い専用画面**に出ている＝相談員には見えず押せない。
+///   ＝ ⚠ **入口で堂々巡り**になっていた。
+///
+///   ⚠ 今まで気づけなかったのは、⚠ **前のサポートで残った 0 が毎回助けていた**から。
+///     実機で `PromptOnSecureDesktop = 1`（素の状態）を初めて見て分かった。
+///     ＝ ⚠ 「1.4.83 は自然だった」のは版の違いではなく、**残り物**だった。
+///
+/// ■ どうするか
+///   ⚠ お客様は**目の前にいらっしゃる**ので、最初の1回だけ押していただく。
+///   以後この端末は、確認が普通の画面に出るので、⚠ **相談員が全部できる**
+///   （再起動・プログラムの導入）。⚠ UAC は解除しない（社長のご判断どおり）。
+///
+/// ■ 安全
+///   ⚠ 押していただけなくても**支障なく続く**。ただ相談員が押せないだけ。
+///   ⚠ 昇格した側は「見張り」として残り、⚠ **お客様のアプリが終われば必ず戻す**。
+///     さらに元の3本立て（Drop／次回起動／Windows の予定30分）もそのまま効く。
+#[cfg(windows)]
+pub fn already_relaxed() -> bool {
+    policy_key(false)
+        .ok()
+        .and_then(|k| k.get_value::<u32, _>("PromptOnSecureDesktop").ok())
+        .map_or(false, |v| v == 0)
+}
+
+/// 昇格した側で動く見張り。親（お客様のアプリ）が生きている間だけ設定を保つ。
+///
+/// ⚠ 戻すのは `UacRelaxer` の `Drop`。⚠ **この関数から普通に抜けること**
+///   （`std::process::exit` で抜けると Drop が走らず、戻らない）。
+#[cfg(windows)]
+pub fn keeper(parent_pid: u32) {
+    let _relaxer = match UacRelaxer::new() {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("RL uac: 見張りを始められません: {e}");
+            return;
+        }
+    };
+    log::info!("RL uac: 見張りを始めました（親 pid={parent_pid}）");
+    loop {
+        // ⚠ 1秒ごと。⚠ **親が終わってから戻すまでを短く**する
+        //   （お客様のPCの守りを、必要より長く下げない）。
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if !process_alive(parent_pid) {
+            log::info!("RL uac: お客様のアプリが終了しました。設定を戻します");
+            break;
+        }
+        // ⚠ 誰か（別の後始末・置き土産）が戻していたら、もう一度かけ直す。
+        //   ★ここが無いと、サポートの途中で静かに元へ戻り、
+        //     以後ずっと相談員が確認を押せなくなる。
+        if !already_relaxed() {
+            if let Ok(key) = policy_key(true) {
+                for name in VALUES_ONETIME {
+                    let _ = key.set_value(*name, &0u32);
+                }
+                log::info!("RL uac: 戻されていたので、かけ直しました");
+            }
+        }
+    }
+}
+
+/// pid のプロセスがまだ動いているか。
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use winapi::um::{
+        handleapi::CloseHandle, processthreadsapi::OpenProcess, synchapi::WaitForSingleObject,
+        winbase::WAIT_OBJECT_0, winnt::SYNCHRONIZE,
+    };
+    unsafe {
+        let h = OpenProcess(SYNCHRONIZE, 0, pid);
+        if h.is_null() {
+            // ⚠ 開けない＝もう居ない、と見なす。権限で開けないことは
+            //   （親は同じお客様の起動した実行ファイルなので）実際には無い。
+            return false;
+        }
+        let r = WaitForSingleObject(h, 0);
+        CloseHandle(h);
+        r != WAIT_OBJECT_0
+    }
+}

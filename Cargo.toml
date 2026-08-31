@@ -112,6 +112,12 @@ winapi = { version = "0.3", features = [
     # なっていただけなので明示する（依存が変わると静かにコンパイルが通らなくなる）。
     "wingdi",
     "winbase",
+    # handleapi / processthreadsapi / winnt は UAC の見張りで
+    # 「親のプロセスがまだ動いているか」を見るのに使う（2026-08-31）。
+    # ⚠ 巻き込みで偶然有効になっているのを当てにしない（上と同じ理由）。
+    "handleapi",
+    "processthreadsapi",
+    "winnt",
     "wincrypt",
     "shellscalingapi",
     "pdh",
