@@ -60,11 +60,33 @@ enum AppKind {
 }
 
 fn find_app(dir: &Path) -> AppKind {
+    // 🔴🔴 **入っている物が必ず勝つ**（2026-09-01 実機で確定）。
+    //
+    //   ⚠ 元は持ち運び版を**先に**見ていた。そのため
+    //     `C:\Program Files\remohelppro\` に落としてきた1個のファイル
+    //     （`remohelppro-operator.exe`）が置いてあるだけで、
+    //     ⚠ **入れたばかりのインストール版が一度も起動しなくなる。**
+    //
+    //   ⚠ 実機で起きたこと（2026-08-31 夜）:
+    //     ・相談員版 1.4.66 を正しく入れた（実測でファイルも新しかった）
+    //     ・それでも「ログイン前から繋ぐ」の**古い釦**が出続けた
+    //     ・動いていたのは %LOCALAPPDATA%\remohelppro の**8/29 の複製**
+    //     ・その複製を消しても、押すたびに展開し直されて戻ってきた
+    //   ＝ ⚠ **入れ替えても永久に古い版が使われる。**しかも
+    //     「インストールは成功している」ので、原因に辿り着けない。
+    //
+    //   ★インストール版の形（本体exe＋`librustdesk.dll`）が揃っていたら、
+    //     持ち運び版が同じ場所に有っても**必ずインストール版を使う**。
+    //   ⚠ `librustdesk.dll` まで見るのは、⚠ 名前だけの空ファイルや
+    //     書きかけを「入っている」と誤って判断しないため。
+    let installed = dir.join(APP_EXE_INSTALLED);
+    if installed.exists() && dir.join("librustdesk.dll").exists() {
+        return AppKind::Installed(installed);
+    }
     let portable = dir.join(APP_EXE);
     if portable.exists() {
         return AppKind::Portable(portable);
     }
-    let installed = dir.join(APP_EXE_INSTALLED);
     if installed.exists() {
         return AppKind::Installed(installed);
     }
