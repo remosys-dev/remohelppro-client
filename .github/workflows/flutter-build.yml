@@ -376,6 +376,44 @@ jobs:
             echo "RL: 相談員フラグを立てられませんでした。中止します"; exit 1; }
 
       # REMOHELP PRO: 常駐版は sed で IS_RESIDENT_BUILD を true 化（無人アクセス＋電源エージェント有効）
+      # 🔴🔴 タスクマネージャーに出る名前を、3製品で分ける（2026-08-31 ご指摘）。
+      #
+      #   ⚠ 実機のタスクマネージャーに
+      #       「REMOHELP PRO Remote Desktop」が**5つ並んでいた**。
+      #     ワンタイム・常駐・相談員が全部この名前なので、
+      #     ⚠ **どれがどれか、社長にも私にも分からない。**
+      #   ⚠ 接続番号（APP_NAME）は 8/07・8/28 に分けたが、
+      #     ⚠ **画面に出る名前（FileDescription）は分けていなかった。**
+      #
+      #   ★これは見た目だけの値で、探す・止める処理は一切これを見ていない
+      #     （プロセスは**実行ファイルの置き場所**で見分けている）。
+      #     ＝ 分けても壊れる所が無い。
+      #   ⚠ Cargo.toml だけ直しても build.rs は作り直されない（過去に空振り済み）。
+      #     ★build.rs 自体を書き換える。書き換えれば必ず作り直される。
+      - name: RL product display name (sed)
+        shell: bash
+        run: |
+          if [ "${{ inputs.resident }}" = "true" ]; then
+            NAME="REMOHELP PRO 常駐"
+          elif [ "${{ inputs.upload-tag }}" = "operator" ] || [ "${{ inputs.upload-tag }}" = "mac-operator" ]; then
+            NAME="REMOHELP PRO 相談員"
+          elif [ "${{ inputs.support_show_window }}" = "true" ]; then
+            NAME="REMOHELP PRO サポート"
+          else
+            NAME=""
+          fi
+          if [ -z "$NAME" ]; then
+            echo "RL: この種類は表示名を変えません（既定のまま）"; exit 0
+          fi
+          for f in build.rs libs/portable/build.rs; do
+            sed -i "s/\.set(\"FileDescription\", \"REMOHELP PRO Remote Desktop\")/.set(\"FileDescription\", \"$NAME\")/" "$f"
+            echo "--- $f ---"; grep -n 'FileDescription' "$f"
+            # ⚠ sed は一致しなくても成功で終わる。必ず変わったことを確かめる。
+            grep -q "FileDescription\", \"$NAME\"" "$f" || {
+              echo "RL: $f の表示名を変えられませんでした。中止します"; exit 1; }
+          done
+          echo "RL: 表示名を「$NAME」にしました"
+
       - name: Resident build flag (sed)
         if: ${{ inputs.resident }}
         shell: bash
