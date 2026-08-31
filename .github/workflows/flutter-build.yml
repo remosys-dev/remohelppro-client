@@ -385,6 +385,9 @@ jobs:
       #   ⚠ 接続番号（APP_NAME）は 8/07・8/28 に分けたが、
       #     ⚠ **画面に出る名前（FileDescription）は分けていなかった。**
       #
+      #   ⚠ 英語にすること（2026-09-01 ご指摘）。日本語だと環境によって
+      #     文字化けし、かえって見分けられなくなる。実行ファイル名
+      #     （-support / -agent / 無し）と同じ言葉にそろえる。
       #   ★これは見た目だけの値で、探す・止める処理は一切これを見ていない
       #     （プロセスは**実行ファイルの置き場所**で見分けている）。
       #     ＝ 分けても壊れる所が無い。
@@ -394,11 +397,11 @@ jobs:
         shell: bash
         run: |
           if [ "${{ inputs.resident }}" = "true" ]; then
-            NAME="REMOHELP PRO 常駐"
+            NAME="REMOHELP PRO Agent"
           elif [ "${{ inputs.upload-tag }}" = "operator" ] || [ "${{ inputs.upload-tag }}" = "mac-operator" ]; then
-            NAME="REMOHELP PRO 相談員"
+            NAME="REMOHELP PRO Operator"
           elif [ "${{ inputs.support_show_window }}" = "true" ]; then
-            NAME="REMOHELP PRO サポート"
+            NAME="REMOHELP PRO Support"
           else
             NAME=""
           fi
