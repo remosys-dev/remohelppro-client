@@ -512,6 +512,38 @@ showCmWindow({bool isStartup = false}) async {
 /// ⚠ 使うのは「隠す設定でも必ず出さねばならない」場面だけ:
 ///   ・チャットが届いた ・音声通話の着信 ・自分の画面を見せている（戻す釦）
 ///   普段の表示は showCmWindow() のままでよい。
+/// 🔴🔴 **隠れていたら出し直す**（2026-09-01・版を突き合わせて原因確定）。
+///
+/// ■ 何を壊していたか
+///   8/29 まで（build-63）は、⚠ **毎秒の見張りが `showCmWindow()` を
+///   何度でも呼んでいた**。＝ 隠す処理に負けても、⚠ **次の1秒で出し直される**。
+///   窓は自分で治っていた。
+///
+///   8/30（build-64）で「一瞬で消える」を直そうとして、
+///   ⚠ `if (!_switchSidesShown)` を足し、⚠ **一度しか呼ばない**ようにした。
+///   ＝ ⚠ **その1回が競争に負けたら、二度と出し直されない。**
+///   これが「出るときと出ないときがある」の正体だった。
+///   ＝ ⚠ **私が自己回復の仕組みを外していた。**
+///
+/// ■ 一度だけにした理由は正しかった
+///   `forceShowCmWindow` は focus と前面化まで行うので、
+///   毎秒呼ぶと⚠ **相談員が他の窓を触れなくなる。**
+///   ★止め方が違った。⚠ **「隠れているときだけ」出し直せばよい。**
+///   出ている間は何もしないので、窓は震えないし、focus も奪わない。
+Future<void> reassertCmWindowIfHidden() async {
+  if (!_isCmReadyToShow) return;
+  try {
+    final hidden = (await windowManager.getOpacity()) != 1 ||
+        await windowManager.isMinimized() ||
+        !(await windowManager.isVisible());
+    if (!hidden) return;
+    try {
+      rlTrace('cm_reassert', {'gen': _cmWindowGen});
+    } catch (_) {}
+    await forceShowCmWindow();
+  } catch (_) {}
+}
+
 Future<void> forceShowCmWindow() async {
   // 🔴 いま出そうとしていることを宣言する（2026-08-31）。
   //   ⚠ これより前に始まっていた「隠す」は、これを見て諦める。

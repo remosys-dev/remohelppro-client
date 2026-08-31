@@ -691,11 +691,19 @@ class ServerModel with ChangeNotifier {
         if (!_keepCmForSwitch) hideCmWindow();
       } else if (_clients.any((c) => c.fromSwitch)) {
         // 隠す設定でも必ず出す。出す方の例外（8/27）と、ここを揃える。
-        // ⚠ **一度だけ**。forceShowCmWindow は focus と前面化まで行うので、
-        //   繰り返すと相談員が他の窓を触れなくなる。
         if (!_switchSidesShown) {
           _switchSidesShown = true;
           forceShowCmWindow();
+        } else {
+          // 🔴🔴 **出したあとも、隠れていたら出し直す**（2026-09-01）。
+          //
+          //   ⚠ 8/29 まではここが毎秒 showCmWindow() を呼んでおり、
+          //     隠す処理に負けても**次の1秒で出し直されていた**（自己回復）。
+          //   ⚠ 8/30 に「一度だけ」にした結果、⚠ **その1回が負けたら
+          //     二度と出し直されなくなった。**＝ 当たり外れの正体。
+          //   ★出ているときは何もしない（窓が震えず、focus も奪わない）。
+          //     隠れているときだけ出し直す。
+          reassertCmWindowIfHidden();
         }
       } else if (!hideCm) {
         showCmWindow();
