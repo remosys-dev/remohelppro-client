@@ -742,6 +742,34 @@ Future<void> windowOnTop(int? id) async {
   if (!isDesktop) {
     return;
   }
+  // 🔴🔴 **相談員のPCに「あなたのコンピューター」の窓を出さない**
+  //   （2026-08-31 ご指摘「本体の窓が出るようなことはだめです」）。
+  //
+  //   ⚠ この窓には**相談員ご自身の接続番号と合言葉**が並んでいる。
+  //     身に覚えのない画面が急に開くので、相談員を不安にさせる。
+  //
+  //   ⚠ 入口を1つずつ塞いできたが、**3回とも取り残していた**:
+  //     ① トレイの「開く」            … 塞いだ（2026-08-26）
+  //     ② 遠隔の画面の右上の「＋」    … 塞いだ（2026-08-26）
+  //     ③ ⚠ **中身の無い `remohelppro://` を受け取ったとき** … 残っていた
+  //        （`handleUriLink` は args が空だとここを呼ぶ）
+  //   ★呼び出し側を数えるのをやめ、⚠ **出す部品そのものに歯止めを置く。**
+  //     ＝ これから入口が増えても、本体の窓は二度と出ない。
+  //
+  //   ⚠ 出してよいのは**お客様用（ワンタイム）だけ**。あちらは
+  //     接続コードの画面そのものなので、出ないと使えない。
+  //   ⚠ `desktopType` を必ず見ること。接続管理の窓（CM）も**同じ関数**で
+  //     自分を前に出しており、ここで塞ぐと⚠ **「戻る窓」が出なくなる。**
+  if (id == null &&
+      desktopType == DesktopType.main &&
+      !kRlSupportShowWindow) {
+    try {
+      rlTrace('main_window_on_top_blocked', {
+        'from': StackTrace.current.toString().split('\n').skip(1).take(2).join(' | '),
+      });
+    } catch (_) {}
+    return;
+  }
   print("Bring window '$id' on top");
   if (id == null) {
     // main window
