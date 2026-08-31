@@ -1159,9 +1159,62 @@ impl Config {
 
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
+            // 🔴🔴 **再起動すると接続番号が変わっていた**（2026-08-31 実測で確定）。
+            //
+            //   ⚠ 中継サーバーの記録:
+            //     16:13:46  update_pk 2621680887   ← 再起動の前
+            //     16:24:21  update_pk 2621680886   ← 再起動の後（同じPC・同じUUID）
+            //   ＝ ⚠ **番号が1つずれた。**相談員は古い番号を呼び続けるので、
+            //     10分待っても永久に繋がらない。手で「もう一度開く」を押すと
+            //     （当社のサーバーが新しい番号を知っているので）繋がる。
+            //     ＝「再起動再接続が動かない」の正体。
+            //
+            //   なぜずれるか: 番号は `mac_address::get_mac_address()` から
+            //   作っていた。これは ⚠ **「最初に見つかった1枚」を返すだけ**で、
+            //   どれが最初かは OS の列挙順に依存する。有線・無線・Bluetooth・
+            //   仮想アダプターが並ぶPCでは、⚠ **再起動のたびに入れ替わりうる。**
+            //   MACの下1桁だけ違う組み合わせは珍しくないので、1違いになった。
+            //
+            //   ★アダプターに依存しないもので作る。`machine_uid`（Windows は
+            //     レジストリの MachineGuid）は ⚠ **再起動しても変わらない**。
+            //     実測でも、番号が変わった前後で UUID は同一だった
+            //     （46fa4ac0-878c-43e8-b0cd-019a318b3184）。
+            //
+            //   ⚠ 影響範囲: ここは「設定に番号が無いとき」しか通らない。
+            //     既に番号を持っている端末（常駐・相談員・導入済み）は**変わらない**。
+            //     変わるのは、番号を作り直す場面＝いま壊れている場面だけ。
+            //   ⚠ 範囲は必ず 0x1FFF_FFFF 以下（製品の目印ビットとぶつけない）。
+            //     さらに 0x1000_0000 を立てて、常に9桁になるようにする。
+            let uuid = crate::get_uuid();
+            if !uuid.is_empty() {
+                // ⚠ 決まった手順で数にする（FNV-1a）。外部の実装に依存しないこと。
+                //   ハッシュの実装が変わると番号が変わってしまうため、ここに直接書く。
+                let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                for b in &uuid {
+                    h ^= *b as u64;
+                    h = h.wrapping_mul(0x1000_0000_01b3);
+                }
+                let id = ((h as u32) & 0x1FFF_FFFF) | 0x1000_0000;
+                log::info!("Generated id {} (from machine uuid)", id);
+                return Some(id.to_string());
+            }
+            log::warn!(
+                "RL: 端末固有のUUIDを取得できません。MACアドレスから番号を作ります \
+                 （⚠ 再起動で番号が変わる可能性があります）"
+            );
             let mut id = 0u32;
-            if let Ok(Some(ma)) = mac_address::get_mac_address() {
-                for x in &ma.bytes()[2..] {
+            // ⚠ MAC に落ちるときも「最初の1枚」では選ばない。⚠ **必ず同じ1枚**に
+            //   なるよう、全部のアダプターを見て、いちばん小さいものを選ぶ。
+            let chosen = mac_address::MacAddressIterator::new()
+                .ok()
+                .and_then(|it| {
+                    it.map(|m| m.bytes())
+                        .filter(|b| b.iter().any(|x| *x != 0))
+                        .min()
+                })
+                .or_else(|| mac_address::get_mac_address().ok().flatten().map(|m| m.bytes()));
+            if let Some(bytes) = chosen {
+                for x in &bytes[2..] {
                     id = (id << 8) | (*x as u32);
                 }
                 id &= 0x1FFFFFFF;

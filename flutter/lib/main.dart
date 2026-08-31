@@ -517,10 +517,23 @@ Future<void> forceShowCmWindow() async {
   //   ⚠ これより前に始まっていた「隠す」は、これを見て諦める。
   final gen = ++_cmWindowGen;
   // 用意ができるまで最大4秒待つ。⚠ 待たずに諦めると起動直後を取りこぼす。
+  var waited = 0;
   for (var i = 0; i < 20; i++) {
     if (_isCmReadyToShow) break;
     await Future.delayed(const Duration(milliseconds: 200));
+    waited += 200;
   }
+  // 🔴 **待っても用意ができないときに、黙って引き下がらない**（2026-08-31 実測）。
+  //
+  //   ⚠ 元はここで `_isCmReadyToShow` が false のまま抜けており、
+  //     ⚠ **何も出さないまま、記録も残さず終わっていた。**
+  //     ＝「出るときと出ないときがある」の当たり外れの正体になりうる。
+  //   ★用意ができていなくても、出す手続きは最後まで行う。
+  //     windowManager の呼び出しは、まだ準備中でも害にならない。
+  //   ★何が起きたかを必ず残す。次に外したときに、また当てずっぽうをしないため。
+  try {
+    rlTrace('cm_force_show', {'gen': gen, 'waited': waited, 'ready': _isCmReadyToShow});
+  } catch (_) {}
   // ⚠ 待っている間に、もっと新しい「出す」が始まっていたら、そちらに任せる。
   if (gen != _cmWindowGen) return;
   try {
@@ -540,23 +553,41 @@ Future<void> forceShowCmWindow() async {
     //   ★600ms 後に一度だけ見に行き、透明・最小化なら出し直す。
     //     ⚠ 変わっていなければ何もしない（窓が震えない）。
     //   ⚠ ここで諦めると、⚠ **お客様に自分のPCを操作させたまま止められない。**
-    Future.delayed(const Duration(milliseconds: 600), () async {
-      if (gen != _cmWindowGen) return; // 新しい指示が来ていれば任せる
-      try {
-        final hidden =
-            (await windowManager.getOpacity()) != 1 ||
-                await windowManager.isMinimized() ||
-                !(await windowManager.isVisible());
-        if (!hidden) return;
-        await windowManager.setOpacity(1);
-        if (await windowManager.isMinimized()) await windowManager.restore();
-        await windowManager.show();
-        await windowManager.focus();
-        windowOnTop(null);
-      } catch (_) {}
-    });
+    // ⚠ 1回では足りなかった（2026-08-31 実機で「出るときと出ないときがある」）。
+    //   ⚠ 起動直後は窓の用意が続いているので、⚠ **後から隠される余地が残る。**
+    //   ★3回見に行く。⚠ 出ていれば何もしない（窓は震えない）。
+    for (final ms in const [600, 1500, 3000]) {
+      Future.delayed(Duration(milliseconds: ms), () async {
+        if (gen != _cmWindowGen) return; // 新しい指示が来ていれば任せる
+        try {
+          final opacity = await windowManager.getOpacity();
+          final minimized = await windowManager.isMinimized();
+          final visible = await windowManager.isVisible();
+          final hidden = opacity != 1 || minimized || !visible;
+          try {
+            rlTrace('cm_force_recheck', {
+              'gen': gen,
+              'ms': ms,
+              'opacity': opacity,
+              'min': minimized,
+              'vis': visible,
+              'fix': hidden,
+            });
+          } catch (_) {}
+          if (!hidden) return;
+          await windowManager.setOpacity(1);
+          if (await windowManager.isMinimized()) await windowManager.restore();
+          await windowManager.show();
+          await windowManager.focus();
+          windowOnTop(null);
+        } catch (_) {}
+      });
+    }
   } catch (e) {
     debugPrint('接続の窓を出せませんでした: $e');
+    try {
+      rlTrace('cm_force_show_error', {'gen': gen, 'e': e.toString()});
+    } catch (_) {}
   }
 }
 
