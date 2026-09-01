@@ -811,6 +811,24 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
   }
 
   List<Widget> _buildRemoteSections(bool canModify) {
+    // 🔴🔴 **お客様に出すのは「キーボード・マウス操作」だけ**（2026-09-01 ご判断）。
+    //
+    //   ご指摘:「他は相談員が使う機能なので、⚠ **お客様が制限すると
+    //           サポートに支障が出る**。他のは会社管理者が許可できるように」
+    //
+    //   ⚠ 分けて考えると:
+    //     お客様が決めるべきもの … 「自分のPCを触らせるかどうか」＝お客様の権利
+    //     相談員が仕事に使う道具 … クリップボード／ファイル転送／音声／録画／
+    //                              入力ブロック／プライバシーモード／再起動
+    //   ⚠ 後者をお客様が切ると**サポートができなくなる**のに、
+    //     ⚠ お客様には「切ると何が困るか」が分からない。
+    //     ⚠ 切ったことを忘れて「なぜできないの」になる。
+    //   ⚠ 選べるものが多いほど、お客様は迷い、押し間違える。
+    //
+    //   ★今日は「1つだけ出す」。⚠ 権限そのものは全部残っている（内部では使う）。
+    //   ⚠ 明日: **会社管理者が項目ごとに「お客様に見せる／見せない」を決める**
+    //     仕組みを設計する。AI判断の提供方式を会社ごとに決めるのと同じ形。
+    //   ⚠ 戻すときは、この関数を git から戻すだけ。
     return [
       buildSectionHeader('📌', 'アクセス権限'),
       buildPermissionRow(
@@ -819,64 +837,6 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
         label: 'キーボード・マウス操作',
         description: '遠隔から PC を操作可能にする',
         onSwitch: (v) => _setPerm('keyboard', v, (e) => client.keyboard = e),
-        canModify: canModify,
-      ),
-      buildPermissionRow(
-        enabled: client.clipboard,
-        iconData: Icons.assignment_rounded,
-        label: 'クリップボード共有',
-        description: '文字・画像のコピー&ペースト',
-        onSwitch: (v) => _setPerm('clipboard', v, (e) => client.clipboard = e),
-        canModify: canModify,
-      ),
-      // 🔴 「音声出力共有」は出さない（2026-09-01 ご指示）。
-      //   ⚠ 実機で窓に収まらず**下が切れて読めなかった**。
-      //   ⚠ 権限そのものは残す（内部では使う）。⚠ 釦だけ出さない。
-      //   ⚠ 戻すときはこの塊を戻すだけ。
-      buildSectionHeader('📁', 'データ転送'),
-      buildPermissionRow(
-        enabled: client.file,
-        iconData: Icons.upload_file_rounded,
-        label: 'ファイル転送',
-        description: 'ファイルのアップロード/ダウンロード',
-        onSwitch: (v) => _setPerm('file', v, (e) => client.file = e),
-        canModify: canModify,
-      ),
-      buildPermissionRow(
-        enabled: client.recording,
-        iconData: Icons.videocam_rounded,
-        label: '画面録画',
-        description: 'セッション内容を遠隔側で録画',
-        onSwitch: (v) => _setPerm('recording', v, (e) => client.recording = e),
-        canModify: canModify,
-      ),
-      buildSectionHeader('👁', '表示制御'),
-      if (isWindows)
-        buildPermissionRow(
-          enabled: client.blockInput,
-          iconData: Icons.block,
-          label: 'ローカル入力ブロック',
-          description: 'PC 前のユーザー操作を遮断 (Windows のみ)',
-          onSwitch: (v) =>
-              _setPerm('block_input', v, (e) => client.blockInput = e),
-          canModify: canModify,
-        ),
-      if (bind.mainSupportedPrivacyModeImpls() != '[]')
-        buildPermissionRow(
-          enabled: client.privacyMode,
-          iconData: Icons.visibility_off,
-          label: 'プライバシーモード',
-          description: 'PC 画面を真っ暗にして覗き見防止',
-          onSwitch: (v) =>
-              _setPerm('privacy_mode', v, (e) => client.privacyMode = e),
-          canModify: canModify,
-        ),
-      buildPermissionRow(
-        enabled: client.restart,
-        iconData: Icons.restart_alt_rounded,
-        label: 'リモート再起動',
-        description: '遠隔から PC を再起動可能にする',
-        onSwitch: (v) => _setPerm('restart', v, (e) => client.restart = e),
         canModify: canModify,
       ),
       SizedBox(height: 8),

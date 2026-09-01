@@ -383,6 +383,11 @@ pub fn core_main() -> Option<Vec<String>> {
     //   ⚠ 押していただけなくても支障なく続く（相談員が押せないだけ）。
     #[cfg(windows)]
     if args.is_empty() {
+        // 🔴 前の版の残骸を、⚠ **始めるときに**片付ける（2026-09-01 ご指摘）。
+        //   ⚠ 「入れ替えたのに何も変わらない」の正体は毎回これだった。
+        //     そのたびに人が手で止めていた。⚠ それでは毎回はまる。
+        //   ⚠ 当社のワンタイム版だけを狙う（目印ファイルで見分ける）。
+        crate::common::rl_kill_stale_onetime();
         rl_uac_prepare();
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]

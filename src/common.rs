@@ -995,6 +995,71 @@ pub fn rl_remove_onetime_data() {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// 🔴🔴 **起動するとき、前の版の残骸を片付ける**（2026-09-01 ご指摘）。
+///
+/// ■ なぜ要るか
+///   ⚠ 「入れ替えたのに何も変わらない」の正体が、⚠ **毎回これ**だった。
+///     ・8/31 夜 相談員版: 古い複製が動いたまま → 古い釦が出続けた
+///     ・9/01 夜 お客様用: 古いプロセスが動いたまま → 直しが効かなかった
+///   ⚠ そのたびに**人が手で止めて**いた。⚠ それでは毎回はまる。
+///   ★起動のたびに、⚠ **自分で片付けてから始める。**
+///
+/// ■ 既存の [`rl_kill_sibling_processes`] との違い
+///   あちらは「**同じ**フォルダから動いているもの」を片付ける（終了時の後始末）。
+///   ⚠ ところが残骸は**別のフォルダ**（前回の展開先）に居る。だから当たらない。
+///   ★こちらは「**別の**フォルダだが、⚠ **当社のワンタイム版である**もの」を狙う。
+///
+/// ■ 巻き添えを出さない
+///   ⚠ 見分けは **CI が置く目印ファイル**（実行ファイルの隣）で行う。
+///     ⚠ 名前で見分けない。RustDesk 系5製品は表示名も窓の種類も同じで、
+///       ⚠ **常駐版・相談員版・他社製品まで巻き込む**（過去に実際に起きている）。
+///   ⚠ 目印は当社のワンタイム版の隣にしか無い。
+///   ⚠ 常駐版・相談員版では**絶対に動かさない**（呼ぶ側の条件だけに頼らない）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn rl_kill_stale_onetime() {
+    use hbb_common::sysinfo::System;
+    if hbb_common::config::IS_RESIDENT_BUILD || hbb_common::config::IS_OPERATOR_BUILD {
+        return;
+    }
+    let Ok(my_exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(my_dir) = my_exe.parent().map(|p| p.to_path_buf()) else {
+        return;
+    };
+    // 共有識別子OK: 名前ではなく、CI が置く目印ファイルの有無で当社の
+    //   ワンタイム版だけに絞っている。他製品の実行ファイルの隣には存在しない。
+    const MARK: &str = "remohelppro-onetime.flag";
+    if !my_dir.join(MARK).exists() {
+        return;
+    }
+    let my_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let mut killed = 0;
+    for (pid, p) in sys.processes().iter() {
+        if *pid == my_pid {
+            continue;
+        }
+        let Some(dir) = p.exe().parent() else { continue };
+        // 自分と同じフォルダは触らない（自分の子プロセスを殺さない）。
+        if dir == my_dir.as_path() {
+            continue;
+        }
+        // ⚠ 当社のワンタイム版でなければ触らない。
+        if !dir.join(MARK).exists() {
+            continue;
+        }
+        if p.kill() {
+            killed += 1;
+            log::info!("RL: 前の版の残骸を片付けました {:?}", dir);
+        }
+    }
+    if killed > 0 {
+        log::info!("RL: 起動時に残骸を {killed} 個片付けました");
+    }
+}
+
 pub fn rl_kill_sibling_processes() {
     use hbb_common::sysinfo::System;
     // ⚠ ワンタイム版だけの後始末。常駐版・相談員版では**絶対にやらない**。
