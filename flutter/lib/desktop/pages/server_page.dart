@@ -179,6 +179,14 @@ class ConnectionManagerState extends State<ConnectionManager>
   @override
   void initState() {
     gFFI.serverModel.updateClientState();
+    // 🔴 窓のタイトルも会社名にする（2026-09-01 ご指摘・2回目）。
+    //   ⚠ 前回はタブを選んだときだけ直していた。⚠ 相手が1人のときは
+    //     その道を通らないので、⚠ **タイトルだけ古い名前のまま**だった。
+    //   ★窓が開いた時点で必ず入れる。⚠ 取れなければ何もしない（壊さない）。
+    try {
+      final co = rlSupportCompanyName();
+      if (co.isNotEmpty) windowManager.setTitle(co);
+    } catch (_) {}
     WidgetsBinding.instance.addObserver(this);
     super.initState();
   }
@@ -821,14 +829,10 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
         onSwitch: (v) => _setPerm('clipboard', v, (e) => client.clipboard = e),
         canModify: canModify,
       ),
-      buildPermissionRow(
-        enabled: client.audio,
-        iconData: Icons.volume_up_rounded,
-        label: '音声出力共有',
-        description: 'PC の音を遠隔に届ける',
-        onSwitch: (v) => _setPerm('audio', v, (e) => client.audio = e),
-        canModify: canModify,
-      ),
+      // 🔴 「音声出力共有」は出さない（2026-09-01 ご指示）。
+      //   ⚠ 実機で窓に収まらず**下が切れて読めなかった**。
+      //   ⚠ 権限そのものは残す（内部では使う）。⚠ 釦だけ出さない。
+      //   ⚠ 戻すときはこの塊を戻すだけ。
       buildSectionHeader('📁', 'データ転送'),
       buildPermissionRow(
         enabled: client.file,
@@ -882,14 +886,8 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
   List<Widget> _buildCameraSections(bool canModify) {
     return [
       buildSectionHeader('📌', 'カメラ権限'),
-      buildPermissionRow(
-        enabled: client.audio,
-        iconData: Icons.volume_up_rounded,
-        label: '音声出力共有',
-        description: 'カメラの音を遠隔に届ける',
-        onSwitch: (v) => _setPerm('audio', v, (e) => client.audio = e),
-        canModify: canModify,
-      ),
+      // 🔴 カメラ側の「音声出力共有」も出さない（2026-09-01 ご指示）。
+      //   ⚠ 同じ名前の項目が2か所にある。片方だけ消すと取り残す。
       buildPermissionRow(
         enabled: client.recording,
         iconData: Icons.videocam_rounded,

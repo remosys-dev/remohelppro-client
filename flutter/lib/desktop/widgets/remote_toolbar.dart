@@ -734,7 +734,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
             ),
           ),
         ),
-        _buildSessionInfoBar(context),
+        // 🔴 帯は**横向きでも**出さない（2026-09-01 ご指摘・2回目）。
+        //   ⚠ 私は縦向き（メニューの中）だけ消して「直した」と報告した。
+        //     ⚠ 実機で出ていたのは**こちら（横向き）**だった。
+        //     ＝ ⚠ **入口を数えずに、目についた1つだけ直した。**今日3回目。
+        //   ⚠ 戻すときはこの行を戻すだけ（_buildSessionInfoBar は残してある）。
         _buildDraggableCollapse(context),
       ],
     );
