@@ -500,6 +500,20 @@ pub mod server {
         std::thread::spawn(|| {
             run_exit_check();
         });
+        // 🔴🔴 **アプリが終わったら、自分も終わる**（2026-09-02 ご指摘
+        //   「前のセクションが終了しているのに出るから問題だね」）。
+        //
+        //   ⚠ ここは **SYSTEM 権限**で動いている。サポートが終わるとき、
+        //     利用者の権限のアプリが仲間を片付けにくるが、
+        //     ⚠ **SYSTEM のこのプロセスは殺せない**（権限が足りない）。
+        //     ＝ 必ず生き残り、二重起動の錠と通信路を握り続ける。
+        //     ＝ お客様は次に⚠ **PCを再起動しないと起動できない**。
+        //   ⚠ EXIT は今まで**異常時にしか立たなかった**。
+        //     「アプリが居なくなったから終わる」という道が無かった。
+        //   ★自分で見張って、自分で終わる。殺してもらうのを当てにしない。
+        std::thread::spawn(|| {
+            rl_exit_when_app_gone();
+        });
         let record_pos_handle = crate::input_service::try_start_record_cursor_pos();
         // Arm forced-exit watchdog only for worker join phase.
         // Once join phase completes, cleanup should not be interrupted by forced exit.
@@ -519,6 +533,51 @@ pub mod server {
         }
         drop(shmem);
         remove_shared_memory_flink_with_retry(&shmem_name);
+    }
+
+    /// アプリ（同じフォルダの仲間）が1つも居なくなったら、自分も終わる。
+    ///
+    /// ⚠ 判断は「同じフォルダから動いているプロセスが自分だけか」。
+    ///   名前では見ない（3製品とも表示名が同じなので巻き込む）。
+    /// ⚠ 起動直後は仲間が揃っていないので、⚠ **30秒待ってから**見張る。
+    /// ⚠ 1回で決めない。⚠ **2回続けて独りだったとき**だけ終わる
+    ///   （入れ替えの一瞬など、たまたま独りになる場面がある）。
+    fn rl_exit_when_app_gone() {
+        use hbb_common::sysinfo::System;
+        let Ok(my_exe) = std::env::current_exe() else {
+            return;
+        };
+        let Some(my_dir) = my_exe.parent().map(|p| p.to_path_buf()) else {
+            return;
+        };
+        let me = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+        std::thread::sleep(Duration::from_secs(30));
+        let mut alone = 0;
+        loop {
+            if EXIT.lock().unwrap().clone() {
+                return;
+            }
+            let mut sys = System::new();
+            sys.refresh_processes();
+            let has_friend = sys
+                .processes()
+                .iter()
+                .any(|(pid, p)| *pid != me && p.exe().parent() == Some(my_dir.as_path()));
+            if has_friend {
+                alone = 0;
+            } else {
+                alone += 1;
+                log::info!("RL: 同じフォルダの仲間が居ません（{alone}回目）");
+                if alone >= 2 {
+                    log::info!(
+                        "RL: アプリが終わったので、画面取り込みの部品も終わります（{my_dir:?}）"
+                    );
+                    *EXIT.lock().unwrap() = true;
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
     }
 
     fn run_exit_check() {

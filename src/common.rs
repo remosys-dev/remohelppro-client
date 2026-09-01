@@ -1081,6 +1081,7 @@ pub fn rl_kill_sibling_processes() {
     let mut sys = System::new();
     sys.refresh_processes();
     let mut killed = 0;
+    let mut failed = 0;
     for (pid, p) in sys.processes().iter() {
         if *pid == my_pid {
             continue;
@@ -1089,11 +1090,36 @@ pub fn rl_kill_sibling_processes() {
         if exe != my_dir.as_path() {
             continue;
         }
+        // 🔴🔴 **殺せなかったものを必ず残す**（2026-09-02 ご指摘
+        //   「前のセクションが終了しているのに出るから問題」）。
+        //
+        //   ⚠ これまでは `if p.kill()` の失敗を**捨てていた**。
+        //     ＝ 記録には「N個片付けました」としか出ず、
+        //     ⚠ **残った物があることが、どこにも出なかった。**
+        //   ⚠ 画面取り込みの部品は **SYSTEM 権限**で動いている。
+        //     利用者の権限では**殺せない**ので、ここは必ず失敗する。
+        //     その残骸が二重起動の錠を握り、
+        //     ⚠ **次はPCを再起動しないと起動できなくなる。**
+        //   ★数だけでなく「誰が残ったか」を残す。ここが空白だと原因に辿り着けない。
         if p.kill() {
             killed += 1;
+        } else {
+            failed += 1;
+            log::warn!(
+                "RL: 片付けられませんでした pid={pid} {:?}（権限が足りない可能性）",
+                p.exe()
+            );
         }
     }
-    log::info!("RL: 同じフォルダの仲間を {killed} 個片付けました（{my_dir:?}）");
+    if failed > 0 {
+        log::warn!(
+            "RL: 同じフォルダの仲間を {killed} 個片付けましたが、\
+             ⚠ {failed} 個は残っています（{my_dir:?}）。\
+             残った物が通信路や錠を握ると、次の起動が塞がれます"
+        );
+    } else {
+        log::info!("RL: 同じフォルダの仲間を {killed} 個片付けました（{my_dir:?}）");
+    }
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
