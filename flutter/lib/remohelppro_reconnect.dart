@@ -40,6 +40,21 @@ import 'remohelppro_trace.dart' show rlTrace;
 // ⚠ 消すのは**サービス自身**（期限とサポート終了を自分で見る）。
 //   ここから消しに行くと、そのたびに管理者の確認が出てしまう。
 
+
+/// Rust の隠し実行から終了コードを取り出す小さな受け皿。
+/// ⚠ 取り出せなければ 1（失敗）にする。⚠ 黙って成功にしない。
+class _RlRun {
+  final int exitCode;
+  const _RlRun(this.exitCode);
+  String get stderr => '';
+}
+
+int _rlExitOf(String out) {
+  final m = RegExp(r'exit=(-?\d+)').firstMatch(out);
+  if (m != null) return int.tryParse(m.group(1)!) ?? 1;
+  return out.trim().isEmpty ? 1 : 0;
+}
+
 /// 一時サービスの**最後の歯止め**。ここまで来たら、何があっても消す。
 ///
 /// 🔴 これは「サポートの制限時間」ではない（2026-08-03 に作り直した）。
@@ -76,10 +91,20 @@ Future<PrelogonResult> preparePrelogonResume(String shortId) async {
     final ps = "\$ErrorActionPreference='Stop';"
         "\$p=Start-Process -FilePath '${exe.replaceAll("'", "''")}'"
         " -ArgumentList '--rl-prelogon-install','${appDir.replaceAll("'", "''")}','$shortId','$hardLimit'"
-        " -Verb RunAs -Wait -PassThru;"
-        "exit \$p.ExitCode";
-    final r = await Process.run(
-        'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+        " -Verb RunAs -WindowStyle Hidden -Wait -PassThru;"
+        // ⚠ 終了コードは `exit` ではなく**出力**に出す。
+        //   隠し実行（rl_run_hidden）は標準出力しか返さないため。
+        "Write-Output ('exit=' + \$p.ExitCode)";
+    // 🔴 黒い窓を出さない（2026-09-01 ご指摘・8/27 の直しの取り残し）。
+    //   ⚠ Dart の Process.run は Windows で**必ずコンソールの窓を作る**。
+    //     8/27 に Rust 側の隠し実行（rl-run-hidden）を作ったが、
+    //     ⚠ **powershell を使う3か所を移し忘れていた。**
+    //   ⚠ 終了コードは Rust 側が最後の行に返す（"exit=<数字>"）。
+    final out = await bind.mainGetCommon(
+        key: 'rl-run-hidden:${jsonEncode([
+          'powershell', '-NoProfile', '-NonInteractive', '-Command', ps
+        ])}');
+    final r = _RlRun(_rlExitOf(out));
     if (r.exitCode == 0) return PrelogonResult.ok;
     if (r.exitCode == 2) return PrelogonResult.noAdmin;
     // Start-Process が投げた（＝「いいえ」を押された）場合もここに来る。

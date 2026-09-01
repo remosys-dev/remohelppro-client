@@ -479,6 +479,15 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         if (n.isNotEmpty && t.isNotEmpty) {
           _supportName = n;
           _supportTel = t;
+          // 🔴 接続管理の窓へ渡す（2026-09-01 ご判断）。
+          //   ⚠ あちらは**別のプロセス**なので、変数では届かない。
+          //     設定ファイルは両方が読むので、そこに預ける。
+          //   ⚠ お客様の画面に出ていた `相談員PCのユーザー名`（相談員PCの Windows ユーザー名）を
+          //     この会社名に差し替えるために使う。
+          //   ⚠ 取れないときは何も書かない＝あちらは従来どおりの表示に戻る。
+          try {
+            bind.mainSetLocalOption(key: 'rl-support-company', value: n);
+          } catch (_) {}
         }
       }
       // 担当者名。⚠ 返し方が2つある（verify-pin は入れ子、pair-init は平ら）。
@@ -964,13 +973,16 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       final ps = "\$ErrorActionPreference='Stop';"
           "\$p=Start-Process -FilePath 'cmd.exe'"
           " -ArgumentList '/c','$cmd'"
-          " -Verb RunAs -Wait -PassThru;"
+          " -Verb RunAs -WindowStyle Hidden -Wait -PassThru;"
           "exit \$p.ExitCode";
-      final r = await Process.run(
-          'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+      // 🔴 黒い窓を出さない（2026-09-01・8/27 の直しの取り残し）。
+      final out = await bind.mainGetCommon(
+          key: 'rl-run-hidden:${jsonEncode([
+            'powershell', '-NoProfile', '-NonInteractive', '-Command', ps
+          ])}');
       // sc stop は「既に止まっている」でも 0 以外を返すことがある。
       // 成否は次の登録確認で判断する（止まっていれば通る）。
-      debugPrint('RL pause resident: exit=${r.exitCode}');
+      debugPrint('RL pause resident: $out');
       _residentPaused = true;
     } catch (e) {
       debugPrint('RL pause resident failed: $e');
@@ -1011,9 +1023,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           ' & schtasks /delete /tn ${_kResumeTask}_AGENT /f';
       const ps = "\$p=Start-Process -FilePath 'cmd.exe'"
           " -ArgumentList '/c','$cmd'"
-          " -Verb RunAs -Wait -PassThru; exit \$p.ExitCode";
-      await Process.run(
-          'powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+          " -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit \$p.ExitCode";
+      // 🔴 黒い窓を出さない（2026-09-01・8/27 の直しの取り残し）。
+      await bind.mainGetCommon(
+          key: 'rl-run-hidden:${jsonEncode([
+            'powershell', '-NoProfile', '-NonInteractive', '-Command', ps
+          ])}');
     } catch (e) {
       debugPrint('RL resume resident failed: $e');
     }

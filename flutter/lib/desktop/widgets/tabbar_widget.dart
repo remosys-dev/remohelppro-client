@@ -283,6 +283,16 @@ class DesktopTab extends StatefulWidget {
   }) : super(key: key);
 
   static RxString tablabelGetter(String peerId) {
+    // 🔴 接続管理の窓のタブにも会社名を出す（2026-09-01 ご判断）。
+    //   ⚠ ここも相談員PCの Windows ユーザー名が出ていた。
+    //   ⚠ 直す場所は4か所あった。2つだけ直すと、また取り残す。
+    //   ⚠ 取れなければ従来どおり（壊さない）。
+    if (desktopType == DesktopType.cm) {
+      try {
+        final co = bind.mainGetLocalOption(key: 'rl-support-company').trim();
+        if (co.isNotEmpty) return RxString(co);
+      } catch (_) {}
+    }
     final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
     return RxString(getDesktopTabLabel(peerId, alias));
   }

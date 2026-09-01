@@ -756,9 +756,11 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
             vertical: true,
             child: MenuAnchor(
               // 接続先・操作権・通信は、開いたときだけ見える見出しとして上に置く。
+              // 🔴 接続先・操作権・通信 の帯は出さない（2026-09-01 ご指示）。
+              //   ⚠ 相談員が見て何かできる情報ではなく、
+              //     ⚠ お客様の画面に相談員の接続番号が映り込む恐れもある。
+              //   ⚠ 戻すときは下の2行を戻すだけ（_buildSessionInfoBar は残してある）。
               menuChildren: [
-                _buildSessionInfoBar(context, inMenu: true),
-                const Divider(height: 9),
                 ...toolbarItems,
               ],
               style: _ToolbarTheme.verticalMenuStyle(context),

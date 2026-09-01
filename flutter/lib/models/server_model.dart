@@ -19,6 +19,8 @@ import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
 // 終了をサーバーへ伝える受け口（顧客アプリの接続画面が預ける）。
 import '../remohelppro_pairing.dart' show rlNotifySupportEnded;
+import '../remohelppro_kiroku.dart'
+    show rlKirokuConnected, rlKirokuDisconnected;
 import '../remohelppro_trace.dart' show rlTrace, rlTraceFlushNow;
 import '../utils/multi_window_manager.dart' show rustDeskWinManager;
 import 'model.dart';
@@ -777,6 +779,13 @@ class ServerModel with ChangeNotifier {
       // 🔴 何が来たのかを必ず残す（2026-08-30）。⚠ **3回直して3回とも外した。**
       //   毎回「fromSwitch が真のはず」と思い込んで直していたが、
       //   ⚠ **真かどうかを一度も測っていなかった。**ここで測る。
+      // 🔴 お客様が読める記録を1行残す（2026-09-01 ご指示）。
+      //   ⚠ 常駐は無人なので、⚠ **後から確かめる手段が記録しかない。**
+      _connectedAt[client.id] = DateTime.now();
+      rlKirokuConnected(
+        staff: client.displayName.isNotEmpty ? client.displayName : client.name,
+        company: rlKirokuCompany(),
+      );
       rlTrace('cm_add_conn', {
         'id': client.id,
         'fromSwitch': client.fromSwitch,
@@ -951,9 +960,26 @@ class ServerModel with ChangeNotifier {
     }
   }
 
+  /// 繋がった時刻。⚠ 接続時間を出すために覚えておく。
+  final Map<int, DateTime> _connectedAt = {};
+
+  /// 会社名（お客様の記録に出す）。⚠ 取れなければ空。
+  String rlKirokuCompany() {
+    try {
+      return bind.mainGetLocalOption(key: 'rl-support-company').trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
   void onClientRemove(Map<String, dynamic> evt) {
     try {
       final id = int.parse(evt['id'] as String);
+      // 🔴 お客様が読める記録（2026-09-01 ご指示）。
+      final at = _connectedAt.remove(id);
+      if (at != null) {
+        rlKirokuDisconnected(DateTime.now().difference(at));
+      }
       final close = (evt['close'] as String) == 'true';
       if (_clients.any((c) => c.id == id)) {
         final index = _clients.indexWhere((client) => client.id == id);

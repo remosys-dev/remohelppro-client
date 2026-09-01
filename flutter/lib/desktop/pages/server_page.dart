@@ -20,10 +20,27 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../common.dart';
+// 「×」で接続を切らず、窓を隠すだけにするために使う（2026-09-01）。
+import '../../main.dart' show hideCmWindow;
 import '../../common/widgets/chat_page.dart';
 import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
+
+/// 🔴🔴 **お客様の画面に出す名前**（2026-09-01 ご判断）。
+///
+///   ⚠ ここに出ていたのは `client.name` ＝**相談員PCの Windows ユーザー名**
+///     （実機で確認済み）。⚠ お客様には意味が分からず、
+///     ⚠ 「誰が私のPCを触っているのか」の答えになっていなかった。
+///   ★左のカードと**同じ会社名**を出す。会社ごとに変わっても必ず一致する。
+///   ⚠ 取れないときは空を返す。呼ぶ側は従来どおりの表示に戻る（壊さない）。
+String rlSupportCompanyName() {
+  try {
+    return bind.mainGetLocalOption(key: 'rl-support-company').trim();
+  } catch (_) {
+    return '';
+  }
+}
 
 class DesktopServerPage extends StatefulWidget {
   const DesktopServerPage({Key? key}) : super(key: key);
@@ -58,15 +75,20 @@ class _DesktopServerPageState extends State<DesktopServerPage>
 
   @override
   void onWindowClose() {
-    Future.wait([gFFI.serverModel.closeAll(), gFFI.close()]).then((_) {
-      if (isMacOS) {
-        RdPlatformChannel.instance.terminate();
-      } else {
-        windowManager.setPreventClose(false);
-        windowManager.close();
-      }
-    });
-    super.onWindowClose();
+    // 🔴🔴 **「×」で接続を切らない**（2026-09-01 ご判断「A案」）。
+    //
+    //   ⚠ ご質問「× 押したらサポート終了されないよね？」
+    //     → ⚠ **切れていました。**`closeAll()` が繋がっている接続を全部閉じる。
+    //   ⚠ しかも中途半端: ⚠ **サーバーには終了が伝わらず、合言葉も無効にならない。**
+    //     ＝ コンソールは「対応中」のまま、接続だけ切れる。
+    //
+    //   ⚠ 同じ日に「切断」の釦を消して「終了する」に一本化すると決めた。
+    //     ⚠ ところが「×」が**実質「切断」と同じ働き**をしていた。
+    //     ＝ ⚠ 消した釦が「×」の形で残ってしまう。
+    //   ★「×」は**隠すだけ**にする。⚠ 止める道は「終了する」1つ。
+    //   ⚠ 窓を出し直す道は残る（音声通話の着信・自分の画面を見せる で自動で出る）。
+    hideCmWindow();
+    // ⚠ super は呼ばない。呼ぶと窓が閉じる（＝プロセスが終わる）。
   }
 
   void onRemoveId(String id) {
@@ -132,7 +154,10 @@ class ConnectionManagerState extends State<ConnectionManager>
               gFFI.chatModel.showChatPage(MessageKey(client.peerId, client.id));
             });
           }
-          windowManager.setTitle(getWindowNameWithId(client.peerId));
+          // ⚠ 会社名があればそれを出す（相談員PCのユーザー名を出さない）。
+          final co = rlSupportCompanyName();
+          windowManager.setTitle(
+              co.isNotEmpty ? co : getWindowNameWithId(client.peerId));
           gFFI.cmFileModel.updateCurrentClientId(client.id);
         }
       }
@@ -477,10 +502,14 @@ class _CmHeaderState extends State<_CmHeader>
               mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // v1.4.6-13: Phase 4 N3 - 担当者名 (display_name)
+                // 🔴 会社名を出す（2026-09-01 ご判断）。
+                //   ⚠ ここに出ていたのは相談員PCの Windows ユーザー名。
+                //     ★左のカードと**同じ会社名**にする。取れなければ従来どおり。
                 FittedBox(
                     child: Text(
-                  client.displayName,
+                  rlSupportCompanyName().isNotEmpty
+                      ? rlSupportCompanyName()
+                      : client.displayName,
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -541,10 +570,13 @@ class _CmHeaderState extends State<_CmHeader>
                     child: Row(
                   children: [
                     Text(
+                      // 🔴 お客様に分かる言葉にする（2026-09-01 ご判断）。
+                      //   ⚠ 「接続済み」は**何と接続したのか**が分からない。
+                      //     ★「遠隔サポート中です」なら、いま何が起きているかが伝わる。
                       client.authorized
                           ? client.disconnected
-                              ? translate("Disconnected")
-                              : translate("Connected")
+                              ? 'サポートは終了しました'
+                              : '遠隔サポート中です'
                           : "${translate("Request access to your device")}...",
                       style: TextStyle(color: Colors.white),
                     ).marginOnly(right: 8.0),
@@ -605,6 +637,11 @@ class _CmHeaderState extends State<_CmHeader>
   }
 
   Widget _buildInitialAvatar() {
+    // 🔴 丸いロゴは出さない（2026-09-01 ご判断「ロゴはいらない」）。
+    //   ⚠ RustDesk 由来の見た目で、⚠ 中の文字は相談員PCのユーザー名の頭文字。
+    //     お客様には意味が無く、⚠ 当社の画面らしくない。
+    return const SizedBox.shrink();
+    // ignore: dead_code
     final initialSource = client.displayName.isNotEmpty
         ? client.displayName
         : client.name;
@@ -1191,7 +1228,17 @@ class _CmControlPanel extends StatelessWidget {
             textColor: Colors.white,
           ),
         ),
-        Row(
+        // 🔴 「切断」は出さない（2026-09-01 ご判断）。
+        //   ⚠ 止める釦が2つあるとお客様が迷う。しかも働きが違う:
+        //     切断     … 接続を切るだけ
+        //     終了する … 接続を切る＋被操作を止める＋合言葉を無効にする
+        //                ＋自動起動を消す＋サーバーへ終了を伝える
+        //   ★確実に止まる「終了する」に一本化する。
+        //   ⚠ 処理（handleDisconnect）は消さない。内部で使っている。
+        //   ⚠ 戻すときは Offstage の offstage を false にするだけ。
+        Offstage(
+          offstage: true,
+          child: Row(
           children: [
             Expanded(
               child: buildButton(context,
@@ -1206,7 +1253,7 @@ class _CmControlPanel extends StatelessWidget {
                   textColor: Colors.white),
             ),
           ],
-        )
+        ))
       ],
     ).marginOnly(bottom: buttonBottomMargin);
   }
