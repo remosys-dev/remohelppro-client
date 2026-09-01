@@ -306,7 +306,20 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     );
   }
   // restart
+  // 🔴🔴 **常駐PCには出さない**（2026-09-01 ご指示）。
+  //
+  //   ⚠ 実機で、常駐PCに対して「再起動して、そのまま続ける」を押すと
+  //     ⚠ **再起動のあと繋がらない**（原因は未確定）。
+  //   ⚠ 押せる状態で残しておくと、相談員は「戻ってくる」と信じて待つ。
+  //     戻らないと分かるまでの数分、⚠ **お客様を待たせたまま止まる。**
+  //   ★直るまでメニューから外す。押せなければ、その事故は起きない。
+  //   ⚠ 常駐は無人のPCなので、⚠ 戻らなかったときに現地で誰も直せない。
+  //     ワンタイム版（お客様が目の前にいる）とは重みが違う。
+  //
+  //   ⚠ 戻すときは、この `!isResidentPeer(ffi) &&` の1行を消すだけ。
+  //     ⚠ ただし**常駐で再起動復帰が成立することを実機で確かめてから**。
   if (isDefaultConn &&
+      !isResidentPeer(ffi) &&
       perms['restart'] != false &&
       (pi.platform == kPeerPlatformLinux ||
           pi.platform == kPeerPlatformWindows ||
