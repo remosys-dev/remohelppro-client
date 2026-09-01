@@ -67,24 +67,36 @@ const POLICY_KEY: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Sy
 ///   常駐は誰も居ないPCに繋ぐためのものなので、押す人が居ない。
 const VALUES: &[&str] = &["PromptOnSecureDesktop", "ConsentPromptBehaviorAdmin"];
 
-/// 🔴🔴 ワンタイム版が触る値。**確認を消さない**（2026-08-30 ご判断）。
+/// 🔴🔴 ワンタイム版が触る値。**確認を出さない**（2026-09-02 ご判断B）。
 ///
-///   ⚠ これまでは常駐と同じく `ConsentPromptBehaviorAdmin = 0` も入れ、
-///     ⚠ **お客様のUACを実質無効**にしていた。1.4.61 の事故（戻せないまま
-///     切りっぱなしになる）も、戻す道を4本も要したのも、ここが原因。
+/// ■ 経緯（2回変えている。両方の理由をここに残す）
 ///
-///   ★2026-08-30 実機で確認: ⚠ **相談員が UAC の確認を押せた。**
-///     当社の入力は SYSTEM 権限で出ているので、Windows の権限の壁を越えられる
-///     （`server/portable_service.rs` でマウス・キーを SYSTEM 側へ渡している）。
-///     ＝ ⚠ **確認を消す必要がない。「普通の画面に出す」だけでよい。**
+///   8/30: `PromptOnSecureDesktop` だけにした。相談員が確認を押せると
+///         実機で分かったので、⚠ **消す必要がない**と考えたため。
+///   9/02: ⚠ **実機のスクショで、確認が2回出ていた。**
+///         ① 🟡 取り出された実行ファイル（署名が無く「発行元: 不明」）
+///         ② 🔵 当社の署名済みファイル
+///         ⚠ お客様には何を押しているのか分からない。⚠ しかも1回目は
+///           Windows の一番強い警告色で出る。
+///         ＝ ご判断で **確認そのものを出さない**（B案）に変更。
 ///
-///   `PromptOnSecureDesktop = 0` … 確認を**暗い専用画面ではなく普通の画面**に出す。
-///     これが無いと相談員には見えず、押すこともできない（画面が真っ黒になる）。
+/// ■ なぜ「不明」が消せるのか
 ///
-///   ⚠ 利点: お客様のUACを無効にしない／戻す対象が1つに減る／
-///     相談員の画面が真っ黒になる件も同じ設定で直る。
-///   ⚠ 代わりに増えるのは「相談員が確認を1回押す」手間だけ。
-const VALUES_ONETIME: &[&str] = &["PromptOnSecureDesktop"];
+///   `ConsentPromptBehaviorAdmin = 0` にすると、⚠ **以降の昇格は確認なし**。
+///   署名済みの外側（libs/portable）が最初に一度だけ確認を出して両方を 0 に
+///   すれば、そのあとの取り出された実行ファイルの昇格は⚠ **無音**になる。
+///   ＝ 黄色い「発行元: 不明」は一度も出ない。署名を増やさずに解決できる。
+///
+/// ■ 値の意味
+///   `PromptOnSecureDesktop = 0`    … 確認を暗い専用画面ではなく普通の画面に出す
+///   `ConsentPromptBehaviorAdmin=0` … 管理者には確認を出さずに昇格させる
+///
+/// 🔴 ⚠ **お客様のPCの守りを下げている。必ず戻すこと。**
+///   戻す道は3本（`UacRelaxer` が落ちる／次の起動／Windows の予定30分）。
+///   ⚠ ここを増やしたら、⚠ **戻す側も必ず両方を戻せているか確かめる**。
+///     1.4.61 の事故（切りっぱなし）は、まさにこの値で起きた。
+///   ⚠ `EnableLUA` は絶対に足さない（再起動が必要になり、戻せなくなる）。
+const VALUES_ONETIME: &[&str] = &["PromptOnSecureDesktop", "ConsentPromptBehaviorAdmin"];
 
 /// 元の値の控え。⚠ 利用者ごとの場所に置かない（戻すのは SYSTEM のこともある）。
 fn backup_path() -> PathBuf {
@@ -158,10 +170,12 @@ pub fn relax_for_session() -> ResultType<()> {
 
     let mut changed = 0usize;
     let mut last_err = None;
-    // 🔴 ワンタイムは **確認を消さない**（2026-08-30 ご判断）。触るのは
-    //   「暗い専用画面に出さない」1つだけ。相談員が押せることを実機で確認済み。
-    //   ⚠ 控え（上）は VALUES の両方を記録している。触らなかった方を戻しても
-    //     同じ値を書くだけなので害はなく、古い版が残した 0 も戻せる。
+    // 🔴 ワンタイムは **確認を出さない**（2026-09-02 ご判断B）。両方を 0 にする。
+    //   ⚠ 8/30 は1つだけにしていた。実機で確認が2回出ていることが分かり変更。
+    //     経緯は VALUES_ONETIME の説明に全部残してある。
+    //   ⚠ 控え（上）は VALUES の両方を記録しているので、戻す側は変わらない。
+    //   ⚠ ここは**普通は通らない**。UAC を緩めるのは、いまは署名済みの外側
+    //     （libs/portable）が起動直後に1回だけ行う。ここは残り物を拾う保険。
     for name in VALUES_ONETIME {
         match key.set_value(*name, &0u32) {
             Ok(_) => changed += 1,
@@ -517,11 +531,33 @@ impl Drop for UacRelaxer {
 ///   昇格側へは**元の値2つだけ**を数字で渡す。長い文字列を渡さない
 ///   （Windows の引数の引用符で静かに壊れるため）。
 #[cfg(windows)]
+/// もう緩んでいるか。
+///
+/// 🔴🔴 ⚠ **「触る値の全部」が 0 のときだけ true**（2026-09-02 修正）。
+///
+///   ⚠ 以前は `PromptOnSecureDesktop` 1つだけを見ていた。9/2 に
+///     `ConsentPromptBehaviorAdmin` を足したので、1つだけ見ていると
+///     ⚠ **古い版が 0 にした片方だけを見て「もう済んでいる」と判断し、
+///       もう片方を一生書かない。** ＝ 確認が出続けるのに原因が見えない。
+///   ★値を足したら、⚠ **判定側も必ず一緒に直す。**片方だけ直す事故を
+///     この製品で何度も起こしている。
+fn all_relaxed(names: &[&str]) -> bool {
+    let Ok(k) = policy_key(false) else {
+        return false;
+    };
+    names
+        .iter()
+        .all(|n| k.get_value::<u32, _>(*n).map_or(false, |v: u32| v == 0))
+}
+
+/// 🔴 ⚠ **2026-09-02 以降、本体からは呼ばれていない。**
+///   UAC を緩めるのは、署名済みの外側（`libs/portable`）が起動直後に
+///   1回だけ行う形にした（黄色い「発行元: 不明」を出さないため）。
+///   ⚠ ここから呼び戻さないこと。⚠ **2か所で控えを書くと、
+///     取り合いになって元に戻せなくなる。**
+#[allow(dead_code)]
 pub fn already_relaxed() -> bool {
-    policy_key(false)
-        .ok()
-        .and_then(|k| k.get_value::<u32, _>("PromptOnSecureDesktop").ok())
-        .map_or(false, |v| v == 0)
+    all_relaxed(VALUES_ONETIME)
 }
 
 /// 控えを書く（既にあれば書かない）。戻り値は VALUES の順の元の値。
@@ -529,6 +565,9 @@ pub fn already_relaxed() -> bool {
 /// ⚠ 既にあるものを上書きしない。⚠ 上書きすると「変更後の値」が控えになり、
 ///   二度と元へ戻せなくなる（`relax_for_session` と同じ流儀）。
 #[cfg(windows)]
+/// 🔴 ⚠ **2026-09-02 以降、本体からは呼ばれていない**（外側のパッカーが同じことをする）。
+///   ⚠ ここを呼び戻さないこと。控えを2か所で書くと元に戻せなくなる。
+#[allow(dead_code)]
 pub fn write_backup_if_absent() -> Vec<(String, Option<u32>)> {
     let current = read_current();
     let path = backup_path();
@@ -558,6 +597,9 @@ pub fn write_backup_if_absent() -> Vec<(String, Option<u32>)> {
 
 /// 昇格側へ渡す引数にする（`0` / `1` / `none`）。⚠ 順番は VALUES と同じ。
 #[cfg(windows)]
+/// 🔴 ⚠ **2026-09-02 以降、本体からは呼ばれていない**（外側のパッカーが同じことをする）。
+///   ⚠ ここを呼び戻さないこと。控えを2か所で書くと元に戻せなくなる。
+#[allow(dead_code)]
 pub fn backup_as_args(values: &[(String, Option<u32>)]) -> Vec<String> {
     VALUES
         .iter()

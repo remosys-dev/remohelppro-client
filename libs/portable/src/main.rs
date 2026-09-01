@@ -1011,6 +1011,159 @@ fn notify_already_running() {
     }
 }
 
+/// ■ UAC を「署名済みのこのファイル」から1回だけ緩める（2026-09-02）
+///
+/// 🔴🔴 なぜ**外側のこのファイル**でやるか。
+///
+///   実機のスクショで、お客様の画面に確認が**2回**出ていた:
+///     ① 🟡「この不明な発行元からのアプリ」
+///        `%LOCALAPPDATA%\remohelppro-support\remohelppro-support.exe`
+///        ＝ ⚠ **取り出された実行ファイルには署名が無い**ので「不明」と出る。
+///           Windows の一番強い警告色。お客様には怪しいソフトに見える。
+///     ② 🔵「REMOHELP PRO（REMOSYS CO., LTD）」＝ 本体が出していたもの
+///
+///   ★このファイルは**お客様が落としてきた署名済みの1個**。ここから出せば
+///     ⚠ **当社名の出る青い確認**になる。しかも両方の値を 0 にするので、
+///     ⚠ **そのあとの昇格（①）は確認そのものが出ない。**
+///     ＝ 黄色い「不明」は一度も出ない。⚠ **中の実行ファイルに署名を
+///        足さずに解決できる**（署名は手作業なので、2回に増やしたくない）。
+///
+/// ⚠ 「いいえ」を押されても**止めない**。従来どおり①の確認が出るだけで、
+///   サポート自体は使える。⚠ 止めるのが一番の害。
+///
+/// ⚠ 控えは**昇格していないこちら側**で書く。ProgramData は利用者でも書ける。
+///   昇格側へは元の値2つだけを数字で渡す（長い文字列は引用符で静かに壊れる）。
+///   ⚠ 形式は本体の `src/rl_uac.rs` の控えと**同じ**にすること。
+///     本体の「戻す」処理（3本）がこの控えを読んで元へ戻す。
+#[cfg(windows)]
+const RL_UAC_KEY: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+#[cfg(windows)]
+const RL_UAC_NAMES: [&str; 2] = ["PromptOnSecureDesktop", "ConsentPromptBehaviorAdmin"];
+
+/// いまの値を読む。無ければ None（＝Windows の既定のまま）。
+///
+/// ⚠ 依存を増やさないため `reg query` の出力から拾う（ランチャーと同じ流儀）。
+///   ⚠ 窓を出さないこと。ここはお客様の画面の前で走る。
+#[cfg(windows)]
+fn rl_uac_read_current() -> Vec<Option<u32>> {
+    use std::os::windows::process::CommandExt;
+    let mut out = Vec::new();
+    for name in RL_UAC_NAMES.iter() {
+        let v = Command::new("reg")
+            .args(["query", RL_UAC_KEY, "/v", name])
+            .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+            .output()
+            .ok()
+            .and_then(|o| {
+                let text = String::from_utf8_lossy(&o.stdout).to_string();
+                text.lines()
+                    .find(|l| l.contains(name) && l.contains("REG_DWORD"))
+                    .and_then(|l| l.split_whitespace().last().map(|s| s.to_string()))
+            })
+            .and_then(|s| {
+                let s = s.trim().to_lowercase();
+                let s = s.strip_prefix("0x").unwrap_or(&s);
+                u32::from_str_radix(s, 16).ok()
+            });
+        out.push(v);
+    }
+    out
+}
+
+/// 控えを書く。⚠ **既にあれば書かない。**
+///
+/// ⚠ 上書きすると「変更後の値」が控えになり、⚠ **二度と元へ戻せなくなる**。
+///   前回戻せていない場合、そこに入っているのが**本当の元の値**。
+#[cfg(windows)]
+fn rl_uac_write_backup_if_absent(values: &[Option<u32>]) {
+    use std::io::Write;
+    let base = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+    let path = std::path::PathBuf::from(base)
+        .join("REMOHELP PRO")
+        .join("uac-backup.txt");
+    if path.exists() {
+        println!("RL uac: 控えは既にあります（上書きしません）");
+        return;
+    }
+    let write = || -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut f = std::fs::File::create(&path)?;
+        for (i, name) in RL_UAC_NAMES.iter().enumerate() {
+            match values.get(i).and_then(|v| *v) {
+                Some(v) => writeln!(f, "{name}={v}")?,
+                // ⚠ 「値が無かった」ことも残す。戻すときに**消す**必要がある。
+                None => writeln!(f, "{name}=none")?,
+            }
+        }
+        Ok(())
+    };
+    match write() {
+        Ok(_) => println!("RL uac: 元の値を控えました → {}", path.display()),
+        Err(e) => println!("RL uac: 控えを書けません: {e}"),
+    }
+}
+
+/// 自分を昇格して呼び、設定を書かせて**終わるまで待つ**。
+///
+/// ⚠ 待つ理由: 待たずに本体を起動すると、本体側の昇格（①）が先に走り、
+///   ⚠ **黄色い「不明」が出てしまう**。順番がこの修正の核心。
+/// ⚠ 待ち過ぎない。お客様が席を外していると永久に返らないので上限を置く。
+#[cfg(windows)]
+fn rl_uac_prepare_first() {
+    use std::os::windows::ffi::OsStrExt;
+    let current = rl_uac_read_current();
+    // ⚠ 全部 0 なら何もしない。2回目以降のサポートで毎回確認を出さないため。
+    if current.iter().all(|v| *v == Some(0)) {
+        println!("RL uac: 既に確認が出ない状態です。何もしません");
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    rl_uac_write_backup_if_absent(&current);
+    let a: Vec<String> = current
+        .iter()
+        .map(|v| match v {
+            Some(v) => v.to_string(),
+            None => "none".to_string(),
+        })
+        .collect();
+    let params = format!("--rl-uac-relax {} {}", a[0], a[1]);
+    let wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let verb = wide("runas");
+    let file = wide(&exe.to_string_lossy());
+    let par = wide(&params);
+    unsafe {
+        let mut info: winapi::um::shellapi::SHELLEXECUTEINFOW = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<winapi::um::shellapi::SHELLEXECUTEINFOW>() as u32;
+        info.fMask = winapi::um::shellapi::SEE_MASK_NOCLOSEPROCESS;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpParameters = par.as_ptr();
+        // ⚠ 隠す。⚠ この実行ファイルは窓なし(subsystem=windows)なので黒い窓は
+        //   出ないが、念のため明示する。
+        info.nShow = winapi::um::winuser::SW_HIDE;
+        if winapi::um::shellapi::ShellExecuteExW(&mut info) == 0 {
+            // ⚠ 「いいえ」を押された場合もここに来る。⚠ **止めない。**
+            println!("RL uac: お客様が確認を押されませんでした（サポートは続けられます）");
+            return;
+        }
+        if !info.hProcess.is_null() {
+            // 最大20秒。⚠ 書くだけの処理なので普通は一瞬で終わる。
+            winapi::um::synchapi::WaitForSingleObject(info.hProcess, 20_000);
+            winapi::um::handleapi::CloseHandle(info.hProcess);
+        }
+    }
+    println!("RL uac: 設定を書きました（確認はこの1回だけです）");
+}
+
 /// 🔴🔴 **UAC の確認を「普通の画面」に出す設定だけを書いて終わる**
 ///   （2026-08-31 ご判断「A案」）。
 ///
@@ -1049,23 +1202,34 @@ fn rl_uac_relax(args: &[String]) {
             .map(|s| s.success())
             .unwrap_or(false)
     };
-    // ① 確認を普通の画面に出す。⚠ 触るのはこの1つだけ。
-    //   ⚠ ConsentPromptBehaviorAdmin は触らない（＝UAC は解除しない。ご判断どおり）。
-    let ok = run(
-        "reg",
-        vec![
-            "add".into(),
-            KEY.into(),
-            "/v".into(),
-            "PromptOnSecureDesktop".into(),
-            "/t".into(),
-            "REG_DWORD".into(),
-            "/d".into(),
-            "0".into(),
-            "/f".into(),
-        ],
-    );
-    println!("RL uac: PromptOnSecureDesktop=0 {}", if ok { "書けました" } else { "書けません" });
+    // ① 確認を出さないようにする（2026-09-02 ご判断B）。
+    //
+    //   ⚠ 8/30 は `PromptOnSecureDesktop` だけにしていた。9/2 に実機の
+    //     スクショで⚠ **確認が2回**（1回目は「発行元: 不明」）出ていることが
+    //     分かり、お客様が何を押しているのか分からない状態だったため変更。
+    //   ★両方を 0 にすると、⚠ **このあとの昇格は確認そのものが出ない**。
+    //     ＝ 取り出された（署名の無い）実行ファイルの黄色い確認が消える。
+    //   🔴 ⚠ **お客様のPCの守りを下げている。**②の戻す予定を必ず置くこと。
+    let mut ok = true;
+    for name in NAMES.iter() {
+        let w = run(
+            "reg",
+            vec![
+                "add".into(),
+                KEY.into(),
+                "/v".into(),
+                (*name).into(),
+                "/t".into(),
+                "REG_DWORD".into(),
+                "/d".into(),
+                "0".into(),
+                "/f".into(),
+            ],
+        );
+        println!("RL uac: {name}=0 {}", if w { "書けました" } else { "書けません" });
+        // ⚠ 1つでも書けなければ「緩んでいない」。中途半端に進めない。
+        ok = ok && w;
+    }
     if !ok {
         return;
     }
@@ -1157,6 +1321,24 @@ fn main() {
             notify_already_running();
         }
         return;
+    }
+    // 🔴🔴 UAC の確認は、**署名済みのこのファイルから1回だけ**出す（2026-09-02）。
+    //
+    //   ⚠ **展開より前**に置くこと。ここが今回の修正の核心。
+    //     後ろに置くと本体が先に昇格し、⚠ **黄色い「発行元: 不明」が出る。**
+    //   🔴🔴 ⚠ **ワンタイム版だけ**。ここを間違えると重大（2026-09-02 に一度
+    //     `!always_install()` と書いて危うく出すところだった）。
+    //     ⚠ このパッカーは**3製品すべて**で使われている:
+    //         常駐   … RL_APP_PREFIX="remohelppro-agent"（+ RL_ALWAYS_INSTALL）
+    //         ワンタイム … RL_APP_PREFIX="remohelppro-support"
+    //         相談員 … RL_APP_PREFIX="remohelppro"
+    //     ⚠ `!always_install()` は**相談員版も真になる**。それでは
+    //       ⚠ **自社の相談員PCの守りまで下げてしまう**（ご指示に反する）。
+    //   ⚠ 常駐は入れるとき自分で管理者権限を取るので、ここでは何もしない。
+    //   ⚠ 押していただけなくても**止めない**。詳しくは rl_uac_prepare_first。
+    #[cfg(windows)]
+    if app_prefix() == "remohelppro-support" {
+        rl_uac_prepare_first();
     }
     let mut args = Vec::new();
     let mut arg_exe = Default::default();

@@ -84,87 +84,6 @@ fn rl_apply_public_config() {
     *config::SHARED_CONFIG_DIR.write().unwrap() = s;
 }
 
-/// ワンタイム版で、UAC の確認を「普通の画面」に出せるようにする準備。
-///
-/// ⚠ お客様が落としてきた**署名済みの1個のファイル**を昇格して呼び、
-///   設定だけ書かせて終わってもらう。⚠ 展開もしないし、常駐もしない。
-#[cfg(windows)]
-fn rl_uac_prepare() {
-    // 🔴 **待たせない**（2026-08-31）。
-    //   ⚠ `run_uac` は、お客様が確認に答えるまで**返ってこない**。
-    //     ここで待つと、⚠ **答えるまでアプリの画面が1つも出ない。**
-    //     起動が遅い件で既にご指摘をいただいている所なので、繰り返さない。
-    //   ★別の流れで行う。⚠ 先にアプリの画面を出してから確認を出す
-    //     （いきなり確認だけが出ると、お客様には何の確認か分からない）。
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(3));
-        rl_uac_prepare_inner();
-    });
-}
-
-#[cfg(windows)]
-fn rl_uac_prepare_inner() {
-    // ⚠ 常駐版・相談員版では絶対にやらない。呼ぶ側の条件だけに頼らない。
-    if config::IS_RESIDENT_BUILD || config::IS_OPERATOR_BUILD {
-        return;
-    }
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let Some(dir) = exe.parent() else {
-        return;
-    };
-    // 共有識別子OK: 名前ではなく、CI が置く目印ファイルの有無で当社の
-    //   ワンタイム版だけに絞っている。他製品の実行ファイルの隣には存在しない。
-    if !dir.join("remohelppro-onetime.flag").exists() {
-        return;
-    }
-    // ⚠ 一時サービスの複製（ログイン前の再接続）では出さない。
-    //   誰も見ていない画面に確認を出しても、押す人がいない。
-    if crate::rl_prelogon::read_marker(dir).is_some() {
-        return;
-    }
-    // ⚠ 既に「普通の画面に出す」状態なら、何も出さない。
-    if crate::rl_uac::already_relaxed() {
-        log::info!("RL uac: 既に普通の画面に出る状態です。確認は出しません");
-        return;
-    }
-    // 🔴🔴 **お客様が落としてきた1個のファイルに書かせる**（2026-08-31 実機の失敗で作り直し）。
-    //
-    //   ⚠ 最初は展開先の実行ファイルを一時フォルダへ写して昇格させたが、
-    //     ⚠ **「desktop_drop_plugin.dll が見つからないため、コードの実行を
-    //     続行できません」** でお客様の画面にエラーが出た。
-    //     ＝ ⚠ **Flutter のアプリは1ファイルでは動かない。**写して動かさない。
-    //   ⚠ 展開先の実行ファイルをその場で昇格させる案も採らない。
-    //     ① 署名が無いので確認に「発行元不明」と出る（お客様を不安にさせる）
-    //     ② 動いている間、⚠ **展開先のフォルダを消せなくなる**
-    //   ★落としてきた1個のファイル（`RL_RUNNER_EXE`）は **EV署名済み**で、
-    //     ⚠ 単独で動く。⚠ 確認には**当社の会社名**が出る。
-    //     そちらに設定だけ書かせて、すぐ終わってもらう（展開もしない）。
-    let Ok(runner) = std::env::var("RL_RUNNER_EXE") else {
-        log::info!("RL uac: 元のファイルの場所が分からないため、確認は出しません");
-        return;
-    };
-    if runner.is_empty() || !std::path::Path::new(&runner).exists() {
-        log::info!("RL uac: 元のファイルが見つかりません（{runner}）。確認は出しません");
-        return;
-    }
-    // ⚠ 控えは**こちら側**（昇格していない）で書く。ProgramData は利用者でも書ける。
-    //   昇格側へは元の値2つだけを数字で渡す。長い文字列は引用符で静かに壊れる。
-    let values = crate::rl_uac::write_backup_if_absent();
-    let a = crate::rl_uac::backup_as_args(&values);
-    let arg = format!("--rl-uac-relax {} {}", a.get(0).map(|s| s.as_str()).unwrap_or("none"), a.get(1).map(|s| s.as_str()).unwrap_or("none"));
-    match crate::platform::run_uac(&runner, &arg) {
-        // ⚠ 「はい」を押していただけたかどうかは、この戻り値では分からない。
-        //   断られた場合は false になる（ShellExecuteW が失敗を返す）。
-        Ok(true) => log::info!("RL uac: 設定を書きに行きました（{arg}）"),
-        Ok(false) => log::warn!(
-            "RL uac: お客様が確認を押されませんでした。             相談員は UAC を押せません（サポート自体は続けられます）"
-        ),
-        Err(e) => log::warn!("RL uac: 確認を出せません: {e}"),
-    }
-}
-
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
     // 🔴 前回のサポートで戻せていない設定があれば、**まずここで戻す**（2026-08-28）。
@@ -388,7 +307,18 @@ pub fn core_main() -> Option<Vec<String>> {
         //     そのたびに人が手で止めていた。⚠ それでは毎回はまる。
         //   ⚠ 当社のワンタイム版だけを狙う（目印ファイルで見分ける）。
         crate::common::rl_kill_stale_onetime();
-        rl_uac_prepare();
+        // 🔴🔴 ここにあった rl_uac_prepare() を**外した**（2026-09-02）。
+        //
+        //   ⚠ 実機のスクショで、お客様の画面に**確認が2回**出ていた。
+        //     ① 🟡「この不明な発行元からのアプリ」
+        //        （取り出された実行ファイル。署名が無いので「不明」と出る）
+        //     ② 🔵「REMOHELP PRO」＝ここから出していたもの
+        //   ⚠ ②は**不要だった**。2026-08-29 に「SYSTEM 側で書く」方式へ
+        //     変えたとき（platform/windows.rs の UacRelaxer）、
+        //     ⚠ **古いこちらを消し忘れていた**。純粋な残骸。
+        //   ★UAC を書くのは、いまは1か所だけ:
+        //     libs/portable（署名済みの外側）が起動直後に一度だけ行う。
+        //     ⚠ 2か所で書くと、控えの取り合いで**戻せなくなる**。
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if args.is_empty() {

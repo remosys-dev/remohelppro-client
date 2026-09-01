@@ -24,6 +24,9 @@ md5 = "0.7"
 #   processthreadsapi / winnt は「その窓を持っているのが当社のワンタイム版か」を
 #   確かめるために使う（OpenProcess / QueryFullProcessImageNameW）。
 #   ⚠ 2026-08-29: 窓の種類だけで探して**他製品の窓を前に出していた**ため追加。
+#   shellapi は「自分を昇格して起動し、終わるまで待つ」ために使う
+#   （2026-09-02。UAC の確認を**署名済みのこのファイル**から1回だけ出すため。
+#     取り出された実行ファイルから出すと「発行元: 不明」になる）。
 winapi = { version = "0.3", features = [
     "winbase",
     "winuser",
@@ -32,6 +35,7 @@ winapi = { version = "0.3", features = [
     "errhandlingapi",
     "processthreadsapi",
     "winnt",
+    "shellapi",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
