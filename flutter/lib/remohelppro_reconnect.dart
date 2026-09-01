@@ -143,34 +143,64 @@ File _tokenFile() {
 /// 合言葉を**両方の場所**に書く。
 /// ⚠ 片方しか書かないと、書いた側と読む側が食い違ったときに気づけない。
 void _saveToken(String token) {
-  try {
-    File('${_ensure(_userBaseDir()).path}/reconnect.token')
-        .writeAsStringSync(token);
-  } catch (_) {}
+  _ensure(_userBaseDir());
   final s = _sharedBase();
-  if (s.isEmpty) return;
-  try {
-    File('${_ensure(Directory(s)).path}/reconnect.token')
-        .writeAsStringSync(token);
-  } catch (_) {}
+  if (s.isNotEmpty) _ensure(Directory(s));
+  for (final f in _tokenFiles()) {
+    try {
+      f.writeAsStringSync(token);
+    } catch (_) {}
+  }
 }
 
-/// 復帰の合言葉が**どちらかの場所に**あるか。
+/// 復帰の合言葉の置き場（両方）。⚠ **書く・読む・消す は必ずこれを使う。**
+///
+/// ⚠ 片方だけ扱うと対が崩れる。実際、⚠ **書くのは両方・消すのは片方**に
+///   なっていた（2026-09-01 ご指摘）。消し残った方が次の起動で見つかり、
+///   ⚠ **いつまでも「再起動復帰中」と誤認する。**
+List<File> _tokenFiles() {
+  final out = <File>[File('${_userBaseDir().path}/reconnect.token')];
+  final s = _sharedBase();
+  if (s.isNotEmpty) out.add(File('$s/reconnect.token'));
+  return out;
+}
+
+/// 復帰の合言葉の寿命。⚠ サーバー側の失効（30分）と揃えること。
+const Duration kResumeTokenLife = Duration(minutes: 30);
+
+/// 復帰の合言葉が**どちらかの場所に、まだ生きて**あるか。
+///
 /// ⚠ 起動時に合言葉を潰してよいかの判断に使う。ここを誤ると、
 ///   ⚠ **再起動復帰が必ずパスワード要求になる。**
+/// 🔴 ⚠ **期限を見る**（2026-09-01 ご指摘）。
+///   ⚠ 中身が空でなければ何日後でも有効、という作りになっていた。
+///   ＝ 消し残りが1つでもあると、⚠ **以後ずっと合言葉を潰さなくなる。**
+///   ⚠ 資料に「30分で失効するので残り続けない」と書いたが、
+///     ⚠ **コードでは成立していなかった。**
+///   ★書いた時刻から 30分を過ぎた控えは、無いものとして扱う。
+///     （サーバー側も30分で失効するので、使えないものを信じない）
 bool hasResumeTokenAnywhere() {
-  bool ok(File f) {
+  final now = DateTime.now();
+  for (final f in _tokenFiles()) {
     try {
-      return f.existsSync() && f.readAsStringSync().trim().isNotEmpty;
-    } catch (_) {
-      return false;
-    }
+      if (!f.existsSync()) continue;
+      if (f.readAsStringSync().trim().isEmpty) continue;
+      final age = now.difference(f.lastModifiedSync());
+      if (age.isNegative || age <= kResumeTokenLife) return true;
+      rlTrace('resume_token_expired', {'min': age.inMinutes});
+    } catch (_) {}
   }
-
-  if (ok(File('${_userBaseDir().path}/reconnect.token'))) return true;
-  final s = _sharedBase();
-  if (s.isNotEmpty && ok(File('$s/reconnect.token'))) return true;
   return false;
+}
+
+/// 復帰の合言葉を**両方の場所から**消す。
+/// ⚠ サポートが終わったら必ず呼ぶ。片方でも残すと上のとおり誤認する。
+void _deleteResumeTokens() {
+  for (final f in _tokenFiles()) {
+    try {
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
 }
 
 /// 再起動の直前に呼ぶ。復帰用の合言葉を取って保存する。
@@ -655,8 +685,9 @@ Future<void> clearRebootResume() async {
   //   403 だらけになり、本当の失敗が埋もれて原因を追えなくなる。
   //   ⚠ Windows 以外でも消す（下の RunOnce の処理より前に置く）。
   try {
-    final f = _tokenFile();
-    if (f.existsSync()) f.deleteSync();
+    // ⚠ **両方消す**（2026-09-01 ご指摘）。片方だけ消すと、残った方を
+    //   次の起動で見つけて「まだ再起動復帰中」と誤認し続ける。
+    _deleteResumeTokens();
   } catch (_) {}
   if (!Platform.isWindows) return;
   try {
