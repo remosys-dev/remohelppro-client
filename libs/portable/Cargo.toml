@@ -36,6 +36,10 @@ winapi = { version = "0.3", features = [
     "processthreadsapi",
     "winnt",
     "shellapi",
+    # tlhelp32 は「窓の無い残骸を数え上げて片付ける」ために使う（2026-09-02）。
+    #   ⚠ 残骸が二重起動の錠を握っていると、お客様は**再起動しないと
+    #     サポートを受けられなかった**。窓が無いなら残骸と判断して片付ける。
+    "tlhelp32",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

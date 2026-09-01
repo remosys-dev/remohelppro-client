@@ -969,6 +969,99 @@ fn find_onetime_window() -> winapi::shared::windef::HWND {
 /// ⚠ 黙って終わらない。何も起きないと「壊れている」と思われ、
 ///   さらに何度も開かれる（今日ずっと直してきた形と同じ）。
 /// ★先に動いている窓を前に出してから伝える。探させない。
+/// 🔴🔴 **窓の無い残骸を片付ける**（2026-09-02 ご指摘「繰り返してるよね」）。
+///
+/// ■ 何が起きていたか
+///   終了しそこねた裏方（`--server` / `--cm` / トレイ）が二重起動の錠を
+///   握ったままになると、次に起動しようとしても
+///   ⚠ **「REMOHELP PRO はすでに起動しています」で止まる。**
+///   ⚠ **お客様は、PCを再起動しないとサポートを受けられない。**
+///   実際に 9/2 の再現テストがこれで塞がれ、社長にPCを再起動させてしまった。
+///
+/// ■ なぜ今まで直らなかったか
+///   本体（`src/common.rs` の `rl_kill_stale_onetime`）に片付けを入れたが、
+///   ⚠ **ここ（外側）が先に止めるので、本体が一度も動かない。**
+///   ＝ 片付ける処理はあるのに、そこへ辿り着けなかった。
+///
+/// ■ 見分け方
+///   ⚠ **窓があるかどうか**で分ける。窓があるなら本当に使用中（案内して終わる）。
+///   窓が無いなら残骸なので、片付けて**先へ進む**。
+///
+/// ⚠ 消すのは「隣に `remohelppro-onetime.flag` がある実行ファイル」だけ。
+///   ＝ 当社のワンタイム版だけ。常駐・相談員・他社製品には当たらない。
+///   ⚠ 名前で消さない（3製品とも表示名が同じなので巻き込む）。
+/// 再起動のあとの命令書を、**窓を出さずに**走らせる（2026-09-02）。
+///
+/// ⚠ 待たない。命令書は自分で完結する（20秒待つ・3回試す・自分を消す）。
+///   ここで待つと、この実行ファイルが1分以上居座ることになる。
+/// ⚠ 引数の組み立ては `raw_arg` を使う。`args` に渡すと Rust が付ける
+///   引用符を `cmd.exe` が別の意味に取り、⚠ **黙って何もしない**
+///   （道は通ったのに動かない、という最も分かりにくい壊れ方になる）。
+#[cfg(windows)]
+fn rl_resume_run(path: Option<&String>) {
+    use std::os::windows::process::CommandExt;
+    let Some(p) = path else {
+        return;
+    };
+    if p.is_empty() || !std::path::Path::new(p).exists() {
+        return;
+    }
+    let r = Command::new("cmd")
+        .raw_arg(format!("/c \"{p}\""))
+        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+        .spawn();
+    match r {
+        Ok(_) => println!("RL resume: 命令書を窓なしで走らせました"),
+        Err(e) => println!("RL resume: 命令書を走らせられません: {e}"),
+    }
+}
+
+#[cfg(windows)]
+fn kill_leftover_onetime() -> usize {
+    use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
+    use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
+    use winapi::um::tlhelp32::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use winapi::um::winnt::PROCESS_TERMINATE;
+    let me = std::process::id();
+    let mut killed = 0usize;
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return 0;
+        }
+        let mut pe: PROCESSENTRY32W = std::mem::zeroed();
+        pe.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut pe) != 0 {
+            loop {
+                let pid = pe.th32ProcessID;
+                if pid != 0 && pid != me {
+                    // ⚠ 目印は**実行ファイルの隣**を見る。名前は一切見ない。
+                    let ours = process_image_path(pid)
+                        .and_then(|p| p.parent().map(|d| d.join(ONETIME_FLAG).exists()))
+                        .unwrap_or(false);
+                    if ours {
+                        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                        if !h.is_null() {
+                            if TerminateProcess(h, 1) != 0 {
+                                killed += 1;
+                            }
+                            CloseHandle(h);
+                        }
+                    }
+                }
+                if Process32NextW(snap, &mut pe) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    killed
+}
+
 #[cfg(windows)]
 fn notify_already_running() {
     use std::os::windows::ffi::OsStrExt;
@@ -1285,6 +1378,25 @@ fn main() {
             rl_uac_relax(&a[1..]);
             return;
         }
+        // 🔴🔴 **再起動のあとの黒い窓を消す**（2026-09-02 ご指摘）。
+        //
+        //   ⚠ これまで RunOnce にはこう登録していた:
+        //       cmd /c if exist "…\rl-resume.cmd" start "" /min "…\rl-resume.cmd"
+        //     ⚠ Windows はログオン時にこれを **cmd.exe で実行する**ので、
+        //       ⚠ **お客様の画面に黒い窓が出る**（しかも `start /min` で2つ目も出る）。
+        //       `/min` は起動する側を小さくするだけで、`cmd /c` 自身の窓は消せない。
+        //
+        //   ★命令書（20秒待つ・3回試す・記録を残す）は**必要**なので消さない。
+        //     ⚠ 消せるのは「窓」だけ。この実行ファイルは
+        //     `#![windows_subsystem = "windows"]` なので**窓を持たない**。
+        //     ここから CREATE_NO_WINDOW で命令書を走らせれば、窓は一つも出ない。
+        //
+        //   ⚠ VBScript（wscript //B）でも隠せるが採らない。対策ソフトに
+        //     止められやすく、当社は未署名の物を走らせない方針のため。
+        if a.first().map(|s| s == "--rl-resume-run").unwrap_or(false) {
+            rl_resume_run(a.get(1));
+            return;
+        }
     }
     // 🔴 展開より前に見る。期限切れなら一時フォルダにも何も置かず、そのまま終わる。
     if is_onetime_expired() {
@@ -1302,8 +1414,15 @@ fn main() {
     //     ⚠ **常駐を入れられなくなる**。
     //   ★見分けは焼き込みで行う（常駐版のビルドにだけ入る目印）。
     //     ⚠ ファイル名で見分けない。ブラウザの `(1)` や改名で簡単に外れる。
+    // 🔴🔴 ⚠ **ワンタイム版だけが錠を見る**（2026-09-02 修正）。
+    //
+    //   ⚠ `!always_install()` は「常駐以外」なので、⚠ **相談員版も通っていた。**
+    //     錠の名前は焼き込みの固定文字列なので、⚠ **ワンタイムと相談員が
+    //     同じ錠を取り合っていた**（片方が動いていると、もう片方が起動しない）。
+    //   ★錠の名前は**変えない**。変えると古い版と新しい版が互いを見つけられず
+    //     二重に動く。⚠ 相談員が錠を見に行かなくなれば、それだけで衝突は消える。
     #[cfg(windows)]
-    if !always_install() && !acquire_single_instance() {
+    if app_prefix() == "remohelppro-support" && !acquire_single_instance() {
         // ⚠ 再起動からの復帰で起こされたときは、**黙って終わる**。
         //
         //   復帰の命令書は「起動したか確かめて、駄目ならもう2回試す」作りなので、
@@ -1317,10 +1436,26 @@ fn main() {
                 s.contains("\\remohelp pro\\resume\\") || s.contains("/remohelp pro/resume/")
             })
             .unwrap_or(false);
-        if !quiet {
-            notify_already_running();
+        // 🔴🔴 **窓が無いなら残骸。止めずに片付けて先へ進む**
+        //   （2026-09-02 ご指摘「繰り返してるよね」）。
+        //
+        //   ⚠ ここで無条件に止めていたため、終了しそこねた裏方が錠を握ると
+        //     ⚠ **お客様はPCを再起動しないとサポートを受けられなかった。**
+        //   ⚠ 本体側の片付け（rl_kill_stale_onetime）は、ここで止まるので
+        //     **一度も動けなかった**。片付ける処理はあったのに辿り着けなかった。
+        //   ★窓があるなら本当に使用中。窓が無いなら残骸。**この1点で分ける。**
+        if find_onetime_window().is_null() {
+            let n = kill_leftover_onetime();
+            println!("RL: 窓の無い残骸を {n} 個片付けて、そのまま続けます");
+            // ⚠ 終わるのを少し待つ。すぐ展開すると、まだ掴まれている部品がある。
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+            // ⚠ ここでは return しない。**続ける**のがこの修正の要。
+        } else {
+            if !quiet {
+                notify_already_running();
+            }
+            return;
         }
-        return;
     }
     // 🔴🔴 UAC の確認は、**署名済みのこのファイルから1回だけ**出す（2026-09-02）。
     //
