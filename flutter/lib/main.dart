@@ -652,7 +652,23 @@ Future<void> forceShowCmWindow() async {
           final opacity = await windowManager.getOpacity();
           final minimized = await windowManager.isMinimized();
           final visible = await windowManager.isVisible();
-          final hidden = opacity != 1 || minimized || !visible;
+          // 🔴🔴 **位置も測る**（2026-09-02 ご報告で判明）。
+          //
+          //   ⚠ 実機の足跡（相談員PC・2026-09-02）:
+          //       opacity:1.0  min:false  vis:true  fix:false
+          //     ＝ ⚠ **アプリから見ると「出ている」。**それなのに見えない。
+          //   ＝ 最小化ではなく、⚠ **窓が画面の外に置かれていた。**
+          //     「タスクバーに居るのに、押すと一瞬見えて消える」のはこの形。
+          //   ⚠ 私は3日間これを最小化だと思い込み、別の所を直していた。
+          //     ★測っていないものは直せない。位置を必ず残す。
+          final pos = await windowManager.getPosition();
+          // ⚠ Windows は最小化した窓を -32000 付近へ置く。画面外の判定は
+          //   広めに取る（多画面でも -3000 より外へ普通は置かれない）。
+          final offscreen = pos.dx < -3000 ||
+              pos.dy < -3000 ||
+              pos.dx > 20000 ||
+              pos.dy > 20000;
+          final hidden = opacity != 1 || minimized || !visible || offscreen;
           try {
             rlTrace('cm_force_recheck', {
               'gen': gen,
@@ -660,6 +676,9 @@ Future<void> forceShowCmWindow() async {
               'opacity': opacity,
               'min': minimized,
               'vis': visible,
+              'x': pos.dx.round(),
+              'y': pos.dy.round(),
+              'off': offscreen,
               'fix': hidden,
             });
           } catch (_) {}
@@ -668,6 +687,14 @@ Future<void> forceShowCmWindow() async {
           if (await windowManager.isMinimized()) await windowManager.restore();
           await windowManager.show();
           await windowManager.focus();
+          // ⚠ 画面の外に居るなら、⚠ **真ん中へ引き戻す。**
+          //   出し直すだけでは、同じ場所（画面外）に出るので見えないまま。
+          if (offscreen) {
+            try {
+              await windowManager.center();
+              rlTrace('cm_recentered', {'gen': gen, 'ms': ms});
+            } catch (_) {}
+          }
           windowOnTop(null);
         } catch (_) {}
       });
