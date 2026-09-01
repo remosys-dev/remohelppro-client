@@ -2653,6 +2653,14 @@ impl LoginConfigHandler {
         } else {
             (my_id, self.id.clone())
         };
+        // 🔴 **自分が何と名乗ったかを残す**（2026-09-02）。
+        //
+        //   ⚠ 「自分の画面を見せる」では、お客様の側がこの `my_id` へ繋ぎに行く。
+        //     ここが中継サーバーに登録されている番号と違うと、
+        //     ⚠ **お客様の画面には「オフライン」としか出ない。**
+        //   ⚠ 9/1〜9/2 に一晩かけても分からなかったのは、
+        //     この値がどこにも残っていなかったため。両端に1行ずつ残す。
+        log::info!("RL: 相手 {pure_id} に、自分を {my_id} と名乗ります");
         let mut avatar = get_builtin_option(keys::OPTION_AVATAR);
         if avatar.is_empty() {
             avatar = serde_json::from_str::<serde_json::Value>(&LocalConfig::get_option(
