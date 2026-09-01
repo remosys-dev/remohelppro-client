@@ -455,6 +455,33 @@ void runConnectionManagerScreen() async {
   listenUniLinks(handleByFlutter: false);
 }
 
+/// 🔴🔴 **押してほしい釦がこの窓の中にある間は、引っ込めさせない**（2026-09-01）。
+///
+/// ⚠ 使う場面は2つ:
+///   ① 自分の画面を見せている（「画面を見せるのをやめる」の釦）
+///   ② ⚠ **音声通話の着信**（「受ける」の釦・A案 2026-09-01 ご判断）
+///      ⚠ 承諾の釦は**お客様PCの接続管理の窓の中**にある。
+///        窓が隠れていると、⚠ **相談員が遠隔で押すこともできない。**
+///        ＝ 電話で「押してください」と頼むしかなく、
+///          ⚠ **電話が繋がっているなら音声通話は要らない**＝機能が成立しない。
+///        ⚠ 常駐は無人なので、押す人がそもそも居ない。
+///      ★窓を出しておけば、⚠ **相談員が自分で押せる**（UAC と同じ理屈）。
+///
+///   ⚠ ご指摘（何度目か）: 「出てるけど最小化してタスクバーに隠れてる。
+///     タスクバーのアイコンをクリックしても**一瞬見えて消える**を繰り返す。
+///     画面を戻すボタンが押せない」
+///   ⚠ 実測でも一致していた: `X=-25600 Y=-25600` ＝ Windows が
+///     最小化した窓を置く座標。私はこれを「隠れた」とだけ書いて、
+///     ⚠ **別の画面に出ている**という誤った見立てへ進んでしまった。
+///
+///   ⚠ 引っ込める道は**2本**あり、どちらも塞いでいなかった:
+///     ① showCmWindow() の中の `minimize(); //needed`（毎秒の見張りから来る）
+///     ② hideCmWindow() の中の minimize()
+///   ★どちらも、この札が立っている間は**通さない**。
+///     窓の中の「画面を見せるのをやめる」が押せなくなると、
+///     ⚠ **相談員は自分のPCを操作させたまま止められない。**
+bool cmKeepVisible = false;
+
 bool _isCmReadyToShow = false;
 
 /// 🔴🔴 「出す」と「隠す」の**競争**を止めるための札（2026-08-31 実測で判明）。
@@ -489,7 +516,10 @@ showCmWindow({bool isStartup = false}) async {
     if (await windowManager.getOpacity() != 1) {
       await windowManager.setOpacity(1);
       await windowManager.focus();
-      await windowManager.minimize(); //needed
+      // ⚠ 見せている間は引っ込めない（2026-09-01）。
+      if (!cmKeepVisible) {
+        await windowManager.minimize(); //needed
+      }
       await windowManager.setSizeAlignment(
           kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
       windowOnTop(null);
@@ -586,6 +616,24 @@ Future<void> forceShowCmWindow() async {
     await windowManager.focus();
     await windowManager.setSizeAlignment(
         kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+    // 🔴🔴 **他の窓の後ろに回らせない**（2026-09-01 ご指摘
+    //   「表示できないの、隠れるだけで、見えるようしてよ」）。
+    //
+    //   ⚠ 実測（相談員PC・2026-09-01）:
+    //     11:18:59  表示=True 前面=False  → ⚠ **後ろに回った**
+    //               前に出たのは: WindowsTerminal
+    //     11:19:07  ⚠ **最小化された**（X=-25600 ＝ Windows の最小化の置き場）
+    //   ＝ ⚠ アプリの記録は「表示中」と答えるが、⚠ **人には見えていない。**
+    //     `isVisible()` は**後ろに回っただけでも true** を返すため、
+    //     ⚠ 私はそれを「出ている」と読み違えて3日直せなかった。
+    //
+    //   ★最前面に固定する。⚠ **見せている間は、何の後ろにも回らない。**
+    //   ⚠ 固定したままにしない。窓を隠す・閉じるときに必ず外す
+    //     （hideCmWindow / 閉じるとき）。付けっぱなしだと、
+    //     ⚠ サポートが終わった後も相談員の画面に居座る。
+    try {
+      await windowManager.setAlwaysOnTop(true);
+    } catch (_) {}
     windowOnTop(null);
 
     // 🔴 **出したあと、本当に出ているか確かめ直す**（2026-08-31）。
@@ -657,6 +705,20 @@ hideCmWindow({bool isStartup = false}) async {
     await windowManager.minimize();
     await windowManager.hide();
     _isCmReadyToShow = true;
+  } else if (cmKeepVisible) {
+    // ⚠ 見せている間は、隠す指示そのものを受け付けない（2026-09-01）。
+    //   ⚠ 呼び出し元を1つずつ塞ぐのはやめる。**入口で断る。**
+    try {
+      rlTrace('cm_hide_refused', {
+        'from': StackTrace.current
+            .toString()
+            .split('\n')
+            .skip(1)
+            .take(2)
+            .join(' | '),
+      });
+    } catch (_) {}
+    return;
   } else if (_isCmReadyToShow) {
     // 🔴🔴 **後から始まった「出す」に道を譲る**（2026-08-31 実測）。
     //   ⚠ ここは非同期。`getOpacity()` を待っている間に
@@ -673,6 +735,10 @@ hideCmWindow({bool isStartup = false}) async {
         await windowManager.setOpacity(1);
         return;
       }
+      // ⚠ 最前面の固定を外してから隠す（付けっぱなしにしない）。
+      try {
+        await windowManager.setAlwaysOnTop(false);
+      } catch (_) {}
       bind.mainHideDock();
       await windowManager.minimize();
       if (gen != _cmWindowGen) return;

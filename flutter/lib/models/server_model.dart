@@ -202,6 +202,18 @@ class ServerModel with ChangeNotifier {
           updateClientState(res);
         } else {
           if (_clients.isEmpty && _keepCmForSwitch) {
+            // 🔴 出したままにするが、⚠ **永久には残さない**（2026-09-01）。
+            //   ⚠ 相手が居なくなってから 30秒（1秒ごとなので 30回）たったら
+            //     印を落として、⚠ **窓ごと閉じる**（隠すのではなく閉じる）。
+            //   ⚠ 30秒は「切れてから繋ぎ直すまで」より十分長く、
+            //     「サポートが終わった」と言い切れる長さ。
+            if (_zeroClientLengthCounter++ >= 30) {
+              rlTrace('cm_switch_close', {'ticks': _zeroClientLengthCounter});
+              _switchSidesShown = false;
+              cmKeepVisible = false;   // ⚠ 札は必ず下ろす
+              _zeroClientLengthCounter = 0;
+              windowManager.close();
+            }
             // 🔴 「自分の画面を見せる」の窓は閉じない（2026-08-30 ご指示）。
             //   ⚠ ここが1秒ごとに走るため、出した直後に閉じられていた。
             //     ＝「タスクバーに出るが押すと一瞬で消える」の正体。
@@ -693,6 +705,7 @@ class ServerModel with ChangeNotifier {
         // 隠す設定でも必ず出す。出す方の例外（8/27）と、ここを揃える。
         if (!_switchSidesShown) {
           _switchSidesShown = true;
+          cmKeepVisible = true;
           forceShowCmWindow();
         } else {
           // 🔴🔴 **出したあとも、隠れていたら出し直す**（2026-09-01）。
@@ -777,6 +790,9 @@ class ServerModel with ChangeNotifier {
           //   hide() したのに show() を呼ばない問題）。必ず forceShowCmWindow。
           // 🔴 印を立てる。以後、この窓は**自動で閉じない**（2026-08-30 ご指示）。
           _switchSidesShown = true;
+          // 🔴 ⚠ **引っ込めさせない札**も立てる（2026-09-01 ご指摘）。
+          //   ⚠ 「最小化してタスクバーに隠れる。押しても一瞬で消える」の対策。
+          cmKeepVisible = true;
           forceShowCmWindow();
         } else if (!hideCm) {
           showCmWindow();
@@ -942,12 +958,25 @@ class ServerModel with ChangeNotifier {
       if (_clients.any((c) => c.id == id)) {
         final index = _clients.indexWhere((client) => client.id == id);
         if (index >= 0) {
-          // 🔴 入れ替えの相手が**実際に去った**ときだけ、守りの印を落とす
-          //   （2026-08-30）。⚠ 一覧が空かどうかで判断しない。
-          //   一覧は途中で空になることがあり、そこで落とすと守りが働かない。
-          if (_clients[index].fromSwitch) {
-            _switchSidesShown = false;
-          }
+          // 🔴🔴 **ここで印を落とさない**（2026-09-01 ご指摘「隠れるだけ・見えない」）。
+          //
+          //   ⚠ 実測（相談員PC・2026-09-01）:
+          //     11:22:20  接続が来て窓を出した（記録では表示中・最小化なし）
+          //     11:22:43  ⚠ **ここで onClientRemove → 窓を閉じた**
+          //     11:22:53  また接続が来て窓を出す
+          //     11:23:02  また閉じる
+          //   ＝ ⚠ **入れ替えの接続が20秒ほどで切れており、窓はそれに従って
+          //     閉じているだけ。**社長には「出た瞬間に消える」に見える。
+          //
+          //   ⚠ 元はここで印を落としてから下の `if (!_keepCmForSwitch)` に
+          //     入るので、⚠ **守りが必ず外れて閉じていた。**
+          //     ＝ 8/30 に「入れ替えの窓は閉じない」と決めたのに、
+          //       ⚠ **その決めごとが自分で無効になっていた。**
+          //   ★印は落とさない。⚠ **窓は出したままにする。**
+          //     止める道は窓の中にある（「画面を見せるのをやめる」「切断」）。
+          //     相手が居なくなっても、⚠ **相談員が自分で閉じるまで残す。**
+          //   ⚠ 残り続けないこと: 相手が0のまま一定時間たてば、
+          //     `updateClientState` が印を落として窓ごと閉じる（下）。
           if (close) {
             _clients.removeAt(index);
             tabController.remove(index);
@@ -976,6 +1005,7 @@ class ServerModel with ChangeNotifier {
     // 🔴 全部閉じるときは、守りの印も落とす（2026-08-30）。
     //   ⚠ 落とさないと、入れ替えが終わった後も窓が閉じられなくなる。
     _switchSidesShown = false;
+    cmKeepVisible = false;   // ⚠ 札は必ず下ろす
     await Future.wait(
         _clients.map((client) => bind.cmCloseConnection(connId: client.id)));
     _clients.clear();
@@ -1002,6 +1032,10 @@ class ServerModel with ChangeNotifier {
       if (index != -1) {
         _clients[index].inVoiceCall = client.inVoiceCall;
         _clients[index].incomingVoiceCall = client.incomingVoiceCall;
+        // ⚠ 着信が終わったら札を下ろす。⚠ ただし入れ替え中なら下ろさない。
+        if (!client.incomingVoiceCall && !_switchSidesShown) {
+          cmKeepVisible = false;
+        }
         if (client.incomingVoiceCall) {
           if (isAndroid) {
             showVoiceCallDialog(client);
@@ -1017,6 +1051,11 @@ class ServerModel with ChangeNotifier {
             //   ⚠ windowOnTop だけでは足りない。ワンタイム版の窓は
             //     setOpacity(0) で透明にしてあり、前に出しても見えない。
             //     不透明に戻す showCmWindow() を通すこと。
+            // 🔴 ⚠ **引っ込めさせない札も立てる**（A案・2026-09-01 ご判断）。
+            //   ⚠ 出すだけでは足りない。毎秒の見張りが引っ込めるので、
+            //     出した直後にタスクバーへ落ちる（実測で確認済みの形）。
+            //   ★札を立てて、⚠ **相談員が遠隔で「受ける」を押せる状態を保つ。**
+            cmKeepVisible = true;
             Future.delayed(Duration.zero, () {
               // ⚠ 受ける釦はこの窓の中にしかない。確実に出す方を使う。
               forceShowCmWindow();
