@@ -2891,6 +2891,30 @@ pub fn main_get_common(key: String) -> String {
         return crate::platform::linux::has_gnome_shortcuts_inhibitor_permission().to_string();
         #[cfg(not(target_os = "linux"))]
         return false.to_string();
+    } else if key == "rl-shared-dir" {
+        // 🔴🔴 **復帰の合言葉を「誰から見ても同じ場所」に置くため**（2026-09-01）。
+        //
+        //   ⚠ 実測で確定した症状: 再起動して繋ぎ直すと必ず
+        //     「パスワードが間違っています」。接続番号は正しく届いている。
+        //   ⚠ 原因: 復帰の合言葉(reconnect.token)の置き場が `%LOCALAPPDATA%`
+        //     ＝**利用者ごとの場所**。ログイン前の一時サービスは SYSTEM で
+        //     動くので、⚠ **その場所が見えない。**
+        //     見えないと「復帰中ではない」と判断し、⚠ **起動時に合言葉を潰す。**
+        //   ★8/30 に設定だけ共有(Public)へ移したが、⚠ 復帰の控えを移し忘れていた。
+        //     同じ理由・同じ直し方で、こちらも共有へ移す。
+        //
+        //   返すのは共有の置き場（`...\REMOHELP PRO\<アプリ名>`）。
+        //   ⚠ 共有を使っていない版・製品では**空**を返す。呼ぶ側は
+        //     空なら従来どおり `%LOCALAPPDATA%` を使う（＝壊さない）。
+        let shared = hbb_common::config::SHARED_CONFIG_DIR.read().unwrap().clone();
+        if shared.is_empty() {
+            return "".to_owned();
+        }
+        // `...\<アプリ名>\config` が入っているので、その親を返す。
+        return std::path::Path::new(&shared)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
     } else if key == "rl-kill-siblings" {
         // サポート終了時に、同じフォルダから動いている仲間のプロセスを片付ける。
         //   残すと次回の通信路を握ったままになる（common.rs の説明を参照）。

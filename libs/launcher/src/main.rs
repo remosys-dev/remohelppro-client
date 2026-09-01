@@ -79,8 +79,17 @@ fn find_app(dir: &Path) -> AppKind {
     //     持ち運び版が同じ場所に有っても**必ずインストール版を使う**。
     //   ⚠ `librustdesk.dll` まで見るのは、⚠ 名前だけの空ファイルや
     //     書きかけを「入っている」と誤って判断しないため。
+    //   ⚠ 「有る」だけでは足りない（2026-09-01 ご指摘）。0バイトや落としかけの
+    //     ファイルでも「入っている」と判断してしまう。
+    //   ★本体EXEと DLL の**両方**を、⚠ **ファイルであること＋大きさ**で見る。
+    //     実物は本体EXE 約38万バイト／DLL 約36MB。桁が違うので取り違えない。
+    fn big_enough(p: &Path, min: u64) -> bool {
+        std::fs::metadata(p)
+            .map(|m| m.is_file() && m.len() >= min)
+            .unwrap_or(false)
+    }
     let installed = dir.join(APP_EXE_INSTALLED);
-    if installed.exists() && dir.join("librustdesk.dll").exists() {
+    if big_enough(&installed, 100_000) && big_enough(&dir.join("librustdesk.dll"), 5_000_000) {
         return AppKind::Installed(installed);
     }
     let portable = dir.join(APP_EXE);

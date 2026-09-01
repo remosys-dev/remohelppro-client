@@ -7398,6 +7398,7 @@ name = "rustdesk-portable-packer"
 version = "1.4.6"
 dependencies = [
  "brotli",
+ "chrono",
  "dirs 5.0.1",
  "md5",
  "native-windows-gui",

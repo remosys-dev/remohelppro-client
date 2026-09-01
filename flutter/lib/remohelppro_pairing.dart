@@ -18,6 +18,7 @@ import 'remohelppro_reconnect.dart'
     show
         armReboot,
         hasResumeToken,
+        hasResumeTokenAnywhere,
         tryResume,
         prepareRebootResume,
         clearRebootResume,
@@ -278,10 +279,23 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //     お客様の同意もその回に対して生きている。潰す理由が当てはまらない。
     //   ⚠ 復帰の合言葉は1回きり・30分で失効し、サポート終了時に
     //     clearRebootResume が消す。残り続けることはない。
-    if (hasResumeToken()) {
+    // 🔴🔴 **共有の場所も見る**（2026-09-01 実測で判明）。
+    //
+    //   ⚠ `hasResumeToken()` は `%LOCALAPPDATA%`（利用者ごとの場所）しか見ない。
+    //     ログイン前の一時サービスは SYSTEM で動くので、⚠ **そこが見えない。**
+    //     見えないと「復帰中ではない」と判断して、⚠ **合言葉を潰していた。**
+    //   ＝ 実機で「再起動して繋ぎ直すと必ずパスワードを訊かれる」の正体。
+    //     共有の設定ファイルで `password = ''` になっていたのを実測で確認した。
+    //   ★どちらか一方にあれば復帰中とみなす。⚠ **潰さない側に倒す。**
+    //     潰し忘れの害（前回の使い捨て合言葉が残る）は、
+    //     30分で失効し、サポート終了時に消えるので小さい。
+    //     潰しすぎの害（繋がらない）の方がはるかに大きい。
+    if (hasResumeTokenAnywhere()) {
       debugPrint('RL: 復帰の合言葉があるので、前回の合言葉は残す');
+      rlTrace('boot_keep_password');
       return;
     }
+    rlTrace('boot_wipe_password');
     try {
       final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
       await bind.mainSetPermanentPasswordWithResult(password: 'boot-$rnd');

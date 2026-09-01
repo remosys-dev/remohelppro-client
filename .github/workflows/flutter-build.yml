@@ -498,10 +498,20 @@ jobs:
           #     ・同じPCなら毎回同じ番号（＝入れ直しても変わらない）
           #     ・ワンタイム版の番号とは**絶対に重ならない**（使う桁が違う）
           #     ・最大でも 10 桁なので、サーバーの検査(6〜14桁)に収まる
-          sed -i 's/^\( *\)id &= 0x1FFFFFFF;$/\1id \&= 0x1FFFFFFF;\n\1if IS_RESIDENT_BUILD { id |= 0x20000000; }/' libs/hbb_common/src/config.rs
-          echo "--- config.rs get_auto_id ---"; grep -n -A1 'id &= 0x1FFFFFFF;' libs/hbb_common/src/config.rs
-          grep -q 'if IS_RESIDENT_BUILD { id |= 0x20000000; }' libs/hbb_common/src/config.rs || {
-            echo "RL: 常駐の接続番号を分けられませんでした。中止します"; exit 1; }
+          # 🔴🔴 **ここでの書き換えはやめた**（2026-09-01 ご指摘）。
+          #
+          #   ⚠ 以前はこの sed で `id &= 0x1FFFFFFF;` の行に常駐の印を足していた。
+          #     ところが番号の作り方を増やした結果、⚠ **UUID から作る道と
+          #     乱数の道には印が付かなかった**（sed は1つの行しか知らないため）。
+          #   ★製品の判断を CI の文字列置換に持たせない。
+          #     Rust 側の `Config::apply_product_id_bit()` に集約し、
+          #     ⚠ **すべての道がそこを通る**ようにした。道を足しても抜けない。
+          #
+          #   ⚠ ここでは「印を付ける処理が消えていないか」だけ確かめる。
+          grep -q 'fn apply_product_id_bit' libs/hbb_common/src/config.rs || {
+            echo "RL: 製品ごとの印を付ける処理が見つかりません。中止します"; exit 1; }
+          echo "--- config.rs apply_product_id_bit ---"
+          grep -n -A6 'fn apply_product_id_bit' libs/hbb_common/src/config.rs
 
       - name: Build rustdesk
         run: |

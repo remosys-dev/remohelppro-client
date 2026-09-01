@@ -1147,6 +1147,24 @@ impl Config {
         }
     }
 
+    /// 🔴🔴 **製品ごとの印を1か所で付ける**（2026-09-01 ご指摘で作り直し）。
+    ///
+    ///   ⚠ 以前は CI が `id &= 0x1FFFFFFF;` の行を sed で書き換えて
+    ///     常駐の印を足していた。ところが番号の作り方を増やした結果、
+    ///     ⚠ **UUID から作る道と乱数の道には印が付かなかった。**
+    ///     （番号の衝突そのものは `src/server.rs` が名乗る前に直すので
+    ///       起きないが、⚠ **二重の守りの片方が抜けていた**。）
+    ///   ★製品の判断を CI の文字列置換に持たせない。⚠ **Rust 側の1か所**に置き、
+    ///     すべての道がここを通る。道を足しても印が抜けない。
+    ///   ⚠ 29ビットに収めること。超えると製品の印とぶつかる。
+    fn apply_product_id_bit(id: u32) -> u32 {
+        let mut id = id & 0x1FFF_FFFF;
+        if IS_RESIDENT_BUILD {
+            id |= 0x2000_0000;
+        }
+        id
+    }
+
     fn get_auto_id() -> Option<String> {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
@@ -1187,14 +1205,18 @@ impl Config {
             //     さらに 0x1000_0000 を立てて、常に9桁になるようにする。
             let uuid = crate::get_uuid();
             if !uuid.is_empty() {
-                // ⚠ 決まった手順で数にする（FNV-1a）。外部の実装に依存しないこと。
-                //   ハッシュの実装が変わると番号が変わってしまうため、ここに直接書く。
+                // ⚠ 決まった手順で数にする（FNV-1a **に似た形**の掛け合わせ）。
+                //   ⚠ 乗数 0x1000_0000_01b3 は、標準の FNV-1a 64bit 素数
+                //     0x100000001b3 とは**違う値**（2026-09-01 ご指摘）。
+                //   ★値は変えない。同じUUIDから必ず同じ番号を返すので目的は満たしており、
+                //     いま変えると**番号を作り直す端末の番号が変わる**。
+                //   ⚠ 外部の実装に依存しないよう、ここに直接書く。
                 let mut h: u64 = 0xcbf2_9ce4_8422_2325;
                 for b in &uuid {
                     h ^= *b as u64;
                     h = h.wrapping_mul(0x1000_0000_01b3);
                 }
-                let id = ((h as u32) & 0x1FFF_FFFF) | 0x1000_0000;
+                let id = Self::apply_product_id_bit((h as u32) | 0x1000_0000);
                 log::info!("Generated id {} (from machine uuid)", id);
                 return Some(id.to_string());
             }
@@ -1217,7 +1239,7 @@ impl Config {
                 for x in &bytes[2..] {
                     id = (id << 8) | (*x as u32);
                 }
-                id &= 0x1FFFFFFF;
+                id = Self::apply_product_id_bit(id);
                 log::info!("Generated id {} (from mac address)", id);
                 Some(id.to_string())
             } else {
@@ -1239,7 +1261,9 @@ impl Config {
                 //     （src/server.rs の RESIDENT_ID_BIT）。
                 //   ⚠ 作った番号は set_id() で保存されるので、次回からは同じ番号になる。
                 //     保存できない環境では毎回変わるが、**使えないよりはるかによい**。
-                let n: u32 = rand::thread_rng().gen_range(100_000_000..0x1FFF_FFFFu32);
+                let n: u32 = Self::apply_product_id_bit(
+                    rand::thread_rng().gen_range(100_000_000..0x1FFF_FFFFu32),
+                );
                 log::warn!(
                     "RL: MACアドレスを取得できないため、番号を乱数で作ります id={} \
                      （元の実装はここで諦めていた＝アプリが永久に使えなくなる）",

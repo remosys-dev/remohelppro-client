@@ -93,19 +93,84 @@ Future<PrelogonResult> preparePrelogonResume(String shortId) async {
   }
 }
 
-/// 合言葉を置く場所。再起動をまたぐので一時フォルダではなく
-/// ユーザーのアプリデータに置く。
-File _tokenFile() {
+/// 🔴🔴 **共有の置き場**（2026-09-01 実測で判明）。
+///
+/// ⚠ 復帰の合言葉を `%LOCALAPPDATA%` に置いていたため、⚠ **利用者ごとの場所**に
+///   なっていた。ログイン前の一時サービスは SYSTEM で動くので、そこが見えない。
+///   ⚠ 見えないと「復帰中ではない」と判断し、⚠ **起動時に合言葉を潰す。**
+///   ＝「再起動して繋ぎ直すと必ずパスワードを訊かれる」の正体。
+///
+/// ★8/30 に設定だけ共有(Public)へ移したのと、⚠ 同じ理由・同じ直し方。
+/// ⚠ 共有を使っていない版・製品では空が返る。そのときは従来どおり。
+String _sharedBase() {
+  try {
+    return bind.mainGetCommonSync(key: 'rl-shared-dir');
+  } catch (_) {
+    return '';
+  }
+}
+
+/// 利用者ごとの置き場（従来）。
+Directory _userBaseDir() {
   final base = Platform.isWindows
       ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
       : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
-  final dir = Directory('$base/REMOHELP PRO');
-  if (!dir.existsSync()) {
+  return Directory('$base/REMOHELP PRO');
+}
+
+Directory _ensure(Directory d) {
+  if (!d.existsSync()) {
     try {
-      dir.createSync(recursive: true);
+      d.createSync(recursive: true);
     } catch (_) {}
   }
-  return File('${dir.path}/reconnect.token');
+  return d;
+}
+
+/// 合言葉を置く場所。⚠ **読むときは共有を先に見る。**
+///
+/// ⚠ 途中の版との行き違いを避けるため、⚠ **書くときは両方に書く**
+///   （[_saveToken]）。読む側は、どちらかにあれば復帰と判断する。
+File _tokenFile() {
+  final s = _sharedBase();
+  if (s.isNotEmpty) {
+    final f = File('${_ensure(Directory(s)).path}/reconnect.token');
+    if (f.existsSync()) return f;
+  }
+  return File('${_ensure(_userBaseDir()).path}/reconnect.token');
+}
+
+/// 合言葉を**両方の場所**に書く。
+/// ⚠ 片方しか書かないと、書いた側と読む側が食い違ったときに気づけない。
+void _saveToken(String token) {
+  try {
+    File('${_ensure(_userBaseDir()).path}/reconnect.token')
+        .writeAsStringSync(token);
+  } catch (_) {}
+  final s = _sharedBase();
+  if (s.isEmpty) return;
+  try {
+    File('${_ensure(Directory(s)).path}/reconnect.token')
+        .writeAsStringSync(token);
+  } catch (_) {}
+}
+
+/// 復帰の合言葉が**どちらかの場所に**あるか。
+/// ⚠ 起動時に合言葉を潰してよいかの判断に使う。ここを誤ると、
+///   ⚠ **再起動復帰が必ずパスワード要求になる。**
+bool hasResumeTokenAnywhere() {
+  bool ok(File f) {
+    try {
+      return f.existsSync() && f.readAsStringSync().trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (ok(File('${_userBaseDir().path}/reconnect.token'))) return true;
+  final s = _sharedBase();
+  if (s.isNotEmpty && ok(File('$s/reconnect.token'))) return true;
+  return false;
 }
 
 /// 再起動の直前に呼ぶ。復帰用の合言葉を取って保存する。
@@ -134,7 +199,7 @@ Future<void> armReboot({
     final j = jsonDecode(r.body) as Map;
     final token = j['token'] as String?;
     if (token == null || token.isEmpty) return;
-    _tokenFile().writeAsStringSync(token);
+    _saveToken(token);
   } catch (_) {
     // 取れなければ従来どおり。再起動後に認証コードを入れ直してもらう。
   }
@@ -274,6 +339,13 @@ const _kResumeRunKey =
 const _kResumeRunName = 'REMOHELPPRO_RESUME';
 
 Directory _resumeDir() {
+  // ⚠ 合言葉と同じ理由で、共有の置き場を先に見る（2026-09-01）。
+  //   SYSTEM で動く一時サービスからも同じ場所が見えるようにする。
+  final s = _sharedBase();
+  if (s.isNotEmpty) {
+    final d = Directory('$s/resume');
+    if (d.existsSync()) return d;
+  }
   final base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
   return Directory('$base/REMOHELP PRO/resume');
 }

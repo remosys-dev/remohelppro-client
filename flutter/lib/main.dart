@@ -530,8 +530,14 @@ showCmWindow({bool isStartup = false}) async {
 ///   毎秒呼ぶと⚠ **相談員が他の窓を触れなくなる。**
 ///   ★止め方が違った。⚠ **「隠れているときだけ」出し直せばよい。**
 ///   出ている間は何もしないので、窓は震えないし、focus も奪わない。
+/// ⚠ 実行中に重ねて入らない（2026-09-01 ご指摘）。
+///   毎秒呼ばれるが、中の問い合わせが1秒を超えると処理が重なりうる。
+///   ⚠ **入口で断り、出口は必ず finally で戻す。**
+bool _reasserting = false;
+
 Future<void> reassertCmWindowIfHidden() async {
-  if (!_isCmReadyToShow) return;
+  if (!_isCmReadyToShow || _reasserting) return;
+  _reasserting = true;
   try {
     final hidden = (await windowManager.getOpacity()) != 1 ||
         await windowManager.isMinimized() ||
@@ -541,7 +547,10 @@ Future<void> reassertCmWindowIfHidden() async {
       rlTrace('cm_reassert', {'gen': _cmWindowGen});
     } catch (_) {}
     await forceShowCmWindow();
-  } catch (_) {}
+  } catch (_) {
+  } finally {
+    _reasserting = false;
+  }
 }
 
 Future<void> forceShowCmWindow() async {
