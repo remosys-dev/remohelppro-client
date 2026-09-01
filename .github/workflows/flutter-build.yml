@@ -408,6 +408,17 @@ jobs:
           if [ -z "$NAME" ]; then
             echo "RL: この種類は表示名を変えません（既定のまま）"; exit 0
           fi
+          # 🔴🔴 **画面に出るのは Runner.rc の値**（2026-09-01 実機で判明）。
+          #
+          #   ⚠ 最初は build.rs 2つだけを直し、⚠ **署名した外側の1個のファイルを見て
+          #     「実物で確認しました」と報告した。**ところが実際に動くのは中身の方で、
+          #     入れ替えても「REMOHELP PRO Remote Desktop」のままだった。
+          #   ⚠ 内訳:
+          #     build.rs              … `inline` 機能付きのときしか動かない
+          #     libs/portable/build.rs … 落としてくる「外側の1個のファイル」
+          #     flutter/windows/runner/Runner.rc … ⚠ **実際に動く実行ファイル**
+          #       （Flutter の runner は CMake が作るので版情報はここから来る）
+          #   ★3つとも直す。⚠ 1つでも漏れると、漏れた方が画面に出る。
           for f in build.rs libs/portable/build.rs; do
             sed -i "s/\.set(\"FileDescription\", \"REMOHELP PRO Remote Desktop\")/.set(\"FileDescription\", \"$NAME\")/" "$f"
             echo "--- $f ---"; grep -n 'FileDescription' "$f"
@@ -415,7 +426,12 @@ jobs:
             grep -q "FileDescription\", \"$NAME\"" "$f" || {
               echo "RL: $f の表示名を変えられませんでした。中止します"; exit 1; }
           done
-          echo "RL: 表示名を「$NAME」にしました"
+          R=flutter/windows/runner/Runner.rc
+          sed -i "s/VALUE \"FileDescription\", \"REMOHELP PRO Remote Desktop\"/VALUE \"FileDescription\", \"$NAME\"/" "$R"
+          echo "--- $R ---"; grep -n 'FileDescription' "$R"
+          grep -q "VALUE \"FileDescription\", \"$NAME\"" "$R" || {
+            echo "RL: $R の表示名を変えられませんでした。中止します"; exit 1; }
+          echo "RL: 表示名を「$NAME」にしました（build.rs 2つ ＋ Runner.rc）"
 
       - name: Resident build flag (sed)
         if: ${{ inputs.resident }}
@@ -494,6 +510,26 @@ jobs:
           # Windows: build RustDesk
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          # 🔴🔴 **出来上がった実行ファイルそのものを確かめる**（2026-09-01 ご指摘）。
+          #
+          #   ⚠ 「直したつもり」を2回やった:
+          #     ① 本体の窓の入口を3本のうち2本しか塞がず「直した」と報告
+          #     ② 表示名を3か所のうち2か所しか直さず、⚠ **署名した外側の
+          #        ファイルだけ見て「実物で確認しました」と報告**
+          #   ＝ ⚠ 人が数えると必ず取り残す。⚠ **機械に確かめさせる。**
+          #
+          #   ★ここはソースではなく、⚠ **これから配る実行ファイルの中身**を読む。
+          #     違っていればビルドを止める（緑のまま古い物を配らない）。
+          $want = "REMOHELP PRO Remote Desktop"
+          if ("${{ inputs.resident }}" -eq "true") { $want = "REMOHELP PRO Agent" }
+          elseif ("${{ inputs.upload-tag }}" -eq "operator" -or "${{ inputs.upload-tag }}" -eq "mac-operator") { $want = "REMOHELP PRO Operator" }
+          elseif ("${{ inputs.support_show_window }}" -eq "true") { $want = "REMOHELP PRO Support" }
+          $got = (Get-Item ./rustdesk/rustdesk.exe).VersionInfo.FileDescription
+          Write-Host "RL: 出来た実行ファイルの表示名 = [$got] / 期待 = [$want]"
+          if ($got -ne $want) {
+            Write-Host "RL: 表示名が期待と違います。配ると見分けが付かなくなるので中止します"
+            exit 1
+          }
           # 2026-06-23: サポート版は VC++ ランタイムを同梱(未導入PCでも起動するように)
           if ("${{ inputs.support_show_window }}" -eq "true") {
             Copy-Item C:\Windows\System32\vcruntime140.dll,C:\Windows\System32\vcruntime140_1.dll,C:\Windows\System32\msvcp140.dll -Destination ./rustdesk -Force
