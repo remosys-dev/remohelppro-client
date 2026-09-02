@@ -904,25 +904,45 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //     終了の条件ではない。だから先に止める。
     //   ⚠ 連絡には必ず時間切れを付ける（5秒）。届かなくても、
     //     相談員の画面は接続が切れたことで気づける。
+    //   🔴🔴 **2026-09-02 追記：送り「始める」のは先。ただし待たない。**
+    //
+    //     ⚠ 実機で分かったこと（スクショ・サーバーの記録）:
+    //       お客様が本体の「×」を押すと
+    //         ・合言葉は無効になる（ビュアーに「パスワードが間違っています」）
+    //         ・⚠ しかしコンソールは**「対応中」のまま**（14:07開始・終了なし）
+    //         ・さらにコンソールが**「お客様の端末が再起動中です」**と誤表示
+    //     ⚠ 原因: 呼び出し側（tabbar_widget の onWindowClose）は**6秒で打ち切る**。
+    //       ところが `_terminateBySupportEnd()` の中には
+    //       `_resumeResidentIfPaused()`（最大30秒待つ）が入っている。
+    //       ＝ ⚠ **サーバーへ伝える所まで一度も辿り着いていなかった。**
+    //
+    //     ★上の教訓（通信で止める処理を止めない）は守る。**待たない**。
+    //       送り始めてすぐ止める処理へ進む。結果は記録にだけ残す。
+    //     ⚠ 順番を戻すだけにしない。戻すと 8/27 の事故（無応答で止まる）が再発する。
     final sid = _shortId;
-    rlTrace('end_by_customer', {'ticks': _pollTicks});
-    await _terminateBySupportEnd();
+    rlTrace('end_by_customer', {'ticks': _pollTicks, 'sid': sid ?? ''});
     if (sid != null) {
-      try {
-        await http
-            .post(
-              Uri.parse('$_kApiBase/api/customer/session-end'),
-              headers: {
-                'Content-Type': 'application/json',
-                if (_custToken != null) 'x-customer-token': _custToken!,
-              },
-              body: jsonEncode({'shortId': sid}),
-            )
-            .timeout(const Duration(seconds: 5));
-      } catch (_) {
-        // 届かなくても、この端末はもう誰も入れない状態になっている。
-      }
+      // ⚠ await しない。送り始めるだけ。
+      http
+          .post(
+            Uri.parse('$_kApiBase/api/customer/session-end'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (_custToken != null) 'x-customer-token': _custToken!,
+            },
+            body: jsonEncode({'shortId': sid}),
+          )
+          .timeout(const Duration(seconds: 5))
+          .then((r) => rlTrace('end_notified', {'status': r.statusCode}))
+          .catchError((Object e) {
+        // ⚠ 伝えられなかったことを**必ず残す**。空白だと原因に辿り着けない。
+        rlTrace('end_notify_failed', {'e': e.toString()});
+      });
+    } else {
+      // ⚠ 接続番号が無い＝サーバーには伝えられない。黙って通り過ぎない。
+      rlTrace('end_no_shortid');
     }
+    await _terminateBySupportEnd();
   }
 
   /// 常駐を一時停止してから、もう一度つなぎ直す。
