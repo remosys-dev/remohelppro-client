@@ -937,6 +937,41 @@ async fn send_close_async(postfix: &str) -> ResultType<()> {
 
 // https://docs.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas
 // https://www.cnblogs.com/doutu/p/4892726.html
+/// ワンタイム版のために、SYSTEM 側で CAD の合図を受ける（2026-09-02）。
+///
+/// ⚠ インストールしたサービス（`run_service`）と**同じ受け口**を用意する。
+///   通信路の名前は `APP_NAME` で製品ごとに分かれているので、
+///   常駐版・相談員版のサービスとぶつからない。
+/// ⚠ 受けるのは SAS だけ。他の指示はサービスの仕事なので触らない。
+/// ⚠ 立てられなくても**黙って終わる**。ここで落ちると画面取り込みが道連れになる。
+#[cfg(windows)]
+#[tokio::main(flavor = "current_thread")]
+async fn rl_serve_sas_for_portable() {
+    // ⚠ 形は run_service の受け口をそのまま写している（実績のある書き方）。
+    let mut incoming = match ipc::new_listener(crate::POSTFIX_SERVICE).await {
+        Ok(v) => v,
+        Err(e) => {
+            // ⚠ 既にサービスが同じ名前で開いている場合もここに来る。
+            //   常駐版・相談員版では正常な状態なので、警告にしない。
+            log::info!("RL sas: 受け口を作りませんでした: {e}");
+            return;
+        }
+    };
+    log::info!("RL sas: SYSTEM 側で Ctrl+Alt+Del の受け口を開きました");
+    loop {
+        if let Some(Ok(conn)) = incoming.next().await {
+            let mut stream = ipc::Connection::new(conn);
+            // ⚠ 1本ずつ順に捌く。CAD は連打される類のものではない。
+            if let Ok(Some(data)) = stream.next_timeout(1000).await {
+                if matches!(data, ipc::Data::SAS) {
+                    log::info!("RL sas: 受け取りました。SendSAS を呼びます");
+                    send_sas();
+                }
+            }
+        }
+    }
+}
+
 pub fn send_sas() {
     #[link(name = "sas")]
     extern "system" {
@@ -1959,12 +1994,30 @@ pub fn toggle_blank_screen(v: bool) {
 }
 
 pub fn block_input(v: bool) -> (bool, String) {
+    let on = v;
     let v = if v { TRUE } else { FALSE };
     unsafe {
         if BlockInput(v) == TRUE {
             (true, "".to_owned())
         } else {
-            (false, format!("Error: {}", io::Error::last_os_error()))
+            // 🔴🔴 **失敗の中身を残す**（2026-09-02 実機で「os error 1460」）。
+            //
+            //   ⚠ 実機のエラー: 「タイムアウト期間が経過したため、この操作は
+            //     終了しました。(os error 1460)」。⚠ **原因は未特定。**
+            //   ⚠ `BlockInput` は、呼んだスレッドが**入力を受けている机**に
+            //     いないと失敗する。SYSTEM の部品・ログオン前の複製・
+            //     昇格の有無で、どの机に居るかが変わる。
+            //   ★ここが空白だと原因に辿り着けない。⚠ **どの立場で呼んだか**を残す。
+            //     推測で直さないための材料（今日それで7回外している）。
+            let e = io::Error::last_os_error();
+            let elevated = is_elevated(None).unwrap_or(false);
+            let system = crate::platform::is_root();
+            log::error!(
+                "RL block_input 失敗: on={on} err={e} 昇格={elevated} SYSTEM={system} \
+                 ユーザー={}",
+                crate::username()
+            );
+            (false, format!("Error: {}", e))
         }
     }
 }
@@ -2597,6 +2650,22 @@ pub fn elevate_or_run_as_system(is_setup: bool, is_elevate: bool, is_run_as_syst
                     }
                 }
             };
+            // 🔴🔴 **Ctrl+Alt+Delete を効かせる**（2026-09-02 ご指摘）。
+            //
+            //   ⚠ CAD の合図は `POSTFIX_SERVICE` の通信路へ送られ、
+            //     ⚠ **インストールしたサービス**（run_service）が受けて
+            //     `SendSAS` を呼ぶ作りになっている。
+            //   ⚠ ところがワンタイム版には**サービスが無い**。
+            //     ＝ 合図がどこにも届かず、⚠ **CAD が何も起きない**。
+            //     （常駐版はサービスがあるので効く。「前はできた」のはそちら）
+            //   ⚠ `SendSAS(FALSE)` は **SYSTEM からでないと効かない**。
+            //     利用者の権限で呼んでも失敗する。
+            //   ★ここは SYSTEM。⚠ **同じ受け口をここにも用意する**。
+            //     通信路の名前は APP_NAME で製品ごとに分かれているので、
+            //     常駐版・相談員版のサービスとぶつからない。
+            std::thread::spawn(|| {
+                rl_serve_sas_for_portable();
+            });
             crate::portable_service::server::run_portable_service();
             drop(_uac);
         }
