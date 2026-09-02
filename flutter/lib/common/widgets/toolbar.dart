@@ -377,7 +377,21 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   //   ⚠ 常駐PCには出さない（2026-08-26 ご判断）。
   //     常駐は既にお使いいただいている業務用PC。ソフトを体験していただく
   //     場面が無いので、押し間違いにしかならない。
-  if (isDefaultConn &&
+  //   🔴🔴 **出さないようにできる**（2026-09-02 ご指示）。
+  //
+  //   ⚠ この機能は、まだ安定していません（戻る窓が1回目に見えない件を追跡中）。
+  //     ⚠ **完成するまで隠せるようにしておきたい**というご判断。
+  //   ★札は `rl-allow-switch-sides`。**既定は「出す」**。
+  //     ⚠ 未設定を「出さない」にしない。⚠ **入れ忘れで機能が消える**と、
+  //       原因の分からない不具合として扱われる（既定値の事故は繰り返している）。
+  //   ⚠ 消し方: 相談員PCで `rl-allow-switch-sides` を `N` にする。
+  //     いずれ会社ごと・相談員ごとの設定から届ける（設計書あり）。
+  //   ⚠ ここは**見せるかどうか**だけ。止める必要があるなら、
+  //     受け取る側（顧客のアプリ）でも断ること。画面から消すだけにしない。
+  final allowSwitchSides =
+      bind.mainGetLocalOption(key: 'rl-allow-switch-sides').trim() != 'N';
+  if (allowSwitchSides &&
+      isDefaultConn &&
       isDesktop &&
       ffiModel.keyboard &&
       pi.platform != kPeerPlatformAndroid &&
