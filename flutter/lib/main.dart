@@ -23,6 +23,7 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'common.dart';
@@ -583,6 +584,53 @@ Future<void> reassertCmWindowIfHidden() async {
   }
 }
 
+/// 戻る窓を **主モニターの右上** に置く（2026-09-02）。
+///
+/// 🔴🔴 なぜ要るか（実測で確定・7回目でようやく分かった）
+///
+///   `setSizeAlignment(size, Alignment.topRight)` は
+///   ⚠ **仮想デスクトップ全体**の右上に置く。2画面のとき、
+///   ⚠ **一番右のモニターの端**へ飛ぶ。
+///
+///   実測（相談員PC・2026-09-02）:
+///     DISPLAY1(主) x=0〜1536 ／ DISPLAY2 x=1920〜3840
+///     戻る窓 x=3540, y=0     ＝ **DISPLAY2 の右端**（窓幅300なので 3540〜3840）
+///   ＝ ⚠ **窓は出ていた。相談員の見ている画面に無かっただけ。**
+///
+///   ⚠ アプリの記録は「表示中・最小化なし・不透明」と答え続けた。
+///     ＝ ⚠ **「見えない」を「隠れている」と読み違えて、7回、別の所を直した。**
+///   ★教訓: 「見えない」と言われたら、⚠ **どこに在るかを測る。**
+///
+/// ⚠ 画面情報が取れないときは、元のやり方に戻す（止めない）。
+Future<void> _placeCmTopRightOfPrimary() async {
+  const size = kConnectionManagerWindowSizeClosedChat;
+  try {
+    final d = await screenRetriever.getPrimaryDisplay();
+    final pos = d.visiblePosition ?? Offset.zero;
+    final vis = d.visibleSize ?? d.size;
+    // ⚠ 端にぴったり付けない。少し内側に置く（枠が切れて見えなくなるため）
+    const margin = 8.0;
+    final x = pos.dx + vis.width - size.width - margin;
+    final y = pos.dy + margin;
+    await windowManager.setSize(size);
+    await windowManager.setPosition(Offset(x, y));
+    rlTrace('cm_place_primary', {
+      'x': x.round(),
+      'y': y.round(),
+      'dw': vis.width.round(),
+      'dh': vis.height.round(),
+    });
+  } catch (e) {
+    // ⚠ 取れなければ元のやり方。⚠ **置けないからといって窓を出さない、はしない。**
+    try {
+      rlTrace('cm_place_fallback', {'e': e.toString()});
+    } catch (_) {}
+    try {
+      await windowManager.setSizeAlignment(size, Alignment.topRight);
+    } catch (_) {}
+  }
+}
+
 Future<void> forceShowCmWindow() async {
   // 🔴 いま出そうとしていることを宣言する（2026-08-31）。
   //   ⚠ これより前に始まっていた「隠す」は、これを見て諦める。
@@ -614,8 +662,17 @@ Future<void> forceShowCmWindow() async {
     }
     await windowManager.show();
     await windowManager.focus();
-    await windowManager.setSizeAlignment(
-        kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+    // 🔴🔴 **主モニターの右上へ置く**（2026-09-02 実測で確定）。
+    //
+    //   ⚠ 元は `setSizeAlignment(..., Alignment.topRight)` で、
+    //     ⚠ **仮想デスクトップ全体の右上**＝一番右のモニターに置いていた。
+    //   ⚠ 実測（相談員PC・2026-09-02）:
+    //       DISPLAY1(主) x=0〜1536 ／ DISPLAY2 x=1920〜3840
+    //       戻る窓の位置 x=3540  ＝ **2台目のモニターの右端**
+    //     ＝ 窓は出ていた。⚠ **相談員の見ている画面に無かっただけ。**
+    //   ⚠ 記録は「表示中・最小化なし」と答えるので、⚠ **7回、別の所を直した。**
+    //     ★「見えない」は「隠れている」とは限らない。**どこに在るかを測る。**
+    await _placeCmTopRightOfPrimary();
     // 🔴🔴 **他の窓の後ろに回らせない**（2026-09-01 ご指摘
     //   「表示できないの、隠れるだけで、見えるようしてよ」）。
     //
@@ -662,12 +719,27 @@ Future<void> forceShowCmWindow() async {
           //   ⚠ 私は3日間これを最小化だと思い込み、別の所を直していた。
           //     ★測っていないものは直せない。位置を必ず残す。
           final pos = await windowManager.getPosition();
-          // ⚠ Windows は最小化した窓を -32000 付近へ置く。画面外の判定は
-          //   広めに取る（多画面でも -3000 より外へ普通は置かれない）。
-          final offscreen = pos.dx < -3000 ||
-              pos.dy < -3000 ||
-              pos.dx > 20000 ||
-              pos.dy > 20000;
+          // 🔴🔴 **決め打ちの数字で判定しない**（2026-09-02 実測で修正）。
+          //
+          //   ⚠ 最初「-3000 より外／20000 より外」という広い判定にしたが、
+          //     実測の位置は **x=3540**。⚠ **判定をすり抜けた**（off:false）。
+          //   ＝ 2画面（0〜1536 と 1920〜3840）の**2台目の右端**に居た。
+          //   ★主モニターの範囲で測る。⚠ **相談員が見ている画面に無ければ
+          //     「見えない」と同じこと。**
+          var offscreen = false;
+          try {
+            final d = await screenRetriever.getPrimaryDisplay();
+            final dp = d.visiblePosition ?? Offset.zero;
+            final ds = d.visibleSize ?? d.size;
+            // 窓の左上が主モニターの中に無ければ「見えていない」と扱う
+            offscreen = pos.dx < dp.dx - 50 ||
+                pos.dy < dp.dy - 50 ||
+                pos.dx > dp.dx + ds.width - 50 ||
+                pos.dy > dp.dy + ds.height - 50;
+          } catch (_) {
+            // 画面情報が取れないときだけ、広い決め打ちに戻す
+            offscreen = pos.dx < -3000 || pos.dy < -3000;
+          }
           final hidden = opacity != 1 || minimized || !visible || offscreen;
           try {
             rlTrace('cm_force_recheck', {
@@ -690,9 +762,12 @@ Future<void> forceShowCmWindow() async {
           // ⚠ 画面の外に居るなら、⚠ **真ん中へ引き戻す。**
           //   出し直すだけでは、同じ場所（画面外）に出るので見えないまま。
           if (offscreen) {
+            // ⚠ center() は「いま居るモニター」の真ん中に寄せるだけなので、
+            //   2台目に居ると2台目の真ん中へ動くだけ＝見えないまま。
+            //   ★主モニターの右上へ置き直す。
+            await _placeCmTopRightOfPrimary();
             try {
-              await windowManager.center();
-              rlTrace('cm_recentered', {'gen': gen, 'ms': ms});
+              rlTrace('cm_replaced', {'gen': gen, 'ms': ms});
             } catch (_) {}
           }
           windowOnTop(null);

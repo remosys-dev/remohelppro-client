@@ -54,6 +54,11 @@ dependencies:
   image: ^4.0.17
   back_button_interceptor: ^6.0.1
   flutter_rust_bridge: "1.80.1"
+  # 2026-09-02: 戻る窓を「主モニターの右上」へ置くために画面情報を読む。
+  #   ⚠ 元は仮想デスクトップ全体の右上に置いており、2画面のとき
+  #     **2台目のモニターに出て、相談員には見えなかった**（実測 x=3540）。
+  #   window_manager が既に使っている部品なので、新しい物は増えない。
+  screen_retriever: ^0.1.9
   window_manager:
     git:
       url: https://github.com/rustdesk-org/window_manager
