@@ -34,6 +34,25 @@ import '../../models/server_model.dart';
 ///     ⚠ 「誰が私のPCを触っているのか」の答えになっていなかった。
 ///   ★左のカードと**同じ会社名**を出す。会社ごとに変わっても必ず一致する。
 ///   ⚠ 取れないときは空を返す。呼ぶ側は従来どおりの表示に戻る（壊さない）。
+/// 常駐版かどうか。
+///
+/// 🔴 判定は**実行ファイル名**（`remohelppro-agent`）。
+///   ⚠ 名前で見分けるのは本来よくない（3製品で名前がぶつかる事故を何度も
+///     起こしている）が、⚠ **常駐だけは APP_NAME ごと分けてある**ので、
+///     ここは名前が正しい見分けになる。`remohelppro_pairing.dart` の
+///     `_isResidentBuild` と同じ流儀。
+/// ⚠ ワンタイム版は目印ファイルで見分ける（名前ではない）。混同しないこと。
+bool rlIsResidentBuild() {
+  if (!Platform.isWindows) return false;
+  try {
+    return Platform.resolvedExecutable
+        .toLowerCase()
+        .contains('remohelppro-agent');
+  } catch (_) {
+    return false;
+  }
+}
+
 String rlSupportCompanyName() {
   try {
     return bind.mainGetLocalOption(key: 'rl-support-company').trim();
@@ -527,6 +546,19 @@ class _CmHeaderState extends State<_CmHeader>
                   maxLines: 1,
                 )),
                 // v1.4.6-13: Phase 4 N3 - 部署 / 役職
+                // 🔴 常駐は「担当　○○」を1行足す（2026-09-02 ご判断）。
+                //   ⚠ お客様（従業員）は、頼んだ覚えなく繋がれることがある。
+                //     ⚠ **誰が繋いでいるか**が見えないと不安になる。
+                //   ⚠ いま出せるのは相談員PCが名乗る名前。会社に登録した
+                //     表示名を出すには、サーバーから届ける仕組みが要る（別途）。
+                if (rlIsResidentBuild() && client.displayName.isNotEmpty)
+                  FittedBox(
+                    child: Text(
+                      '担当　${client.displayName}',
+                      style: TextStyle(color: Colors.white, fontSize: 13),
+                      maxLines: 1,
+                    ),
+                  ),
                 if (client.departmentRole.isNotEmpty)
                   FittedBox(
                     child: Text(
@@ -581,10 +613,20 @@ class _CmHeaderState extends State<_CmHeader>
                       // 🔴 お客様に分かる言葉にする（2026-09-01 ご判断）。
                       //   ⚠ 「接続済み」は**何と接続したのか**が分からない。
                       //     ★「遠隔サポート中です」なら、いま何が起きているかが伝わる。
+                      // 🔴 常駐は言い方を変える（2026-09-02 ご判断）。
+                      //   ⚠ 常駐は**お客様が呼んでいない**ことがある。
+                      //     「サポート中」だと、頼んだ覚えのないお客様には
+                      //     何が起きているか伝わらない。
+                      //   ★「遠隔制御中！」＝**いま操作されている**とはっきり出す。
+                      //   ⚠ ワンタイムは今までどおり（お客様が自分で呼んでいる）。
                       client.authorized
                           ? client.disconnected
-                              ? 'サポートは終了しました'
-                              : '遠隔サポート中です'
+                              ? (rlIsResidentBuild()
+                                  ? '遠隔制御は終了しました'
+                                  : 'サポートは終了しました')
+                              : (rlIsResidentBuild()
+                                  ? '遠隔制御中！'
+                                  : '遠隔サポート中です')
                           : "${translate("Request access to your device")}...",
                       style: TextStyle(color: Colors.white),
                     ).marginOnly(right: 8.0),
@@ -802,9 +844,18 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
-          children: isCamera
-              ? _buildCameraSections(canModify)
-              : _buildRemoteSections(canModify),
+          // 🔴 常駐ではアクセス権限を出さない（2026-09-02 ご判断）。
+          //   ⚠ 常駐は**会社が管理している業務用PC**。
+          //     お客様（従業員）が相談員の操作を制限する場面ではない。
+          //   ⚠ ワンタイムでは出す。あちらはお客様の私物PCで、
+          //     ⚠ **お客様が相談員の操作を制限する手段**として必要（ご判断）。
+          //   ⚠ 同じ画面を2製品で使っている。片方だけ変えるつもりが
+          //     両方変わる事故を起こしているので、必ず製品で分ける。
+          children: rlIsResidentBuild()
+              ? const []
+              : (isCamera
+                  ? _buildCameraSections(canModify)
+                  : _buildRemoteSections(canModify)),
         ),
       ),
     );
