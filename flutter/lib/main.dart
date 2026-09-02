@@ -509,9 +509,14 @@ showCmWindow({bool isStartup = false}) async {
       windowManager.focus(),
       windowManager.setOpacity(1)
     ]);
-    // ensure initial window size to be changed
-    await windowManager.setSizeAlignment(
-        kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+    // 🔴🔴 **お客様の窓も、主モニターの右上へ**（2026-09-02）。
+    //
+    //   ⚠ `Alignment.topRight` は**仮想デスクトップ全体**の右上に置く。
+    //     ⚠ お客様が2画面のとき、⚠ **一番右のモニターに出て見えない。**
+    //     ＝ 「遠隔サポート中です」も「終了する」も、お客様に届かない。
+    //   ⚠ 相談員側で実測して分かった形（x=3540＝2台目の右端）。
+    //     同じ書き方なので、お客様側でも同じことが起きる。
+    await _placeCmTopRightOfPrimary();
     _isCmReadyToShow = true;
   } else if (_isCmReadyToShow) {
     if (await windowManager.getOpacity() != 1) {
@@ -521,8 +526,7 @@ showCmWindow({bool isStartup = false}) async {
       if (!cmKeepVisible) {
         await windowManager.minimize(); //needed
       }
-      await windowManager.setSizeAlignment(
-          kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
+      await _placeCmTopRightOfPrimary();
       windowOnTop(null);
     }
   }
