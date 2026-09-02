@@ -1023,7 +1023,16 @@ List<TToggleMenu> toolbarKeyboardToggles(FFI ffi) {
   // Wayland is not supported due to cursor warping limitations.
   // Mobile: This option is now in GestureHelp widget, shown only when joystick is visible.
   final isWayland = isDesktop && isLinux && bind.mainCurrentIsWayland();
-  if (isDesktop &&
+  // 🔴 「相対マウスモード」を出さない（2026-09-02 ご判断）。
+  //
+  //   ⚠ ゲームや3Dの操作で使うもので、⚠ **遠隔サポートでは使い道が無い**。
+  //     入れると、マウスの絶対位置ではなく「動いた量」だけを送るようになり、
+  //     ⚠ お客様の画面でカーソルが思った所へ行かなくなる。
+  //   ⚠ 名前からは何をするか分からず、押し間違いにしかならない。
+  //   ★消すのは**メニューから出すのをやめるだけ**。処理は残してある。
+  //     戻したくなったら `false &&` を外せば元どおり。
+  if (false &&
+      isDesktop &&
       isDefaultConn &&
       !isWeb &&
       !isWayland &&

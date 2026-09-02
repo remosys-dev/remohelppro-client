@@ -2440,11 +2440,19 @@ class _KeyboardMenu extends StatelessWidget {
               keyboardMode(),
               localKeyboardType(),
               inputSource(),
-              Divider(),
-              viewMode(),
-              if ([kPeerPlatformWindows, kPeerPlatformMacOS, kPeerPlatformLinux]
-                  .contains(pi.platform))
-                showMyCursor(),
+              // 🔴 「表示モード」と「自分のカーソルを表示する」を出さない
+              //   （2026-09-02 ご判断）。
+              //
+              //   ⚠ 「自分のカーソルを表示する」は、**レーザーポインターと
+              //     同じこと**をする（お客様の画面に相談員の指し位置を出す）。
+              //   ⚠ 同じ機能が2か所にあると、⚠ **どちらを押せばよいか分からない**。
+              //     レーザーポインターは道具の並びに釦があり、そちらが本命。
+              //   ⚠ 「表示モード」は、これと対になっている項目
+              //     （見るだけにする切り替え）。片方だけ残すと意味が通らないので
+              //     一緒に出さない。止める手立ては別にある（権限の切り替え）。
+              //   ★消すのは**メニューから出すのをやめるだけ**。
+              //     処理そのものは残してある（viewMode / showMyCursor）。
+              //     戻したくなったら、この2行を戻せば元どおり。
               Divider(),
               ...toolbarToggles(),
               ...mouseSpeed(),

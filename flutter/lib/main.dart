@@ -646,6 +646,27 @@ Future<void> forceShowCmWindow() async {
     await Future.delayed(const Duration(milliseconds: 200));
     waited += 200;
   }
+  // 🔴🔴 **窓が無ければ、ここで作る**（2026-09-02 常駐で判明）。
+  //
+  //   ⚠ 常駐は無人なので、接続管理の窓を**普段は作らない**
+  //     （server_model の `if (!hideCm) showCmWindow();` を通らない）。
+  //   ⚠ そのため音声通話の着信が来ても、⚠ **承諾の釦がどこにも現れない**。
+  //     相談員は押しようがなく、通話を始められなかった。
+  //   ★出す前に「作られているか」を見る。無ければ作ってから出す。
+  //   ⚠ 一度作れば `_isCmReadyToShow` が立つので、二度は作らない。
+  if (!_isCmReadyToShow) {
+    try {
+      rlTrace('cm_late_init', {'gen': gen, 'waited': waited});
+    } catch (_) {}
+    try {
+      await showCmWindow(isStartup: true);
+    } catch (e) {
+      // ⚠ 作れなくても、この先の「出す」は試す。黙って諦めない。
+      try {
+        rlTrace('cm_late_init_failed', {'e': e.toString()});
+      } catch (_) {}
+    }
+  }
   // 🔴 **待っても用意ができないときに、黙って引き下がらない**（2026-08-31 実測）。
   //
   //   ⚠ 元はここで `_isCmReadyToShow` が false のまま抜けており、
