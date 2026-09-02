@@ -532,11 +532,22 @@ class _CmHeaderState extends State<_CmHeader>
                 // 🔴 会社名を出す（2026-09-01 ご判断）。
                 //   ⚠ ここに出ていたのは相談員PCの Windows ユーザー名。
                 //     ★左のカードと**同じ会社名**にする。取れなければ従来どおり。
+                // 🔴🔴 **相談員が名乗った会社名を最優先にする**（2026-09-03）。
+                //
+                //   ⚠ これまでは設定ファイル（`rl-support-company`）だけを見ていた。
+                //     ところが常駐では、⚠ 書くのは SYSTEM のサービス・
+                //     読むのは利用者の窓で、**別々のファイル**を見ている。
+                //     ＝ 会社名が ⚠ **入ったり入らなかったり**した。
+                //   ★繋いできた相談員が名乗る値（組織名）を先に使う。
+                //     これは接続そのものに乗ってくるので、取りこぼしが無い。
+                //   ⚠ 名乗りが無い古い相談員版のときは、従来どおりの順に落ちる。
                 FittedBox(
                     child: Text(
-                  rlSupportCompanyName().isNotEmpty
-                      ? rlSupportCompanyName()
-                      : client.displayName,
+                  client.organizationName.isNotEmpty
+                      ? client.organizationName
+                      : (rlSupportCompanyName().isNotEmpty
+                          ? rlSupportCompanyName()
+                          : client.displayName),
                   style: TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,

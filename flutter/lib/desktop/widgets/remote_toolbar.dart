@@ -2709,18 +2709,28 @@ class _ChatMenuState extends State<_ChatMenu> {
 
   @override
   Widget build(BuildContext context) {
-    if (isWeb) {
-      return buildTextChatButton();
-    } else {
-      return _IconSubmenuButton(
-          tooltip: 'Chat',
-          key: chatButtonKey,
-          svg: 'assets/chat.svg',
-          ffi: widget.ffi,
-          color: _ToolbarTheme.blueColor,
-          hoverColor: _ToolbarTheme.hoverBlueColor,
-          menuChildrenGetter: (_) => [textChat(), voiceCall()]);
-    }
+    // 🔴🔴 **音声通話の入口を1つに減らす**（2026-09-03 ご判断）。
+    //
+    //   ⚠ 音声通話は**2か所から始められた**:
+    //     ① 受話器の釦（`_VoiceCallMenu`）… 許可の設定で出し分けている
+    //     ② ここ（チャットの釦の中の「音声通話」）… ⚠ **素通りしていた**
+    //   ＝ 会社／相談員が「許可しない」にしても、②から掛けられた。
+    //     ⚠ 設定した意味が無い。しかも②が在ることに気づけない。
+    //   ⚠ 入口が2つあると、片方だけ直して「直った」と誤解する
+    //     （同じ間違いを何度も起こしている）。
+    //   ★②を無くす。判断は受話器の釦1か所に集める。
+    //
+    //   ⚠ 残るのは文字のやりとりだけなので、押した瞬間に開く釦にする
+    //     （項目が1つだけの引き出しは、無駄に1回多く押させる）。
+    //   ⚠ 絵柄は今までと同じ `chat.svg` のまま。見た目は変えない。
+    return _IconMenuButton(
+      assetName: 'assets/chat.svg',
+      tooltip: 'Chat',
+      key: chatButtonKey,
+      onPressed: _textChatOnPressed,
+      color: _ToolbarTheme.blueColor,
+      hoverColor: _ToolbarTheme.hoverBlueColor,
+    );
   }
 
   buildTextChatButton() {

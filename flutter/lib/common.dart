@@ -2533,6 +2533,27 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
       // 前セッション残値クリア
       bind.mainSetEnv(key: 'RL_PEER_NAME', value: '');
     }
+    // 🔴🔴 **この相談員に許されていない機能**を受け取る（2026-09-03）。
+    //
+    //   ⚠ お客様の側から届く許可（`rl_features`）は**会社の設定**しか運べない。
+    //     常駐の端末は⚠ **繋がれる前に誰が来るかを知らない**ためで、
+    //     ＝ 相談員ごとの「許可しない」が常駐で一度も効いていなかった。
+    //   ★相談員が主語の決まりは、⚠ **相談員の側から運ぶ**。
+    //   ⚠ 形は「駄目なものだけを並べる」。既定は許可のままにしたいので、
+    //     受け取れなかったときに全部消える形にはしない。
+    //   ⚠ 毎回必ず書く（空でも）。書かないと**前の相談員の制限が残る**。
+    final opDeny = (param["op_deny"] ?? '').trim();
+    for (final e in const {
+      'switchSides': 'rl-op-deny-switch-sides',
+      'rebootResume': 'rl-op-deny-reboot-resume',
+      'privacyMode': 'rl-op-deny-privacy-mode',
+      'voiceCall': 'rl-op-deny-voice-call',
+      'ctrlAltDel': 'rl-op-deny-ctrl-alt-del',
+      'blockInput': 'rl-op-deny-block-input',
+    }.entries) {
+      final denied = opDeny.split(',').contains(e.key);
+      bind.mainSetLocalOption(key: e.value, value: denied ? 'Y' : '');
+    }
     return args;
   }
 

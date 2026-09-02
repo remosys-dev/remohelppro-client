@@ -1997,7 +1997,30 @@ pub fn block_input(v: bool) -> (bool, String) {
     let on = v;
     let v = if v { TRUE } else { FALSE };
     unsafe {
-        if BlockInput(v) == TRUE {
+        // 🔴🔴 **入力を受けている机に移ってから頼む**（2026-09-03）。
+        //
+        //   ⚠ 実機のエラーは「os error 1460（タイムアウト）」。
+        //   ⚠ `BlockInput` は、呼んだスレッドが**いま入力を受けている机**に
+        //     いないと通らない。⚠ **通らないときの返事が 1460**。
+        //     （権限の問題に見えるが、権限なら 5 が返る）
+        //   ⚠ 当社のワンタイムは、画面取り込みのために机を行き来している
+        //     （ログオン画面・管理者の確認・画面の切り替え）。
+        //     ＝ 頼む瞬間に**別の机に居ることがある**。
+        //   ★キー入力の側は元から毎回これを呼んでいる
+        //     （`legacy_keyboard_mode` の先頭）。⚠ **ここだけ抜けていた。**
+        //   ⚠ 既に正しい机なら `try_change_desktop()` は何もしない。
+        //     ＝ 普段の動きは変わらない。
+        try_change_desktop();
+        // ⚠ 1460 は「時間切れ」なので、**一瞬だけ待てば通ることがある**
+        //   （机を切り替えた直後は、入力の担当が落ち着くまで少しかかる）。
+        //   ★2回だけ試す。何度も粘らない（相談員を待たせない）。
+        let mut ok = BlockInput(v) == TRUE;
+        if !ok {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            try_change_desktop();
+            ok = BlockInput(v) == TRUE;
+        }
+        if ok {
             (true, "".to_owned())
         } else {
             // 🔴🔴 **失敗の中身を残す**（2026-09-02 実機で「os error 1460」）。

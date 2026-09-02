@@ -668,6 +668,8 @@ mod imp {
                 ("rebootResume", "rl-allow-reboot-resume"),
                 ("privacyMode", "rl-allow-privacy-mode"),
                 ("voiceCall", "rl-allow-voice-call"),
+                ("ctrlAltDel", "rl-allow-ctrl-alt-del"),
+                ("blockInput", "rl-allow-block-input"),
             ] {
                 if let Some(b) = f.get(from).and_then(Value::as_bool) {
                     hbb_common::config::LocalConfig::set_option(

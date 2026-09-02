@@ -102,6 +102,28 @@ handleOsPasswordAction(
 /// ⚠ ここは「メニューを出すかどうか」だけ（ご判断どおり）。
 ///   厳密な禁止ではない。止める必要があるものは受け取る側でも断ること。
 bool rlFeatureAllowed(PeerInfo pi, String key) {
+  // 🔴🔴 **相談員ごとの「許可しない」を、まず見る**（2026-09-03）。
+  //
+  //   ⚠ お客様の側から届く値は**会社の設定**しか運べない。
+  //     常駐の端末は⚠ **繋がれる前に誰が来るかを知らない**ため。
+  //     ＝ 相談員ごとの設定が、常駐で一度も効いていなかった。
+  //   ★相談員が主語の決まりは、相談員の側が持つ
+  //     （起動の合図 `op_deny=` で受け取り、common.dart が控えている）。
+  //   ⚠ 「駄目なものだけ」を控える形。受け取れなくても機能は消えない。
+  try {
+    const denyKey = {
+      'switch_sides': 'rl-op-deny-switch-sides',
+      'reboot_resume': 'rl-op-deny-reboot-resume',
+      'privacy_mode': 'rl-op-deny-privacy-mode',
+      'voice_call': 'rl-op-deny-voice-call',
+      'ctrl_alt_del': 'rl-op-deny-ctrl-alt-del',
+      'block_input': 'rl-op-deny-block-input',
+    };
+    final k = denyKey[key];
+    if (k != null && bind.mainGetLocalOption(key: k).trim() == 'Y') {
+      return false;
+    }
+  } catch (_) {}
   try {
     final raw = pi.platformAdditions[kPlatformAdditionsRlFeatures];
     if (raw is Map) {
@@ -313,9 +335,13 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   //   ⚠ 昇格前は出さない。押せるのに必ず失敗する項目は置かない
   //     （プライバシーモードの「モード 2」と同じ過ち）。
   //     昇格の入口は、下の「権限の昇格をリクエストする」。
+  // ⚠ 会社／相談員が許可していなければ出さない（2026-09-03 ご指示）。
+  //   ⚠ ワンタイムで効かない件が続いているため、
+  //     **直るまで隠せる逃げ道**を用意しておく。
   if (isDefaultConn &&
       !ffiModel.viewOnly &&
       ffiModel.keyboard &&
+      rlFeatureAllowed(pi, 'ctrl_alt_del') &&
       (pi.platform == kPeerPlatformLinux ||
           pi.sasEnabled ||
           ffi.elevationModel.portableServiceRunning)) {
@@ -363,8 +389,11 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
     );
   }
   // blockUserInput
+  // ⚠ 会社／相談員が許可していなければ出さない（2026-09-03 ご指示）。
+  //   ⚠ 「os error 1460」で失敗する件が続いているため、隠せるようにする。
   if (isDefaultConn &&
       ffi.ffiModel.keyboard &&
+      rlFeatureAllowed(pi, 'block_input') &&
       ffi.ffiModel.permissions['block_input'] != false &&
       pi.platform == kPeerPlatformWindows) // privacy-mode != true ??
   {

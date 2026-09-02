@@ -909,6 +909,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       'rebootResume': 'rl-allow-reboot-resume',
       'privacyMode': 'rl-allow-privacy-mode',
       'voiceCall': 'rl-allow-voice-call',
+      'ctrlAltDel': 'rl-allow-ctrl-alt-del',
+      'blockInput': 'rl-allow-block-input',
     };
     pairs.forEach((from, to) {
       final v = raw[from];

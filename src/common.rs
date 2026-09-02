@@ -1248,6 +1248,8 @@ pub fn rl_allowed_features() -> serde_json::Value {
         "reboot_resume": allow("rl-allow-reboot-resume"),
         "privacy_mode": allow("rl-allow-privacy-mode"),
         "voice_call": allow("rl-allow-voice-call"),
+        "ctrl_alt_del": allow("rl-allow-ctrl-alt-del"),
+        "block_input": allow("rl-allow-block-input"),
     })
 }
 
