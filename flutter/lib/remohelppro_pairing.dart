@@ -768,6 +768,13 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
             _pollErrors = 0;
           }
           final j = jsonDecode(r.body) as Map;
+          // 🔴 会社が許可した機能を受け取って残す（2026-09-02 ご判断）。
+          //   ⚠ 相談員アプリはコンソールを見に行かない。ここで受け取った値を
+          //     設定に残し、繋いだ瞬間に相談員へ渡す（common.rs の
+          //     rl_allowed_features → platform_additions）。
+          //   ⚠ 受け取れなかったときは**触らない**。
+          //     ⚠ 消しにいくと、通信が一度失敗しただけで機能が消える。
+          _saveFeatureFlags(j['features']);
           if (j['active'] == false) {
             rlTrace('poll_active_false');
             await _terminateBySupportEnd();
@@ -888,6 +895,30 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   /// 顧客が自分で「終了する」を押したとき。
   ///   セッションを ended にし（相談員ダッシュボードにも伝わる）、被操作を停止・
   ///   一時パスワードを無効化する（＝以降は誰も操作できない）。
+  /// 会社が許可した機能を設定に残す（2026-09-02）。
+  ///
+  /// ⚠ サーバーの言い方（switchSides）と、設定の名前（rl-allow-switch-sides）を
+  ///   ここで1回だけ突き合わせる。⚠ **綴りを間違えると黙って不許可になる**ので、
+  ///   対応表は1か所にまとめる。
+  /// ⚠ 値が来ていない項目は**触らない**。消しにいかない
+  ///   （通信が一度失敗しただけで機能が消えるのを防ぐ）。
+  void _saveFeatureFlags(Object? raw) {
+    if (raw is! Map) return;
+    const pairs = <String, String>{
+      'switchSides': 'rl-allow-switch-sides',
+      'rebootResume': 'rl-allow-reboot-resume',
+      'privacyMode': 'rl-allow-privacy-mode',
+      'voiceCall': 'rl-allow-voice-call',
+    };
+    pairs.forEach((from, to) {
+      final v = raw[from];
+      if (v is! bool) return; // 来ていない＝触らない
+      try {
+        bind.mainSetLocalOption(key: to, value: v ? '' : 'N');
+      } catch (_) {}
+    });
+  }
+
   Future<void> _endByCustomer() async {
     // 🔴🔴 **先に止める。伝えるのは後**（2026-08-27 ご指示で作り直し）。
     //

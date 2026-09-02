@@ -696,7 +696,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     // 🔴 AI分析（2026-08-28 ご指示）。⚠ チャットの隣に1つだけ足す。
     //   新しい窓も新しい画面も作らない。押すと範囲を選ぶ膜が出る。
     toolbarItems.add(_RlAiMenu(ffi: widget.ffi));
-    if (!isWeb) {
+    // ⚠ 会社が音声通話を許可していなければ出さない（2026-09-02 ご判断）。
+    //   ⚠ 判断の材料はお客様の側から渡された値。無ければ許可（既定）。
+    if (!isWeb && rlFeatureAllowed(widget.ffi.ffiModel.pi, 'voice_call')) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
     }
     if (!isWeb) toolbarItems.add(_RecordMenu());

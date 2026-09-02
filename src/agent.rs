@@ -644,6 +644,39 @@ mod imp {
             Some(v) => v,
             None => return,
         };
+        // 🔴🔴 会社名と、機能の許可を受け取って残す（2026-09-02 ご判断）。
+        //
+        //   ⚠ 常駐は自分がどの会社のものか知らず、顧客の窓に
+        //     ⚠ **PC名がそのまま出ていた**。お客様には意味のない文字。
+        //   ⚠ 許可も同じ道で受け取る。相談員アプリはコンソールを見に行かないので、
+        //     ⚠ **お客様の側から繋いだ瞬間に渡す**しかない
+        //     （common.rs の rl_allowed_features → platform_additions）。
+        //   ⚠ 値が来ていない項目は**触らない**。消しにいくと、通信が一度
+        //     失敗しただけで会社名や機能が消える。
+        //   ⚠ commands より**前**に置く。commands が無いと下で return するため。
+        if let Some(name) = v.get("companyName").and_then(Value::as_str) {
+            if !name.trim().is_empty() {
+                hbb_common::config::LocalConfig::set_option(
+                    "rl-support-company".to_owned(),
+                    name.trim().to_owned(),
+                );
+            }
+        }
+        if let Some(f) = v.get("features") {
+            for (from, to) in [
+                ("switchSides", "rl-allow-switch-sides"),
+                ("rebootResume", "rl-allow-reboot-resume"),
+                ("privacyMode", "rl-allow-privacy-mode"),
+                ("voiceCall", "rl-allow-voice-call"),
+            ] {
+                if let Some(b) = f.get(from).and_then(Value::as_bool) {
+                    hbb_common::config::LocalConfig::set_option(
+                        to.to_owned(),
+                        if b { "".to_owned() } else { "N".to_owned() },
+                    );
+                }
+            }
+        }
         let commands = match v.get("commands").and_then(Value::as_array) {
             Some(c) => c.clone(),
             None => return,

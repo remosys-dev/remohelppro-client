@@ -1737,6 +1737,11 @@ impl Connection {
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         {
             platform_additions.insert("rl_sysinfo".into(), crate::rl_support_sysinfo());
+            // 🔴 会社が許可した機能を、繋いだ瞬間に相談員へ渡す（2026-09-02）。
+            //   ⚠ 相談員アプリはコンソールを見に行かないので、
+            //     お客様の側から渡すのが唯一の確実な道。
+            //   ⚠ 既定は許可（受け取れなかっただけで機能を消さない）。
+            platform_additions.insert("rl_features".into(), crate::rl_allowed_features());
         }
 
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]

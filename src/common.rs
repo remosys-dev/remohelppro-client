@@ -1221,6 +1221,36 @@ pub fn rl_global_ip() -> String {
 /// ⚠ MACアドレスは入れない。接続番号の元になっているので、
 ///   見せる意味が薄いわりに、控えられると困る情報になる。
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+/// 🔴🔴 **会社が許可した機能を、相談員へ渡す**（2026-09-02 ご判断）。
+///
+/// ■ なぜこの道か
+///   ⚠ 相談員アプリはコンソールを見に行かない。自分がどの会社かも知らない。
+///     ＝ ⚠ **許可を相談員へ届ける道が無かった。**
+///   ★お客様の側は知っている（顧客アプリは4秒ごと、常駐は poll で受け取る）。
+///     繋いだ瞬間に、⚠ **お客様の側から相談員へ渡す**のが一番確実。
+///   ⚠ 新しい仕組みは作らない。`platform_additions` は上流にある仕掛けで、
+///     既に `rl_sysinfo` を同じ道で渡している。
+///
+/// ■ 既定は「許可」
+///   ⚠ 設定が入っていない（まだサーバーから受け取っていない・古い版）ときは
+///     ⚠ **許可**にする。⚠ 不許可にすると、
+///     ⚠ **受け取れなかっただけで機能が消える**。
+///   ★明示的に `N` が入っているときだけ不許可。
+///
+/// ⚠ ここは「メニューを出すかどうか」の材料（ご判断どおり）。
+///   厳密な禁止ではない。止める必要があるものは、受け取る側でも断ること。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn rl_allowed_features() -> serde_json::Value {
+    use hbb_common::config::LocalConfig;
+    let allow = |k: &str| -> bool { LocalConfig::get_option(k).trim() != "N" };
+    serde_json::json!({
+        "switch_sides": allow("rl-allow-switch-sides"),
+        "reboot_resume": allow("rl-allow-reboot-resume"),
+        "privacy_mode": allow("rl-allow-privacy-mode"),
+        "voice_call": allow("rl-allow-voice-call"),
+    })
+}
+
 pub fn rl_support_sysinfo() -> serde_json::Value {
     let mut v = get_sysinfo();
     // ローカルIP（社内のどの島にいるか、VPN越しかの見当がつく）。

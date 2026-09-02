@@ -30,6 +30,11 @@ const String kPlatformAdditionsHasFileClipboard = "has_file_clipboard";
 /// お客様のパソコンの情報（CPU・メモリ・OS・ローカルIP など）。
 /// 中身は src/common.rs の rl_support_sysinfo() が作る。
 const String kPlatformAdditionsRlSysinfo = "rl_sysinfo";
+/// 会社が許可した機能（2026-09-02 ご判断）。
+///   お客様の側が繋いだ瞬間に渡す（相談員アプリはコンソールを見に行かないため）。
+///   ⚠ 中身は {"switch_sides": true, ...}。⚠ **無ければ全部「許可」**
+///     （古い版のお客様と繋いだときに、機能が消えないようにする）。
+const String kPlatformAdditionsRlFeatures = "rl_features";
 const String kPlatformAdditionsSupportedPrivacyModeImpl =
     "supported_privacy_mode_impl";
 

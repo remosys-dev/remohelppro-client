@@ -92,6 +92,26 @@ handleOsPasswordAction(
   }
 }
 
+/// 会社（と相談員）が許可した機能かどうか（2026-09-02 ご判断）。
+///
+/// ⚠ 判断の材料は **お客様の側から渡された値**（`platform_additions`）。
+///   相談員アプリはコンソールを見に行かないので、これが唯一の道。
+/// 🔴 ⚠ **無ければ「許可」**。
+///   ⚠ 古い版のお客様と繋いだときや、値を受け取れなかったときに
+///     ⚠ **機能が黙って消える**のを防ぐ。明示的に false のときだけ隠す。
+/// ⚠ ここは「メニューを出すかどうか」だけ（ご判断どおり）。
+///   厳密な禁止ではない。止める必要があるものは受け取る側でも断ること。
+bool rlFeatureAllowed(PeerInfo pi, String key) {
+  try {
+    final raw = pi.platformAdditions[kPlatformAdditionsRlFeatures];
+    if (raw is Map) {
+      final v = raw[key];
+      if (v is bool) return v;
+    }
+  } catch (_) {}
+  return true;
+}
+
 List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   final ffiModel = ffi.ffiModel;
   final pi = ffiModel.pi;
@@ -318,7 +338,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   //
   //   ⚠ 戻すときは、この `!isResidentPeer(ffi) &&` の1行を消すだけ。
   //     ⚠ ただし**常駐で再起動復帰が成立することを実機で確かめてから**。
+  // ⚠ 会社が「再起動して続ける」を許可していなければ出さない（2026-09-02）。
   if (isDefaultConn &&
+      rlFeatureAllowed(pi, 'reboot_resume') &&
       !isResidentPeer(ffi) &&
       perms['restart'] != false &&
       (pi.platform == kPeerPlatformLinux ||
@@ -388,8 +410,7 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   //     いずれ会社ごと・相談員ごとの設定から届ける（設計書あり）。
   //   ⚠ ここは**見せるかどうか**だけ。止める必要があるなら、
   //     受け取る側（顧客のアプリ）でも断ること。画面から消すだけにしない。
-  final allowSwitchSides =
-      bind.mainGetLocalOption(key: 'rl-allow-switch-sides').trim() != 'N';
+  final allowSwitchSides = rlFeatureAllowed(pi, 'switch_sides');
   if (allowSwitchSides &&
       isDefaultConn &&
       isDesktop &&
@@ -879,6 +900,13 @@ List<TToggleMenu> toolbarPrivacyMode(
   // Backend revocation already attempts to turn privacy mode off.
   // Still keep this menu when privacy mode is active, so users can turn it off
   // if there is a sync delay, version mismatch, or off attempt failure.
+  // ⚠ 会社がプライバシーモードを許可していなければ出さない（2026-09-02）。
+  //   ⚠ ただし**既に効いている**ときは出す。出さないと
+  //     ⚠ **お客様の画面が暗いまま戻せなくなる**（切る手段が消える）。
+  if (!rlFeatureAllowed(ffi.ffiModel.pi, 'privacy_mode') &&
+      privacyModeState.isEmpty) {
+    return [];
+  }
   if (!hasPrivacyModePermission && privacyModeState.isEmpty) {
     return []; // No permission and not active, hide options.
   }
