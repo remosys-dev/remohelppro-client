@@ -1017,7 +1017,7 @@ fn rl_resume_run(path: Option<&String>) {
 }
 
 #[cfg(windows)]
-fn kill_leftover_onetime() -> usize {
+fn kill_leftover_onetime() -> (usize, usize) {
     use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
     use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
     use winapi::um::tlhelp32::{
@@ -1027,10 +1027,17 @@ fn kill_leftover_onetime() -> usize {
     use winapi::um::winnt::PROCESS_TERMINATE;
     let me = std::process::id();
     let mut killed = 0usize;
+    // 🔴🔴 **殺せなかった数を返す**（2026-09-02 実機の事故で追加）。
+    //   ⚠ 画面取り込みの部品は SYSTEM 権限。利用者の権限では殺せない。
+    //     ⚠ それが DLL を掴んだままだと、**展開が失敗する**。
+    //     気づかず先へ進むと「desktop_multi_window_plugin.dll が見つからない」
+    //     という⚠ **壊れた起動**になる（実際にお客様の画面に出した）。
+    //   ★1つでも残っていたら、⚠ **先へ進まない。**
+    let mut failed = 0usize;
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE {
-            return 0;
+            return (0, 1);
         }
         let mut pe: PROCESSENTRY32W = std::mem::zeroed();
         pe.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
@@ -1044,9 +1051,14 @@ fn kill_leftover_onetime() -> usize {
                         .unwrap_or(false);
                     if ours {
                         let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
-                        if !h.is_null() {
+                        if h.is_null() {
+                            // ⚠ 開けない＝権限が足りない（SYSTEM の部品）
+                            failed += 1;
+                        } else {
                             if TerminateProcess(h, 1) != 0 {
                                 killed += 1;
+                            } else {
+                                failed += 1;
                             }
                             CloseHandle(h);
                         }
@@ -1059,7 +1071,37 @@ fn kill_leftover_onetime() -> usize {
         }
         CloseHandle(snap);
     }
-    killed
+    (killed, failed)
+}
+
+/// 前の分がまだ終わりきっていないことを、お客様にお伝えする（2026-09-02）。
+///
+/// ⚠ 「すでに起動しています」とは違う。窓は無いので、お客様には
+///   ⚠ **何も起きていないように見える**。⚠ **待てば使えること**を伝える。
+/// ⚠ 黙って壊れた起動をするより、待っていただく方がよい。
+#[cfg(windows)]
+fn notify_leftover_busy() {
+    use std::os::windows::ffi::OsStrExt;
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+    unsafe {
+        let body = wide(
+            "前回のサポートの後片付けが、まだ終わっていません。\n\n\
+             1分ほど待ってから、もう一度開いてください。\n\
+             それでも開かないときは、パソコンを再起動してください。",
+        );
+        let title = wide("REMOHELP PRO");
+        winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONINFORMATION,
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -1445,10 +1487,27 @@ fn main() {
         //     **一度も動けなかった**。片付ける処理はあったのに辿り着けなかった。
         //   ★窓があるなら本当に使用中。窓が無いなら残骸。**この1点で分ける。**
         if find_onetime_window().is_null() {
-            let n = kill_leftover_onetime();
+            let (n, left) = kill_leftover_onetime();
+            // 🔴🔴 **1つでも残っていたら、先へ進まない**（2026-09-02 実機の事故）。
+            //
+            //   ⚠ 画面取り込みの部品は SYSTEM 権限で動いており、
+            //     ⚠ **利用者の権限では殺せない**。それが DLL を掴んだままだと、
+            //     展開が失敗し、⚠ **「desktop_multi_window_plugin.dll が
+            //     見つからないため、コードの実行を続行できません」** になる。
+            //     ⚠ 実際にお客様の画面へ出してしまった（1.4.98）。
+            //   ⚠ 私は「止まる」を「壊れて起動する」に変えてしまっていた。
+            //     ★止まる方がまだ良い。⚠ **壊れた起動は絶対に出さない。**
+            //   ⚠ 残った物は、いずれ自分で終わる（SYSTEM 側の見張りを入れた）。
+            //     少し待てば使えるようになるので、その旨をお伝えする。
+            if left > 0 {
+                println!("RL: 残骸を {n} 個片付けましたが、{left} 個は残っています（権限不足）");
+                notify_leftover_busy();
+                return;
+            }
             println!("RL: 窓の無い残骸を {n} 個片付けて、そのまま続けます");
-            // ⚠ 終わるのを少し待つ。すぐ展開すると、まだ掴まれている部品がある。
-            std::thread::sleep(std::time::Duration::from_millis(1200));
+            // ⚠ 終わるのを待つ。すぐ展開すると、まだ掴まれている部品がある。
+            //   ⚠ 1.2秒では足りなかった（実機）。ファイルの握りが外れるまで待つ。
+            std::thread::sleep(std::time::Duration::from_millis(2500));
             // ⚠ ここでは return しない。**続ける**のがこの修正の要。
         } else {
             if !quiet {
