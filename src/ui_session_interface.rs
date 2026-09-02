@@ -653,6 +653,27 @@ impl<T: InvokeUiSession> Session<T> {
         self.lc.read().unwrap().restarting_remote_device
     }
 
+    /// 🔴🔴 **繋がったら「再起動中」の印を下ろす**（2026-09-02 実機で確定）。
+    ///
+    /// ⚠ 実際に起きたこと（相談員PC・スクショ）:
+    ///   再起動 → 自動でつなぎ直して**接続できた** → しばらくして
+    ///   ⚠ **「お客様のパソコンを再起動しています」が急に出る**。
+    ///   OK を押すとビュアーが落ち、「もう一度開く」で入り直せる。
+    ///
+    /// ⚠ 原因: この印を下ろすのは `initialize()`（**新しいセッションを作るとき**）
+    ///   だけだった。再起動から**同じセッションのまま**つなぎ直すと、
+    ///   ⚠ **印が立ったまま残る**。その後に一瞬でも切れると、
+    ///   `io_loop` が「再起動中だ」と判断して案内を出し、⚠ **接続を閉じる**。
+    ///
+    /// ★繋がった時点で下ろす。⚠ **繋がっているのに「再起動中」はあり得ない。**
+    pub fn clear_restarting_remote_device(&self) {
+        let mut lc = self.lc.write().unwrap();
+        if lc.restarting_remote_device {
+            lc.restarting_remote_device = false;
+            log::info!("RL: つながったので「再起動中」の印を下ろしました");
+        }
+    }
+
     #[inline]
     pub fn peer_platform(&self) -> String {
         self.lc.read().unwrap().info.platform.clone()

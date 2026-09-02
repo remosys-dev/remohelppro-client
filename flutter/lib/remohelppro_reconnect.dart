@@ -586,19 +586,28 @@ Future<void> prepareRebootResume() async {
           'if not errorlevel 1 goto :$label',
         ].join('\r\n');
 
-    String tryOnce(String n) => [
-          'ping -n 21 127.0.0.1 >nul',
+    // 🔴🔴 **1回目を早くする**（2026-09-02 ご指摘）。
+    //
+    //   ⚠ 元は毎回20秒待ってから試していた（1回目も20秒）。
+    //     ＝ ⚠ **再起動後、お客様の画面にアプリが出るまで最低20秒＋展開の時間**。
+    //     その間ずっと相談員の画面には「つなぎ直します」が出続ける。
+    //   ⚠ 20秒にした理由（2026-08-02）は「ログイン直後は準備が整っていない」。
+    //     ★ただし**失敗しても後ろで何度も試す**作りなので、早く1回試して損はない。
+    //       当たれば20秒得をし、外れても2回目・3回目は従来どおり。
+    //   ⚠ 待ち時間は ping の回数−1 秒（ping -n 7 ＝ 約6秒）。
+    String tryOnce(String n, int waitSec) => [
+          'ping -n ${waitSec + 1} 127.0.0.1 >nul',
           runningCheck('running'),
-          'echo [%date% %time%] try $n >> "$logPath"',
+          'echo [%date% %time%] try $n (wait ${waitSec}s) >> "$logPath"',
           'start "" "$exePath"',
         ].join('\r\n');
 
     final cmd = [
       '@echo off',
       'echo [%date% %time%] START >> "$logPath"',
-      tryOnce('1'),
-      tryOnce('2'),
-      tryOnce('3'),
+      tryOnce('1', 6),
+      tryOnce('2', 15),
+      tryOnce('3', 20),
       'ping -n 11 127.0.0.1 >nul',
       // 最後の見届け。どれか動いていれば OK、1つも無ければ FAILED。
       //   ⚠ 記録に**探した名前を残す**。今回のように「探す名前が違っていた」

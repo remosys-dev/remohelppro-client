@@ -234,6 +234,11 @@ impl<T: InvokeUiSession> Remote<T> {
                                         if !received {
                                             received = true;
                                             self.handler.update_received(true);
+                                            // 🔴 つながったのだから「再起動中」ではない（2026-09-02）。
+                                            //   ⚠ 下ろさないと、この先で一瞬切れたときに
+                                            //     「お客様のパソコンを再起動しています」が急に出て、
+                                            //     ⚠ **OK でビュアーが落ちる**（実機で発生）。
+                                            self.handler.clear_restarting_remote_device();
                                         }
                                         self.data_count.fetch_add(bytes.len(), Ordering::Relaxed);
                                         if !self.handle_msg_from_peer(bytes, &mut peer).await {
