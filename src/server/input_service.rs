@@ -2202,10 +2202,47 @@ async fn lock_screen_2() {
 #[cfg(windows)]
 #[tokio::main(flavor = "current_thread")]
 async fn send_sas() -> ResultType<()> {
+    // 🔴🔴 **自分が SYSTEM なら、通信路を使わずその場で呼ぶ**（2026-09-02）。
+    //
+    //   ⚠ `SendSAS(FALSE)` に必要なのは「SYSTEM であること」だけで、
+    //     ⚠ **サービスである必要は無い**。
+    //   ⚠ 元は必ず `_service` の通信路へ投げていた。ところがその受け手は
+    //     ⚠ **インストールしたサービス**しか居ない。
+    //     ・常駐版 … サービスが在る → 効く（「前はできた」のはこちら）
+    //     ・ワンタイム版 … ⚠ **サービスが無い** → どこにも届かず、何も起きない
+    //   ⚠ 受け口を SYSTEM 側に足す直しも入れたが、⚠ **通信路の名前を
+    //     前の回の残り物が握っていると、それも立たない**。
+    //     ＝ 通信路に頼る限り、⚠ **効かない回が必ず残る**。
+    //
+    //   ★昇格しているとき、キーの処理は**SYSTEM のプロセスで動いている**
+    //     （portable_service が SYSTEM 側へ転送し、そこで handle_key_ を呼ぶ）。
+    //     ＝ ここが既に SYSTEM。⚠ **他所へ頼む必要がそもそも無い。**
+    //   ⚠ 常駐版のサービスも SYSTEM なので、同じくその場で呼ぶ形になる
+    //     （通信路を1往復減らすだけで、動きは変わらない）。
+    if crate::platform::is_root() {
+        log::info!("RL sas: 自分が SYSTEM なので、その場で SendSAS を呼びます");
+        crate::platform::send_sas();
+        return Ok(());
+    }
+    // ここから先は「利用者の権限で動いている」場合。
+    //   自分では SendSAS を呼べないので、SYSTEM 側へ頼むしかない。
     if crate::platform::is_physical_console_session().unwrap_or(true) {
-        let mut stream = crate::ipc::connect(1000, crate::POSTFIX_SERVICE).await?;
-        timeout(1000, stream.send(&crate::ipc::Data::SAS)).await??;
+        match crate::ipc::connect(1000, crate::POSTFIX_SERVICE).await {
+            Ok(mut stream) => {
+                timeout(1000, stream.send(&crate::ipc::Data::SAS)).await??;
+                log::info!("RL sas: SYSTEM 側へ合図を渡しました");
+            }
+            Err(e) => {
+                // ⚠ ここが**今まで黙って失敗していた場所**。
+                //   呼び出し元は `allow_err!` で捨てるので、
+                //   ⚠ **相談員には「押しても何も起きない」としか見えなかった。**
+                log::error!("RL sas: SYSTEM 側へ渡せませんでした（受け口が居ない）: {e}");
+                return Err(e);
+            }
+        }
     } else {
+        // 物理コンソールでない（ログオン前など）。ここは元から直接呼ぶ作り。
+        log::info!("RL sas: 物理コンソールではないので、その場で SendSAS を呼びます");
         crate::platform::send_sas();
     };
     Ok(())
