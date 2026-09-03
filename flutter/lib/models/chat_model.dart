@@ -291,10 +291,42 @@ class ChatModel with ChangeNotifier {
   }
 
   var _togglingCMSidePage = false; // protect order for await
+  /// 接続の窓が、⚠ **お客様に見えているか**を測る（2026-09-04）。
+  ///
+  /// ⚠ `isVisible()` は⚠ **他の窓の後ろに回っただけでも true** を返す。
+  ///   それだけでは足りないので、ワンタイム版の隠し方（透明・最小化）を見る。
+  /// ⚠ 測れないときは「見えている」とみなす（勝手に窓を動かさない）。
+  Future<bool> _cmLooksVisible() async {
+    try {
+      if (!await windowManager.isVisible()) return false;
+      if (await windowManager.isMinimized()) return false;
+      if (await windowManager.getOpacity() != 1) return false;
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   toggleCMSidePage() async {
     if (_togglingCMSidePage) return false;
     _togglingCMSidePage = true;
     if (_isShowCMSidePage) {
+      // 🔴🔴 **押した1回目で「画面が消える」のを止める**（2026-09-04 ご報告）。
+      //
+      //   ⚠ ご報告:「最初出ないので、チャットアイコンを押したら画面が消える」。
+      //   ★理由: 相談員のチャットが届いた時点で、この札（_isShowCMSidePage）は
+      //     ⚠ **すでに「開いている」になっている**。ところがワンタイム版の窓は
+      //     透明なので、⚠ **お客様には一度も見えていない。**
+      //     その状態でアイコンを押すと、ここ（閉じる側）へ来て、
+      //     下の hideCmWindow() で⚠ **窓ごと消える。**
+      //   ★「開いていることになっているが、実際には見えていない」ときは、
+      //     閉じるのではなく⚠ **出し直す**。札は動かさない。
+      if (!await _cmLooksVisible()) {
+        _togglingCMSidePage = false;
+        cmKeepVisible = true;
+        await forceShowCmWindow();
+        return;
+      }
       _isShowCMSidePage = !_isShowCMSidePage;
       notifyListeners();
       await windowManager.show();
@@ -304,6 +336,14 @@ class ChatModel with ChangeNotifier {
       //   チャットのために出した窓を出しっぱなしにすると、当社の画面と
       //   2つ並んで、お客様がどちらで終わらせるのか分からなくなる。
       //   ★出すのは知らせが来たときだけ。用が済んだら引っ込める。
+      // 🔴 引っ込める前に、⚠ **札を下ろす**（2026-09-04）。
+      //   ⚠ 下ろさないと hideCmWindow() が入口で断られ、
+      //     お客様が閉じても窓が残る（8/26 の決めごとが崩れる）。
+      //   ⚠ ただし⚠ **音声通話の着信中・通話中・入れ替え中は下ろさない。**
+      //     そこは「押してほしい釦がある」状態で、消してはいけない。
+      final busy = gFFI.serverModel.clients.any(
+          (c) => c.incomingVoiceCall || c.inVoiceCall || c.fromSwitch);
+      if (!busy) cmKeepVisible = false;
       if (gFFI.serverModel.hideCm) {
         await hideCmWindow();
       }
@@ -369,6 +409,20 @@ class ChatModel with ChangeNotifier {
     //     windowManager.show() だけでは透明のままで、出したつもりで見えない。
     //     showCmWindow() は不透明に戻してから前に出すので、必ずこちらを通す。
     if (desktopType == DesktopType.cm) {
+      // 🔴🔴 **引っ込めさせない札を立ててから出す**（2026-09-04 ご報告）。
+      //
+      //   ⚠ ご報告:「相談員がチャットを入れても、顧客側でチャットが開かない。
+      //     手動でアイコンを押すと出る。音声通話なら出る」。
+      //   ★実際、出す仕掛けは⚠ **音声通話・入れ替えと同じ**なのに、
+      //     ⚠ **札（cmKeepVisible）を立てているのはその2つだけだった。**
+      //       音声通話 … server_model.dart（着信時に札→forceShow）
+      //       入れ替え … server_model.dart（fromSwitch 時に札→forceShow）
+      //       チャット … ⚠ **札なし**で forceShow のみ ← ここだけ抜けていた
+      //   ⚠ 札が無いと、毎秒の見張りや hideCmWindow() が素通りするので、
+      //     出した窓がそのまま引っ込められる（＝お客様には何も起きない）。
+      //   ★同じ扱いに揃える。⚠ 札は、お客様が閉じたときに下ろす
+      //     （toggleCMSidePage の閉じる側）。
+      cmKeepVisible = true;
       // ⚠ showCmWindow() では出し切れない（main.dart の説明）。
       await forceShowCmWindow();
     }

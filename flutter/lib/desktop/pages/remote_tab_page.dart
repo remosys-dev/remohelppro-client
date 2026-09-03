@@ -294,32 +294,57 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       menu.insert(1, splitAction);
     }
 
-    if (perms['restart'] != false &&
-        (pi.platform == kPeerPlatformLinux ||
-            pi.platform == kPeerPlatformWindows ||
-            pi.platform == kPeerPlatformMacOS)) {
+    // 🔴🔴 **「再起動後接続」はここから外す**（2026-09-04 ご指示）。
+    //
+    //   ⚠ 時間の掛かる機能なので、慎重に使いたい。★出すのはメニューの中だけ
+    //     （`common/widgets/toolbar.dart` の同じ項目）に一本化する。
+    //   🔴 外す理由はもう1つあり、⚠ **こちらの写しには守りが1つも無かった。**
+    //     メニューの側は
+    //       ・会社が「再起動して続ける」を許可しているか
+    //       ・⚠ **常駐の端末では出さない**（無人なので戻らないと誰も直せない）
+    //     を見ているのに、⚠ この写しは `perms['restart']` しか見ておらず、
+    //     ⚠ **許可していない会社でも、常駐でも押せてしまっていた。**
+    //   ⚠ 戻すときは、守りごと写すこと。処理（showRestartRemoteDevice）は
+    //     メニュー側で使っているので消していない。
+
+    if (perms['keyboard'] != false && !ffi.ffiModel.viewOnly) {
+      // 🔴🔴 **Ctrl+Alt+Del をここに出す**（2026-09-04 ご指示・よく使う）。
+      //
+      //   ⚠ これまでは `pi.sasEnabled` が真のときしか出していなかった。
+      //     それは⚠ **接続を受けている処理が SYSTEM のときだけ真**になる印で、
+      //     ワンタイム版（お客様の権限で動く）では⚠ **常に偽**。
+      //     ＝ いちばん使いたい場面で、項目そのものが無かった。
+      //   ★1.4.107 以降、送る側は⚠ **通信路に頼らず自分で送る**ように直してある
+      //     （[[remohelppro-sas-needs-system-not-service]]）。
+      //     画面取り込みの SYSTEM の処理が在れば効くので、Windows なら出す。
+      //   ⚠ お客様のPCに SYSTEM の処理がまったく無いときは効かない。
+      //     そのときは相手側の記録に理由が残る（黙って消えないようにしてある）。
+      if (pi.platform == kPeerPlatformLinux ||
+          pi.platform == kPeerPlatformWindows ||
+          pi.sasEnabled) {
+        menu.add(RemoteMenuEntry.insertCtrlAltDel(sessionId, padding,
+            dismissFunc: cancelFunc));
+      }
+
+      menu.add(RemoteMenuEntry.insertLock(sessionId, padding,
+          dismissFunc: cancelFunc));
+    }
+
+    // 🔴 **「お客様のパソコン情報」をここにも出す**（2026-09-04 ご指示・よく使う）。
+    //   ⚠ 中身はメニューの中と同じもの。⚠ 相手が古い版だと空なので、
+    //     そのときは**項目を出さない**（押しても何も出ない項目を置かない）。
+    if (pi.platformAdditions[kPlatformAdditionsRlSysinfo] != null) {
       menu.add(MenuEntryButton<String>(
         childBuilder: (TextStyle? style) => Text(
-          translate('Restart remote device'),
+          translate('Remote system info'),
           style: style,
         ),
-        proc: () => showRestartRemoteDevice(
-            pi, peerId ?? '', sessionId, ffi.dialogManager,
-            ffi: ffi),
+        proc: () => showRemoteSysinfoDialog(
+            pi, peerId ?? '', pi.version, ffi.dialogManager),
         padding: padding,
         dismissOnClicked: true,
         dismissCallback: cancelFunc,
       ));
-    }
-
-    if (perms['keyboard'] != false && !ffi.ffiModel.viewOnly) {
-      menu.add(RemoteMenuEntry.insertLock(sessionId, padding,
-          dismissFunc: cancelFunc));
-
-      if (pi.platform == kPeerPlatformLinux || pi.sasEnabled) {
-        menu.add(RemoteMenuEntry.insertCtrlAltDel(sessionId, padding,
-            dismissFunc: cancelFunc));
-      }
     }
 
     menu.addAll([
