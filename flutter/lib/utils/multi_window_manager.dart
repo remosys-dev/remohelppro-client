@@ -185,6 +185,18 @@ class RustDeskMultiWindowManager {
       try {
         await windowController.show();
         await windowController.focus();
+        // 🔴🔴 `show()` と `focus()` だけでは**足りない**（2026-09-03 実機で確定）。
+        //
+        //   ⚠ ご報告:「自分の画面を見せる」の1回目、相談員の戻る画面も
+        //     お客様側のビュアーも⚠ **タスクバーに隠れて気づけなかった**。
+        //   ⚠ Windows は、前面に居ないプログラムからの前面化を**拒否**し、
+        //     タスクバーを光らせるだけにする。＝ 出したつもりで出ていない。
+        //   ★接続の窓（cm）で実績のある手を、こちらにも当てる:
+        //     **一度だけ最前面に固定して、すぐ外す。**
+        //   ⚠ 固定したままにしない。他の窓の上に居座る。
+        await windowController.setAlwaysOnTop(true);
+        await Future.delayed(const Duration(milliseconds: 400));
+        await windowController.setAlwaysOnTop(false);
       } catch (e) {
         debugPrint('接続の窓を前に出せませんでした: $e');
       }
@@ -233,8 +245,23 @@ class RustDeskMultiWindowManager {
                   windowId: windowId, peerId: remoteId);
             }
             await DesktopMultiWindow.invokeMethod(windowId, methodName, msg);
-            if (methodName != kWindowEventNewRemoteDesktop) {
-              WindowController.fromWindowId(windowId).show();
+            // 🔴🔴 **使い回すときも必ず前に出す**（2026-09-03 実機で確定）。
+            //
+            //   ⚠ ここは元は「遠隔操作のときだけ show() しない」だった。
+            //     ＝ 2回目以降、⚠ **窓はあるのにタスクバーに隠れたまま**。
+            //   ⚠ 2026-08-30 に「必ず前に出す」直しを入れたが、入れたのは
+            //     ⚠ **タブにまとめる側だけ**だった。この製品は別ウィンドウ方式
+            //     なので、⚠ **実際に使われている方の道には入っていなかった。**
+            //   ★同じ壁は入口ごとに塞ぐ。
+            try {
+              final c = WindowController.fromWindowId(windowId);
+              await c.show();
+              await c.focus();
+              await c.setAlwaysOnTop(true);
+              await Future.delayed(const Duration(milliseconds: 400));
+              await c.setAlwaysOnTop(false);
+            } catch (e) {
+              debugPrint('接続の窓を前に出せませんでした($windowId): $e');
             }
             registerActiveWindow(windowId);
             return MultiWindowCallResult(windowId, null);

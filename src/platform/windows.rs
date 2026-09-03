@@ -2206,6 +2206,105 @@ async fn rl_block_input_via_service(on: bool) -> (bool, String) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 🔴🔴 お客様の手を本当に止める仕掛け（2026-09-03 実機で確定）
+//
+//   ⚠ 実機のご報告: ブロック中でも
+//       ・お客様のマウスは動く／操作できる
+//       ・キーボードは効かない
+//       ・別の遠隔ツールから送り込む操作は止まる
+//   ＝ `BlockInput` は**仕様どおりに効いている**。ただし止めているのは
+//     「入力がアプリに届くこと」であって、⚠ **OS がカーソルを動かすのは
+//     この関門より下**なので、ポインタは動き続ける。
+//
+//   ★ご要望は「相談員が大事な作業をしている間、お客様に触られたくない」。
+//     ＝ **人が触った操作だけを捨て、相談員が送り込む操作は通す**必要がある。
+//   ★送り込まれた操作には印が付く（INJECTED）。だから区別できる。
+//
+//   ⚠ Ctrl+Alt+Del は Windows が必ず通す（横取りできない）。
+//     ＝ お客様が固まって困ることはない。**安全弁として残る。**
+//   ⚠ この見張りは**入力を受けている机に居るプロセス**でしか働かない。
+//     ワンタイム版では SYSTEM 側（portable service）がそれに当たる。
+
+static RL_INPUT_LOCK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static RL_LOCK_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 人が触った操作か（送り込まれた操作でないか）。
+#[inline]
+fn rl_is_physical(injected: bool) -> bool {
+    !injected
+}
+
+unsafe extern "system" fn rl_mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if code >= 0 && RL_INPUT_LOCK.load(std::sync::atomic::Ordering::Relaxed) {
+        let p = l as *const MSLLHOOKSTRUCT;
+        if !p.is_null() && rl_is_physical(((*p).flags & LLMHF_INJECTED) != 0) {
+            return 1; // ⚠ ここで捨てる。カーソルも動かない。
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, w, l)
+}
+
+unsafe extern "system" fn rl_key_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if code >= 0 && RL_INPUT_LOCK.load(std::sync::atomic::Ordering::Relaxed) {
+        let p = l as *const KBDLLHOOKSTRUCT;
+        if !p.is_null() && rl_is_physical(((*p).flags & LLKHF_INJECTED) != 0) {
+            return 1;
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, w, l)
+}
+
+/// 見張りを立てる。⚠ 見張りは**自分を立てたスレッド**でしか働かないので、
+///   専用のスレッドを1本だけ持ち、そこで待ち続ける。
+fn rl_ensure_input_hook_thread() {
+    if RL_LOCK_THREAD.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+        return; // 既に居る
+    }
+    std::thread::spawn(|| unsafe {
+        let tid = winapi::um::processthreadsapi::GetCurrentThreadId();
+        RL_LOCK_THREAD.store(tid, std::sync::atomic::Ordering::Relaxed);
+        let hm = SetWindowsHookExW(WH_MOUSE_LL, Some(rl_mouse_hook), std::ptr::null_mut(), 0);
+        let hk = SetWindowsHookExW(WH_KEYBOARD_LL, Some(rl_key_hook), std::ptr::null_mut(), 0);
+        if hm.is_null() || hk.is_null() {
+            log::error!(
+                "RL input lock: 見張りを立てられません（マウス={} キー={}）",
+                !hm.is_null(),
+                !hk.is_null()
+            );
+        } else {
+            log::info!("RL input lock: 見張りを立てました");
+        }
+        // ⚠ 待ち続けないと見張りは働かない。合図が来るまでここで待つ。
+        let mut msg: MSG = std::mem::zeroed();
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if !hm.is_null() {
+            UnhookWindowsHookEx(hm);
+        }
+        if !hk.is_null() {
+            UnhookWindowsHookEx(hk);
+        }
+        RL_LOCK_THREAD.store(0, std::sync::atomic::Ordering::Relaxed);
+        log::info!("RL input lock: 見張りを片付けました");
+    });
+}
+
+/// お客様の手を止める／戻す。
+///
+/// ⚠ 戻し忘れは**お客様のPCが操作不能のまま残る**という最悪の事故になる。
+///   接続が切れたときにも必ず戻すこと（呼び出し側の責任）。
+pub fn rl_set_input_lock(on: bool) {
+    if on {
+        rl_ensure_input_hook_thread();
+    }
+    RL_INPUT_LOCK.store(on, std::sync::atomic::Ordering::Relaxed);
+    log::info!("RL input lock: {}", if on { "止めました" } else { "戻しました" });
+}
+
 pub fn block_input(v: bool) -> (bool, String) {
     let on = v;
     // 🔴🔴 **昇格していないなら、自分で呼ばない**（2026-09-03 実機の記録で確定）。
@@ -2234,6 +2333,14 @@ pub fn block_input(v: bool) -> (bool, String) {
             }
         };
     }
+    // 🔴 `BlockInput` だけでは**お客様のマウスが動く**（2026-09-03 実機で確定）。
+    //   止めているのは「入力がアプリに届くこと」で、カーソルの動きは止まらない。
+    //   ★人が触った操作を捨てる見張りも一緒に入り切りする。
+    //   ⚠ 順番: 止めるときは見張りを先に、戻すときは見張りを後に。
+    //     どちらも「止まっていない時間」を作らないため。
+    if on {
+        rl_set_input_lock(true);
+    }
     let v = if v { TRUE } else { FALSE };
     unsafe {
         // 🔴🔴 **入力を受けている机に移ってから頼む**（2026-09-03）。
@@ -2260,6 +2367,9 @@ pub fn block_input(v: bool) -> (bool, String) {
             ok = BlockInput(v) == TRUE;
         }
         if ok {
+            if !on {
+                rl_set_input_lock(false);
+            }
             (true, "".to_owned())
         } else {
             // 🔴🔴 **失敗の中身を残す**（2026-09-02 実機で「os error 1460」）。
@@ -2283,6 +2393,11 @@ pub fn block_input(v: bool) -> (bool, String) {
                  ユーザー={}",
                 crate::username()
             );
+            // ⚠ 失敗しても、解除の指示なら見張りは**必ず**外す。
+            //   ここを飛ばすと、お客様のPCが操作不能のまま残る。
+            if !on {
+                rl_set_input_lock(false);
+            }
             (false, format!("Error: {}", e))
         }
     }
