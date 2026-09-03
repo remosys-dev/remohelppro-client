@@ -194,9 +194,13 @@ class RustDeskMultiWindowManager {
         //   ★接続の窓（cm）で実績のある手を、こちらにも当てる:
         //     **一度だけ最前面に固定して、すぐ外す。**
         //   ⚠ 固定したままにしない。他の窓の上に居座る。
-        await windowController.setAlwaysOnTop(true);
-        await Future.delayed(const Duration(milliseconds: 400));
-        await windowController.setAlwaysOnTop(false);
+        // ⚠ ここで最前面固定は**使えない**（2026-09-03 CI で判明）。
+        //   `WindowController` に `setAlwaysOnTop` は無い
+        //   （接続管理の窓は `windowManager` を使えるので、あちらだけ可能）。
+        //   ⚠ `dart analyze` は通ったのに CI のビルドで落ちた。
+        //     ★手元の検査だけを根拠に「直った」と言わないこと。
+        //   ⚠ show()+focus() だけでは Windows に前面化を拒否されることがある。
+        //     ＝ この件はまだ完全ではない。別途、窓の側から出す形を作る。
       } catch (e) {
         debugPrint('接続の窓を前に出せませんでした: $e');
       }
@@ -257,9 +261,7 @@ class RustDeskMultiWindowManager {
               final c = WindowController.fromWindowId(windowId);
               await c.show();
               await c.focus();
-              await c.setAlwaysOnTop(true);
-              await Future.delayed(const Duration(milliseconds: 400));
-              await c.setAlwaysOnTop(false);
+              // ⚠ 最前面固定は `WindowController` には無い（上の説明）。
             } catch (e) {
               debugPrint('接続の窓を前に出せませんでした($windowId): $e');
             }
