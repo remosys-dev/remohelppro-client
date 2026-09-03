@@ -1055,6 +1055,24 @@ class ServerModel with ChangeNotifier {
     try {
       final client = Client.fromJson(jsonDecode(evt["client"]));
       final index = _clients.indexWhere((element) => element.id == client.id);
+      // 🔴🔴 ここに記録が1行も無かった（2026-09-03）。
+      //
+      //   ⚠ 「音声通話の承諾ができない」を 8/26・9/1・9/2 と3回直しているが、
+      //     ⚠ **どれも実機では直っていない**。理由は、この画面に記録が無く、
+      //     ⚠ **どこまで届いているのかを誰も見られなかった**から。
+      //     ・知らせが届いていないのか
+      //     ・届いたが窓を出せないのか
+      //     ・窓は出たが押せないのか
+      //     この3つで直す場所がまったく違う。★次はここで切り分ける。
+      //   ⚠ `index == -1` なら、相手が一覧に居ないので**何も起きない**。
+      //     その場合も分かるように、必ず残す。
+      rlTrace('voice_call_state', {
+        'id': client.id,
+        'index': index,
+        'incoming': client.incomingVoiceCall,
+        'inCall': client.inVoiceCall,
+        'clients': _clients.length,
+      });
       if (index != -1) {
         _clients[index].inVoiceCall = client.inVoiceCall;
         _clients[index].incomingVoiceCall = client.incomingVoiceCall;
@@ -1084,6 +1102,7 @@ class ServerModel with ChangeNotifier {
             cmKeepVisible = true;
             Future.delayed(Duration.zero, () {
               // ⚠ 受ける釦はこの窓の中にしかない。確実に出す方を使う。
+              rlTrace('voice_call_show_cm');
               forceShowCmWindow();
             });
           }

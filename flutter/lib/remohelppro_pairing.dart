@@ -54,6 +54,20 @@ Future<void> Function()? rlNotifySupportEnded;
 ///     もう一度サポートを受けるには認証コードを入れ直すだけでよい。
 Future<void> Function()? rlEndByCustomerOnClose;
 
+/// 起動の引数（記録に残す用）。⚠ 復帰で立ち上がったのか、
+/// お客様がご自分で開いたのかで、追う場所がまったく違う。
+String _rlBootArgsForTrace() {
+  try {
+    final a = <String>[];
+    for (final s in Platform.executableArguments) {
+      a.add(s);
+    }
+    return a.join(' ');
+  } catch (_) {
+    return '?';
+  }
+}
+
 /// 🔴🔴 **いまサポート中かどうか**（2026-09-03 ご指示）。
 ///
 ///   顧客アプリの「×」を出すかどうかの判断に使う。
@@ -309,6 +323,21 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       return;
     }
     rlTrace('boot_wipe_password');
+    // 🔴 再起動後の復帰が**4分30秒**かかる件を測るための記録（2026-09-03 ご指摘）。
+    //
+    //   ⚠ 「遅い」ことは分かっているが、⚠ **どこで時間を使っているかが
+    //     一度も測られていない**。推測で速くすると、直っていないのに
+    //     直したと思い込む（今日それで一度外している）。
+    //   ★区切りは4つ:
+    //     ① Windows がログインしてから、この行までの時間
+    //        （RunOnce の待ち＋展開＋アプリの起動。⚠ ここが一番怪しい）
+    //     ② この行から poll_start まで（当社の処理）
+    //     ③ poll_start から窓が見えるまで
+    //   ⚠ ① は外から測るしかないので、起動した時刻をそのまま残す。
+    rlTrace('boot_clock', {
+      'now': DateTime.now().toIso8601String(),
+      'args': _rlBootArgsForTrace(),
+    });
     try {
       final rnd = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
       await bind.mainSetPermanentPasswordWithResult(password: 'boot-$rnd');
