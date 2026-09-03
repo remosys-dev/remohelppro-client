@@ -110,6 +110,15 @@ class CachedPeerData {
 }
 
 class FfiModel with ChangeNotifier {
+  /// 🔴 つなぎ直しを**黙って**試した回数（2026-09-03 ご指示）。
+  ///
+  ///   ⚠ これまでは切れた瞬間に必ず「つなぎ直しています」を出していた。
+  ///     ＝ すぐ戻る一瞬の切断でも必ず出る。実機の録画では、画面が正常に
+  ///     見えているのに出ていた。
+  ///     ⚠ お客様にも相談員にも「接続が不安定な製品」に見える。
+  ///   ★本当に不安定なときだけ出す。数回黙って試して、それでも駄目なら出す。
+  ///   ⚠ 繋がったら 0 に戻す（`connection_ready`）。
+  int _rlQuietTries = 0;
   CachedPeerData cachedPeerData = CachedPeerData();
   PeerInfo _pi = PeerInfo();
   Rect? _rect;
@@ -341,6 +350,7 @@ class FfiModel with ChangeNotifier {
       } else if (name == 'sync_platform_additions') {
         handlePlatformAdditions(evt, sessionId, peerId);
       } else if (name == 'connection_ready') {
+        _rlQuietTries = 0; // 繋がったので数え直す（黙って試した回数）
         setConnectionType(peerId, evt['secure'] == 'true',
             evt['direct'] == 'true', evt['stream_type'] ?? '');
       } else if (name == 'switch_display') {
@@ -1082,8 +1092,15 @@ class FfiModel with ChangeNotifier {
     //   ⚠ すぐ繋ぎ直さないこと。切り替えた直後は新しいセッションの画面がまだ
     //     用意できておらず、失敗して本当のエラーに見える。数秒おく。
     if (type == 'session-switching') {
-      msgBox(sessionId, 'custom-nook-nocancel', 'つなぎ直しています',
-          'お客様がパソコンにログインしました。\n自動でつなぎ直しています。そのままお待ちください。', '', dialogManager);
+      // 🔴 ここでは**何も出さない**（2026-09-03 ご指示）。
+      //
+      //   ⚠ 再起動後の再接続では、この切り替えが必ず途中で起きる。
+      //     ここで別の窓を出すと、⚠ **「再起動後の再接続を実行中です」の途中に
+      //     『つなぎ直しています』が割り込む**。実機の録画でそうなっていた。
+      //     ご指示は「実行中ですだけが出て、接続したら何も出ない」。
+      //   ★黙って繋ぎ直す。5秒で戻るので、出す必要が無い。
+      //   ⚠ 万一戻らなくても放置にはならない。繋ぎ直しに数回失敗すれば、
+      //     下の「つなぎ直しています」が出る（黙るのは最初の数回だけ）。
       _timer?.cancel();
       _timer = Timer(const Duration(seconds: 5), () {
         reconnect(dialogManager, sessionId, false);
@@ -1140,14 +1157,18 @@ class FfiModel with ChangeNotifier {
       final ffi = parent.target!;
       final (state, remainSec) = await rlWatchReconnect(ffi);
       if (state == 'waiting') {
-        final m = (remainSec / 60).ceil();
+        // 🔴 数字を出さない（2026-09-03 ご指示）。
+        //
+        //   ⚠ ここに出していた「残り およそ N 分」は**待ち時間ではない**。
+        //     サポートの打ち切り上限（最後の歯止め）の残りをそのまま出していた。
+        //     ＝ お客様の再起動は普通2〜3分なのに「あと26分」と読める。
+        //     ⚠ 実機の録画で確認した。数字そのものが要らない。
+        //   ★出すのは「いま何をしているか」だけにする。
         msgBox(
             sessionId,
             'custom-nook-nocancel',
-            '再起動後の再接続を待っています',
-            'お客様のパソコンが再起動しています。\n'
-                '戻り次第、自動でつなぎ直します。\n\n'
-                '残り およそ $m 分',
+            '再起動後の再接続を実行中です',
+            'お客様のパソコンが戻り次第、自動でつなぎ直します。',
             '',
             dialogManager);
         _timer?.cancel();
@@ -1191,14 +1212,28 @@ class FfiModel with ChangeNotifier {
             ? ''
             : '\n\n⚠ 接続先が設定で上書きされています: $override\n'
                 '（設定 → ネットワーク → ID サーバー を空にすると直ります）';
-        msgBox(
-            sessionId,
-            'custom-nook-nocancel',
-            'つなぎ直しています',
-            'お客様のパソコンとの接続が一時的に切れました。\n'
-                '自動でつなぎ直しています。そのままお待ちください。$extra',
-            '',
-            dialogManager);
+        // 🔴🔴 **すぐには出さない**（2026-09-03 ご指示）。
+        //
+        //   ⚠ これまでは切れた瞬間に必ず出していた。
+        //     ＝ すぐ戻る一瞬の切断でも必ず出る。実機の録画では、
+        //     ⚠ **画面が正常に見えているのに出ていた**。
+        //     お客様にも相談員にも「接続が不安定な製品」に見える。
+        //   ★まず黙って数回試す。それでも駄目なときだけ出す。
+        //   ⚠ 黙る時間を長くしすぎない。長いと、本当に切れているのに
+        //     何も出ないまま放置される。5秒ごとに3回＝約15秒で出す。
+        //   ⚠ 接続先の上書きが在るときは**すぐ出す**。あれは何度試しても
+        //     直らないので、黙っていても意味が無い（原因を早く見せる）。
+        _rlQuietTries++;
+        if (_rlQuietTries > 3 || extra.isNotEmpty) {
+          msgBox(
+              sessionId,
+              'custom-nook-nocancel',
+              'つなぎ直しています',
+              'お客様のパソコンとの接続が一時的に切れました。\n'
+                  '自動でつなぎ直しています。そのままお待ちください。$extra',
+              '',
+              dialogManager);
+        }
         _timer?.cancel();
         _timer = Timer(const Duration(seconds: 5), () {
           reconnect(dialogManager, sessionId, false);
