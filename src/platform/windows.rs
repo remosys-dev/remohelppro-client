@@ -522,13 +522,82 @@ fn fix_cursor_mask(
 
 define_windows_service!(ffi_service_main, service_main);
 
+// 🔴 CAD 専用の一時サービスの中身（2026-09-03）。
+//   ⚠ ここでしか SendSAS は効かない。⚠ 余計なことは一切しない。
+//     本体のサービス（service_main）を呼ぶと、ワンタイム版の
+//     動いているアプリと通信路を奪い合って壊れる。
+fn rl_sas_service_main(_arguments: Vec<OsString>) {
+    // ⚠ 止める指示には素直に応じる。応じないと SCM に強制終了され、
+    //   「サービスが残る」事故になる。
+    let handler = move |control_event| -> ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            ServiceControl::Stop | ServiceControl::Preshutdown | ServiceControl::Shutdown => {
+                ServiceControlHandlerResult::NoError
+            }
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
+    };
+    let name = rl_sas_service_name();
+    let status_handle = match service_control_handler::register(&name, handler) {
+        Ok(h) => h,
+        Err(e) => {
+            log::error!("RL sas: 一時サービスの登録に失敗: {e}");
+            return;
+        }
+    };
+    let mk = |state: ServiceState| ServiceStatus {
+        service_type: SERVICE_TYPE,
+        current_state: state,
+        controls_accepted: ServiceControlAccept::STOP,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    };
+    // ⚠ 先に「動いている」と伝える。伝える前に時間を使うと SCM に切られる。
+    if let Err(e) = status_handle.set_service_status(mk(ServiceState::Running)) {
+        log::error!("RL sas: 一時サービスの状態を返せません: {e}");
+    }
+    log::info!("RL sas: 一時サービスとして SendSAS を呼びます");
+    send_sas();
+    let _ = status_handle.set_service_status(mk(ServiceState::Stopped));
+}
+
+define_windows_service!(ffi_rl_sas_service_main, rl_sas_service_main);
+
+/// `--rl-sas-service` で起動されたときの入口。
+pub fn rl_run_sas_service() {
+    if let Err(e) =
+        windows_service::service_dispatcher::start(rl_sas_service_name(), ffi_rl_sas_service_main)
+    {
+        log::error!("RL sas: 一時サービスを始められません: {e}");
+    }
+}
+
 fn service_main(arguments: Vec<OsString>) {
     if let Err(e) = run_service(arguments) {
         log::error!("run_service failed: {}", e);
     }
 }
 
+/// 🔴 この処理が「本物の Windows サービス」の中で動いているか（2026-09-03）。
+///
+///   ⚠ `SendSAS` は**サービスから呼ばないと効かない**（実機で確定）。
+///     Windows の許可設定の値の名前がそのまま `Services` である。
+///     ・SYSTEM のプロセス … 呼べるが**何も起きない**（エラーも出ない）
+///     ・サービス ………… 効く
+///   ⚠ 「SYSTEM かどうか」（`is_root`）では区別できない。**別物**である。
+static RL_IS_SERVICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// この処理が本物のサービスの中で動いていれば true。
+pub fn rl_is_windows_service() -> bool {
+    RL_IS_SERVICE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn start_os_service() {
+    // ⚠ ここを通るのは `--service` で起動された処理だけ＝本物のサービス。
+    RL_IS_SERVICE.store(true, std::sync::atomic::Ordering::Relaxed);
     if let Err(e) =
         windows_service::service_dispatcher::start(crate::get_app_name(), ffi_service_main)
     {
@@ -973,8 +1042,17 @@ async fn rl_serve_sas_for_portable() {
             if let Ok(Some(data)) = stream.next_timeout(1000).await {
                 match data {
                     ipc::Data::SAS => {
-                        log::info!("RL sas: 受け取りました。SendSAS を呼びます");
-                        send_sas();
+                        // 🔴 ここは SYSTEM だが**サービスではない**（2026-09-03 実機で確定）。
+                        //   ⚠ そのまま send_sas() を呼んでも、エラーも出ずに何も起きない。
+                        //     `SAS received` まで記録に残るので、効いたように見える。
+                        //   ★一時サービスを立てて、そこから呼ぶ。
+                        log::info!("RL sas: 受け取りました。一時サービスから呼びます");
+                        if !rl_send_sas_via_temp_service() {
+                            // ⚠ 立てられなくても諦めない。効かないかもしれないが、
+                            //   今より悪くはならない（今は必ず効かない）。
+                            log::error!("RL sas: 一時サービスが駄目だったので、その場で呼びます");
+                            send_sas();
+                        }
                     }
                     // 🔴 「お客様の入力を止める」も、ここ（SYSTEM）で実行する（2026-09-03）。
                     //   ⚠ ワンタイム版の本体はお客様の権限で動くので、
@@ -990,6 +1068,86 @@ async fn rl_serve_sas_for_portable() {
             }
         }
     }
+}
+
+/// CAD 専用の一時サービスの名前。⚠ 製品ごとに分ける。
+///
+/// ⚠ 名前を共有すると、他製品のサービスを消しに行く事故になる
+///   （RustDesk 系5製品が同じ名前を持っている）。
+fn rl_sas_service_name() -> String {
+    let mut n = String::new();
+    for c in crate::get_app_name().chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            n.push(c);
+        }
+    }
+    if n.is_empty() {
+        n.push_str("remohelppro");
+    }
+    format!("{n}-sas")
+}
+
+/// `sc` を1回動かす。⚠ 黒い窓を出さない（お客様の画面に出る）。
+fn rl_sc(args: &[&str]) -> bool {
+    match std::process::Command::new("sc")
+        .args(args)
+        .creation_flags(winapi::um::winbase::CREATE_NO_WINDOW)
+        .status()
+    {
+        Ok(st) => st.success(),
+        Err(e) => {
+            log::error!("RL sas: sc {args:?} が動きませんでした: {e}");
+            false
+        }
+    }
+}
+
+/// 🔴🔴 **一時サービスを立てて、そこから SendSAS を呼ぶ**（2026-09-03）。
+///
+///   ⚠ 実機で確定したこと:
+///     ・常駐版（本物のサービスが在る）… CAD が出る
+///     ・ワンタイム版（SYSTEM だがサービスではない）… **呼べるのに何も起きない**
+///       記録には `SAS received` まで残る。⚠ エラーは1行も出ない。
+///   ★`SendSAS` を許す Windows の設定は、値の名前がそのまま `Services`。
+///     ＝ **SYSTEM であるだけでは足りない。サービスである必要がある。**
+///
+///   ⚠ ワンタイム版にはサービスが無い（お客様のPCに何も残さないため）。
+///     そこで、押された時だけ**数秒だけ**サービスを立てて、すぐ消す。
+///   ⚠ 跡を残さない。作る前にも古いものを消す（前回が落ちた場合に備える）。
+///   ⚠ 立てられなくても**最後に直接呼ぶ**。効かないかもしれないが、
+///     今より悪くはならない（今は必ず効かない）。
+#[cfg(windows)]
+pub fn rl_send_sas_via_temp_service() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        log::error!("RL sas: 自分の場所が分かりません");
+        return false;
+    };
+    let name = rl_sas_service_name();
+    // ⚠ 前回の残りを先に消す。残っていると create が必ず失敗する。
+    rl_sc(&["delete", &name]);
+    let bin = format!("\"{}\" --rl-sas-service", exe.display());
+    let created = rl_sc(&[
+        "create", &name, "binpath=", &bin, "type=", "own", "start=", "demand",
+        "DisplayName=", "REMOHELP PRO (CAD)",
+    ]);
+    if !created {
+        log::error!("RL sas: 一時サービスを作れませんでした（{name}）");
+        return false;
+    }
+    // ⚠ `sc start` は「動き出した」と言われた時点で戻る。
+    //   一時サービスは動き出したらすぐ SendSAS を呼ぶので、ここで待つ必要はない。
+    let started = rl_sc(&["start", &name]);
+    if !started {
+        log::error!("RL sas: 一時サービスを動かせませんでした（{name}）");
+    }
+    // ⚠ 必ず消す。⚠ 消し損ねると、お客様のPCに当社のサービスが残る。
+    //   まだ動いていれば止まってから消えるので、SendSAS は取りこぼさない。
+    rl_sc(&["stop", &name]);
+    rl_sc(&["delete", &name]);
+    if started {
+        log::info!("RL sas: 一時サービスから SendSAS を呼びました（{name}）");
+    }
+    started
 }
 
 pub fn send_sas() {

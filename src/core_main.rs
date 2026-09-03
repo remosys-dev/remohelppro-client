@@ -720,6 +720,19 @@ pub fn core_main() -> Option<Vec<String>> {
             }
             crate::start_os_service();
             return None;
+        } else if args[0] == "--rl-sas-service" {
+            // 🔴 CAD 専用の一時サービス（2026-09-03）。
+            //   ⚠ SendSAS は**サービスからでないと効かない**（実機で確定）。
+            //     SYSTEM のプロセスから呼んでも、エラーも出ずに何も起きない。
+            //   ⚠ ここでは SendSAS 以外は何もしない。本体の処理を動かすと、
+            //     ワンタイム版の動いているアプリと通信路を奪い合って壊れる。
+            #[cfg(windows)]
+            {
+                crate::platform::rl_run_sas_service();
+                return None;
+            }
+            #[cfg(not(windows))]
+            return None;
         } else if args[0] == "--rl-prelogon-install" {
             // 一時サービスを作る（昇格済みで呼ばれる）。
             //   使い方: --rl-prelogon-install <展開先> <短いID> <打ち切りUNIX秒>

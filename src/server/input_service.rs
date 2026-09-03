@@ -2219,8 +2219,18 @@ async fn send_sas() -> ResultType<()> {
     //     ＝ ここが既に SYSTEM。⚠ **他所へ頼む必要がそもそも無い。**
     //   ⚠ 常駐版のサービスも SYSTEM なので、同じくその場で呼ぶ形になる
     //     （通信路を1往復減らすだけで、動きは変わらない）。
-    if crate::platform::is_root() {
-        log::info!("RL sas: 自分が SYSTEM なので、その場で SendSAS を呼びます");
+    // 🔴🔴 **SYSTEM であるだけでは足りない。サービスである必要がある**
+    //   （2026-09-03 実機で確定。前回の見立ては外れていた）。
+    //
+    //   ⚠ 9/2 に「SYSTEM ならその場で呼ぶ」に変えたが、それでは効かない。
+    //     実機の記録には `SAS received` まで残るのに、⚠ **画面は出ない**。
+    //     エラーも返らない（SendSAS は戻り値を返さない）ので、効いたように見える。
+    //   ★`SendSAS` を許す Windows の設定は、値の名前がそのまま `Services`。
+    //     ・本物のサービス ……… 効く（常駐版はこれで鳴っていた）
+    //     ・SYSTEM のプロセス … 呼べるが何も起きない
+    //   ⚠ `--server` は SYSTEM だが**サービスではない**。ここが落とし穴。
+    if crate::platform::rl_is_windows_service() {
+        log::info!("RL sas: 自分がサービスなので、その場で SendSAS を呼びます");
         crate::platform::send_sas();
         return Ok(());
     }
@@ -2237,6 +2247,15 @@ async fn send_sas() -> ResultType<()> {
                 //   呼び出し元は `allow_err!` で捨てるので、
                 //   ⚠ **相談員には「押しても何も起きない」としか見えなかった。**
                 log::error!("RL sas: SYSTEM 側へ渡せませんでした（受け口が居ない）: {e}");
+                // ★最後の手段: 自分で一時サービスを立てて呼ぶ（2026-09-03）。
+                //   ⚠ 昇格していなければサービスは作れないので、そのときは諦める。
+                {
+                    if crate::platform::is_root()
+                        && crate::platform::rl_send_sas_via_temp_service()
+                    {
+                        return Ok(());
+                    }
+                }
                 return Err(e);
             }
         }
