@@ -471,6 +471,24 @@ pub enum Data {
     ControlPermissionsRemoteModify(Option<bool>),
     #[cfg(target_os = "windows")]
     FileTransferEnabledState(Option<bool>),
+    /// 🔴 「お客様の入力を止める」を **SYSTEM 側へ頼む**（2026-09-03）。
+    ///
+    ///   ⚠ 実機の記録で確定:
+    ///     `RL block_input 失敗: on=true err=(os error 0) 昇格=false SYSTEM=false`
+    ///   `BlockInput` は**昇格していない側からは通らない**。ワンタイム版の本体は
+    ///   お客様の権限で動くので、⚠ **本体が自分で呼ぶ限り必ず失敗する**。
+    ///
+    ///   ★キー入力と Ctrl+Alt+Del は、既に SYSTEM 側（portable service）で
+    ///     処理されている。⚠ **入力ブロックだけが本体に取り残されていた。**
+    ///     同じ道に乗せる。⚠ 新しい仕組みは作らない。
+    ///
+    ///   （この enum は `serde(tag = "t")` ＝**名前で判別**するので、
+    ///     足す位置で意味が変わることはない。番号順ではない。）
+    #[cfg(windows)]
+    BlockInput(bool),
+    /// 上の結果。⚠ 成否を捨てない（捨てると相談員に嘘の成功が出る）。
+    #[cfg(windows)]
+    BlockInputResult((bool, String)),
 }
 
 #[tokio::main(flavor = "current_thread")]

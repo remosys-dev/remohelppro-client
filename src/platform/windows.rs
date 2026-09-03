@@ -715,6 +715,14 @@ async fn run_service(_arguments: Vec<OsString>) -> ResultType<()> {
                             ipc::Data::SAS => {
                                 send_sas();
                             }
+                            // 🔴 入力ブロックを SYSTEM のここで実行する（2026-09-03）。
+                            //   ⚠ 頼んだ側は返事を待っている。必ず返す。
+                            ipc::Data::BlockInput(on) => {
+                                let r = block_input(on);
+                                allow_err!(
+                                    stream.send(&ipc::Data::BlockInputResult(r)).await
+                                );
+                            }
                             ipc::Data::UserSid(usid) => {
                                 if let Some(usid) = usid {
                                     if session_id != usid {
@@ -963,9 +971,21 @@ async fn rl_serve_sas_for_portable() {
             let mut stream = ipc::Connection::new(conn);
             // ⚠ 1本ずつ順に捌く。CAD は連打される類のものではない。
             if let Ok(Some(data)) = stream.next_timeout(1000).await {
-                if matches!(data, ipc::Data::SAS) {
-                    log::info!("RL sas: 受け取りました。SendSAS を呼びます");
-                    send_sas();
+                match data {
+                    ipc::Data::SAS => {
+                        log::info!("RL sas: 受け取りました。SendSAS を呼びます");
+                        send_sas();
+                    }
+                    // 🔴 「お客様の入力を止める」も、ここ（SYSTEM）で実行する（2026-09-03）。
+                    //   ⚠ ワンタイム版の本体はお客様の権限で動くので、
+                    //     本体が自分で呼ぶと**必ず失敗する**（実機の記録で確定）。
+                    //   ⚠ 頼んだ側は返事を待っている。失敗でも必ず返す。
+                    ipc::Data::BlockInput(on) => {
+                        let r = block_input(on);
+                        log::info!("RL block_input: SYSTEM 側で実行しました on={on} ok={}", r.0);
+                        allow_err!(stream.send(&ipc::Data::BlockInputResult(r)).await);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1993,8 +2013,69 @@ pub fn toggle_blank_screen(v: bool) {
     }
 }
 
+/// SYSTEM 側へ「入力を止める／戻す」を頼む（2026-09-03）。
+///
+/// ⚠ 形は `input_service::send_sas` の頼み方をそのまま写している（実績のある書き方）。
+/// ⚠ 返事を待つ。待たずに成功と言うと、相談員に**嘘の成功**が出る。
+///   待ち時間は短くする（相談員を待たせない）。届かなければ失敗として返す。
+#[cfg(windows)]
+#[tokio::main(flavor = "current_thread")]
+async fn rl_block_input_via_service(on: bool) -> (bool, String) {
+    let mut stream = match crate::ipc::connect(1000, crate::POSTFIX_SERVICE).await {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("RL block_input: SYSTEM 側へ繋げません: {e}");
+            return (false, format!("Error: {}", e));
+        }
+    };
+    if let Err(e) = stream.send(&crate::ipc::Data::BlockInput(on)).await {
+        log::error!("RL block_input: SYSTEM 側へ渡せません: {e}");
+        return (false, format!("Error: {}", e));
+    }
+    match stream.next_timeout(3000).await {
+        Ok(Some(crate::ipc::Data::BlockInputResult((ok, msg)))) => {
+            log::info!("RL block_input: SYSTEM 側の返事 ok={ok} {msg}");
+            (ok, msg)
+        }
+        Ok(other) => {
+            log::error!("RL block_input: SYSTEM 側の返事が違います: {other:?}");
+            (false, "Error: unexpected reply".to_owned())
+        }
+        Err(e) => {
+            log::error!("RL block_input: SYSTEM 側の返事がありません: {e}");
+            (false, format!("Error: {}", e))
+        }
+    }
+}
+
 pub fn block_input(v: bool) -> (bool, String) {
     let on = v;
+    // 🔴🔴 **昇格していないなら、自分で呼ばない**（2026-09-03 実機の記録で確定）。
+    //
+    //   ⚠ 記録に残っていたもの:
+    //     `RL block_input 失敗: on=true err=(os error 0) 昇格=false SYSTEM=false ユーザー=gasug`
+    //   ⚠ `BlockInput` は昇格していない側からは通らない。＝ ワンタイム版の本体
+    //     （お客様の権限）が呼ぶ限り、⚠ **何をしても必ず失敗する**。
+    //     `try_change_desktop()` を足しても直らなかったのはこのため（1460 が 0 に変わっただけ）。
+    //
+    //   ★キー入力も Ctrl+Alt+Del も、既に SYSTEM 側で処理されている。
+    //     ⚠ **入力ブロックだけが本体に取り残されていた。** 同じ道に乗せる。
+    //   ⚠ 常駐版・サービス版はここが SYSTEM なので、そのまま下へ落ちる（動きは変わらない）。
+    //   ⚠ **昇格しているなら頼まない**。昇格した管理者なら自分で呼べるので、
+    //     今まで通っていた経路の動きを変えない（変えると別の壊れ方を呼ぶ）。
+    if !crate::platform::is_root() && !is_elevated(None).unwrap_or(false) {
+        // ⚠ 別のスレッドで呼ぶ。`rl_block_input_via_service` は tokio_main なので、
+        //   既にランタイムの中から呼ぶと**落ちる**。
+        //   ★`send_sas` の呼び方（input_service.rs）と同じ形にしてある。
+        //   ⚠ ただしこちらは**結果が要る**ので、待って受け取る。
+        return match std::thread::spawn(move || rl_block_input_via_service(on)).join() {
+            Ok(r) => r,
+            Err(_) => {
+                log::error!("RL block_input: SYSTEM 側へ頼む処理が落ちました on={on}");
+                (false, "Error: helper thread panicked".to_owned())
+            }
+        };
+    }
     let v = if v { TRUE } else { FALSE };
     unsafe {
         // 🔴🔴 **入力を受けている机に移ってから頼む**（2026-09-03）。
@@ -2026,7 +2107,11 @@ pub fn block_input(v: bool) -> (bool, String) {
             // 🔴🔴 **失敗の中身を残す**（2026-09-02 実機で「os error 1460」）。
             //
             //   ⚠ 実機のエラー: 「タイムアウト期間が経過したため、この操作は
-            //     終了しました。(os error 1460)」。⚠ **原因は未特定。**
+            //     終了しました。(os error 1460)」。
+            //   ✅ 2026-09-03 に**この記録そのもので原因が確定した**:
+            //       `on=true err=(os error 0) 昇格=false SYSTEM=false ユーザー=gasug`
+            //     ＝ 昇格していない側から呼んでいた。上の分岐で SYSTEM 側へ回すようにした。
+            //     ⚠ ここに残るのは「SYSTEM／昇格済みなのに失敗した」場合だけになる。
             //   ⚠ `BlockInput` は、呼んだスレッドが**入力を受けている机**に
             //     いないと失敗する。SYSTEM の部品・ログオン前の複製・
             //     昇格の有無で、どの机に居るかが変わる。
