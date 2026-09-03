@@ -3,6 +3,7 @@ import 'dart:convert';
 // Process / ProcessStartMode は Mac の自己削除で使う（自分を消す後始末を切り離して走らせる）。
 import 'dart:io' show Platform, File, Directory, exit, Process, ProcessStartMode;
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 import 'remohelppro_mac_permission.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -52,6 +53,18 @@ Future<void> Function()? rlNotifySupportEnded;
 ///   ⚠ 確認は挟まない。挟むと、押し間違えたときに**開いたまま**が残る。
 ///     もう一度サポートを受けるには認証コードを入れ直すだけでよい。
 Future<void> Function()? rlEndByCustomerOnClose;
+
+/// 🔴🔴 **いまサポート中かどうか**（2026-09-03 ご指示）。
+///
+///   顧客アプリの「×」を出すかどうかの判断に使う。
+///   ⚠ 「×」を消したのは、⚠ **うっかり押してサポートが終わってしまう**ため。
+///     ところが**消しっぱなしにすると、終わらせる道が無くなる場面がある**:
+///       ・認証コードを入れる前 … コードを入れずにやめたいとき
+///       ・サポートが終わったあと … 「この画面は閉じて大丈夫です」の画面
+///     ⚠ この2つでは「終了する」の釦が出ていない。＝ 閉じる道が1つも無い。
+///
+///   ★出し分ける。**サポート中だけ「×」を消す。**
+final rlCustomerSupportActive = false.obs;
 
 
 /// 常駐を一時停止したときに置く「戻す予定」の名前。
@@ -418,6 +431,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       });
       setState(() {
         _ready = true;
+        rlCustomerSupportActive.value = true; // 「×」を消す（サポート中）
         _busy = false;
       });
 
@@ -540,6 +554,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     });
     rlNotifySupportEnded = null;
     rlEndByCustomerOnClose = null;
+    rlCustomerSupportActive.value = false;
     _statusPoll?.cancel();
     _statusPoll = null;
     _rearm?.cancel();
@@ -556,6 +571,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Future<void> _terminateBySupportEnd() async {
     if (_terminated) return;
     _terminated = true;
+    rlCustomerSupportActive.value = false; // 「×」を戻す（終わったら閉じられること）
     rlTrace('terminate_by_support_end', {'ticks': _pollTicks});
     _statusPoll?.cancel();
     _statusPoll = null;
@@ -1271,6 +1287,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       if (mounted) setState(() {});
     });
     setState(() {
+    rlCustomerSupportActive.value = true; // 「×」を消す（サポート中）
       _ready = true;
       _busy = false;
     });

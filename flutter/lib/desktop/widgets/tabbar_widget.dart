@@ -8,6 +8,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/rl_support.dart';
+import 'package:flutter_hbb/remohelppro_pairing.dart'
+    show rlCustomerSupportActive;
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
@@ -831,19 +833,29 @@ class WindowActionPanelState extends State<WindowActionPanel> {
                           : _toggleMaximize,
                       isClose: false,
                     )),
-              // 🔴🔴 顧客アプリでは「×」を**出さない**（2026-09-03 ご指示）。
+              // 🔴🔴 顧客アプリの「×」は**サポート中だけ**消す（2026-09-03 ご指示）。
               //
               //   ⚠ お客様が うっかり「×」を押してサポートを終わらせてしまう。
               //     途中で切れると、掛け直しからやり直しになる。
-              //   ★終わらせる道は「終了する」の1つだけにする。
+              //   ★サポート中は、終わらせる道を「終了する」の1つだけにする。
               //     こちらは押すと何が起きるかが文字で書いてある。
-              //   ⚠ 最小化の釦は残す。⚠ **窓を消す道が1つも無い形にはしない。**
-              //     邪魔なときは最小化でどけられる。
+              //
+              //   ⚠ ただし**消しっぱなしにしてはいけない**（同日ご指摘）。
+              //     ・認証コードを入れる前 … コードを入れずにやめたいとき
+              //     ・サポートが終わったあと … 「この画面は閉じて大丈夫です」
+              //     ⚠ この2つでは「終了する」が出ていない。
+              //       消したままだと**閉じる道が1つも無くなる**。
+              //   ★だから状態で出し分ける（rlCustomerSupportActive）。
+              //
+              //   ⚠ 最小化の釦は常に残す。
               //   ⚠ 2026-08-27 には逆の直しを入れている（「×」で終わるようにした）。
               //     ご判断が変わった経緯なので、戻すときはここも一緒に見ること。
-              if (widget.showClose && !isMacOS && !kRlSupportShowWindow)
-                ActionIcon(
-                  message: 'Close',
+              if (widget.showClose && !isMacOS)
+                Obx(() => (kRlSupportShowWindow &&
+                        rlCustomerSupportActive.isTrue)
+                    ? const Offstage()
+                    : ActionIcon(
+                        message: 'Close',
                   icon: IconFont.close,
                   onTap: () async {
                     final res = await widget.onClose?.call() ?? true;
@@ -860,8 +872,8 @@ class WindowActionPanelState extends State<WindowActionPanel> {
                       });
                     }
                   },
-                  isClose: true,
-                )
+                        isClose: true,
+                      ))
             ],
           ),
       ],
