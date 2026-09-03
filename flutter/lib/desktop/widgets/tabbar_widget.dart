@@ -8,8 +8,6 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/rl_support.dart';
-import 'package:flutter_hbb/remohelppro_pairing.dart'
-    show rlEndByCustomerOnClose;
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
@@ -445,24 +443,24 @@ class _DesktopTabState extends State<DesktopTab>
 
   @override
   void onWindowClose() async {
-    // 🔴🔴 顧客アプリの「×」は、隠すだけでは**遠隔接続が開いたまま**になる
-    //   （2026-08-27 ご指摘・重大）。詳しくは remohelppro_pairing.dart の
-    //   rlEndByCustomerOnClose の説明。
-    //   ⚠ お客様は閉じたつもりでも、相談員はそのまま入れる状態が残っていた。
-    //   ★顧客版だけ、終了と同じ後始末（サーバーへ連絡・被操作停止・合言葉の無効化）
-    //     をしてから窓を消す。相談員版・常駐版は今までどおり隠すだけ。
+    // 🔴🔴 顧客アプリの「×」は**サポートを終了しない**（2026-09-03 ご指示）。
+    //
+    //   ⚠ 経緯を残す。2026-08-27 には逆にした
+    //     （「×」で隠すだけだと遠隔接続が開いたままになるため、終了させた）。
+    //   ⚠ ところが実機で、お客様が**うっかり「×」を押して終わってしまう**方が
+    //     困る、と分かった。サポートの途中で切れると、掛け直しから やり直しになる。
+    //   ★終わらせる道は「終了する」の1つだけにする。
+    //     ⚠ こちらは押すと何が起きるかが文字で書いてある
+    //       （「押すと接続を切り、それ以降は誰も操作できません」）。
+    //     「×」は、どの窓でも「閉じる」であって「終わる」ではない。
+    //
+    //   ⚠ `hide()` にはしない。**タスクバーからも消えてしまい、戻す道が
+    //     分かりにくくなる**（お客様は「消えた」と受け取る）。
+    //   ★最小化にする。まだ動いていることがタスクバーで見え、ひと押しで戻せる。
     mainWindowClose() async {
       if (kRlSupportShowWindow) {
-        final end = rlEndByCustomerOnClose;
-        if (end != null) {
-          try {
-            // ⚠ 待ちすぎない。この後の「終了しました」の表示と自己終了は
-            //   アプリが自分で続ける（数十秒かかる）ので、ここでは待たない。
-            await end().timeout(const Duration(seconds: 6));
-          } catch (_) {
-            // 伝えられなくても、被操作の停止と合言葉の無効化までは済んでいる。
-          }
-        }
+        await windowManager.minimize();
+        return;
       }
       await windowManager.hide();
     }
@@ -833,7 +831,17 @@ class WindowActionPanelState extends State<WindowActionPanel> {
                           : _toggleMaximize,
                       isClose: false,
                     )),
-              if (widget.showClose && !isMacOS)
+              // 🔴🔴 顧客アプリでは「×」を**出さない**（2026-09-03 ご指示）。
+              //
+              //   ⚠ お客様が うっかり「×」を押してサポートを終わらせてしまう。
+              //     途中で切れると、掛け直しからやり直しになる。
+              //   ★終わらせる道は「終了する」の1つだけにする。
+              //     こちらは押すと何が起きるかが文字で書いてある。
+              //   ⚠ 最小化の釦は残す。⚠ **窓を消す道が1つも無い形にはしない。**
+              //     邪魔なときは最小化でどけられる。
+              //   ⚠ 2026-08-27 には逆の直しを入れている（「×」で終わるようにした）。
+              //     ご判断が変わった経緯なので、戻すときはここも一緒に見ること。
+              if (widget.showClose && !isMacOS && !kRlSupportShowWindow)
                 ActionIcon(
                   message: 'Close',
                   icon: IconFont.close,
