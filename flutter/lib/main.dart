@@ -370,6 +370,39 @@ void runMultiWindow(
   } catch (e) {
     debugPrint('RL: 親へ「描き始めた」を知らせられませんでした: $e');
   }
+
+  // 🔴🔴 **窓の側から、自分で前に出る**（2026-09-04 ご報告）。
+  //
+  //   ⚠ ご報告:「自分の画面を見せる、⚠ **1回目で顧客側にビュアーが出ない。
+  //     2回目で出る**」。音声通話の承諾もまったく同じ形だった。
+  //   ★親（窓を作った側）から `show()` + `focus()` は既にしている。
+  //     ⚠ ところが Windows は、⚠ **前面に居ないプログラムからの前面化を拒否**し、
+  //     タスクバーを光らせるだけにする。＝ 出したつもりで出ていない。
+  //   ⚠ `multi_window_manager.dart` にも
+  //     「show()+focus() だけでは足りない。⚠ **別途、窓の側から出す形を作る**」
+  //     と書いたまま**残していた**。ここがその宿題。
+  //   ★窓自身のプロセスなら `windowManager` が使えるので、
+  //     接続の窓（cm）で実績のある「一瞬だけ最前面に固定して、すぐ外す」が使える。
+  //   ⚠ 固定したままにしない。他の窓の上に居座って邪魔になる。
+  //   ⚠ 失敗しても何もしない。前に出せないことでサポートを止めない。
+  if (isWindows &&
+      (appType == kAppTypeDesktopRemote ||
+          appType == kAppTypeDesktopViewCamera)) {
+    Future.delayed(const Duration(milliseconds: 300), () async {
+      try {
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.setAlwaysOnTop(true);
+        await Future.delayed(const Duration(milliseconds: 600));
+        await windowManager.setAlwaysOnTop(false);
+        rlTrace('subwindow_front', {'app': appType, 'id': kWindowId});
+      } catch (e) {
+        try {
+          rlTrace('subwindow_front_failed', {'e': e.toString()});
+        } catch (_) {}
+      }
+    });
+  }
   // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
     WindowController.fromWindowId(kWindowId!).showTitleBar(true);
@@ -765,7 +798,23 @@ Future<void> forceShowCmWindow() async {
             // 画面情報が取れないときだけ、広い決め打ちに戻す
             offscreen = pos.dx < -3000 || pos.dy < -3000;
           }
-          final hidden = opacity != 1 || minimized || !visible || offscreen;
+          // 🔴🔴 **「出ている」と「押せる」は別**（2026-09-04 ご報告で判明）。
+          //
+          //   ⚠ ご報告:「音声通話の承諾が、⚠ **2回目で操作できた**」。
+          //   ⚠ 記録では1回目も2回目も
+          //       opacity:1.0 min:false vis:true off:false
+          //     と⚠ **まったく同じ**。＝ アプリから見える範囲では違いが無い。
+          //   ★残るのは Windows 側の話で、⚠ **窓が前面に来ていない**こと。
+          //     Windows は、裏の処理が勝手に前面を奪うのを止める仕組みを持つ。
+          //     ⚠ そのとき窓は**見えているのに、最初のひと押しが
+          //     「窓を選ぶ」だけで消える**。＝ 2回目で押せる、の正体。
+          //   ★測って残す。次に外したときに、また当てずっぽうをしないため。
+          var focused = true;
+          try {
+            focused = await windowManager.isFocused();
+          } catch (_) {}
+          final hidden =
+              opacity != 1 || minimized || !visible || offscreen || !focused;
           try {
             rlTrace('cm_force_recheck', {
               'gen': gen,
@@ -773,6 +822,7 @@ Future<void> forceShowCmWindow() async {
               'opacity': opacity,
               'min': minimized,
               'vis': visible,
+              'focus': focused,
               'x': pos.dx.round(),
               'y': pos.dy.round(),
               'off': offscreen,

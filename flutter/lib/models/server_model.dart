@@ -1100,10 +1100,35 @@ class ServerModel with ChangeNotifier {
             //     出した直後にタスクバーへ落ちる（実測で確認済みの形）。
             //   ★札を立てて、⚠ **相談員が遠隔で「受ける」を押せる状態を保つ。**
             cmKeepVisible = true;
-            Future.delayed(Duration.zero, () {
+            Future.delayed(Duration.zero, () async {
+              // 🔴🔴 **呼び出し中は窓を高くする**（2026-09-04 ご報告）。
+              //
+              //   ⚠ お客様の窓は 300×490 と小さい。呼び出しが来ると
+              //     「承諾／拒否」の行が増えるので、⚠ **下がはみ出して
+              //     押せなくなる**恐れがある（同じ症状を過去に2回出している）。
+              //   ★鳴っている間だけ高くする。⚠ 幅は変えない
+              //     （お客様が広げた幅を勝手に戻さない）。
+              //   ⚠ 失敗しても先へ進む。ここで止めると窓そのものが出ない。
+              try {
+                final sz = await windowManager.getSize();
+                if (sz.height < 620) {
+                  await windowManager.setSize(Size(sz.width, 620));
+                }
+              } catch (_) {}
               // ⚠ 受ける釦はこの窓の中にしかない。確実に出す方を使う。
               rlTrace('voice_call_show_cm');
-              forceShowCmWindow();
+              await forceShowCmWindow();
+              // 🔴 **もう一度だけ前面を取り直す**（2026-09-04 ご報告
+              //   「顧客は2回目で操作できた」）。
+              //   ⚠ 窓は出ているのに、⚠ **最初のひと押しが「窓を選ぶ」だけで
+              //     消えている**疑いが強い（Windows が前面の奪取を止める仕組み）。
+              //   ★出した直後は他の処理が続いているので、少し置いてから取り直す。
+              await Future.delayed(const Duration(milliseconds: 400));
+              try {
+                await windowManager.show();
+                await windowManager.focus();
+                windowOnTop(null);
+              } catch (_) {}
             });
           }
         }
