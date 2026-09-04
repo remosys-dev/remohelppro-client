@@ -622,7 +622,28 @@ Future<List<TToggleMenu>> toolbarCursor(
   final sessionId = ffi.sessionId;
 
   // show remote cursor
-  if (pi.platform != kPeerPlatformAndroid &&
+  // 🔴🔴 **「リモートコンピューターのカーソルを表示する」は出さない**
+  //   （2026-09-04 社長のご判断）。
+  //
+  //   ⚠ ご報告:「チェックしても外しても同じ。何の機能か分からない」。
+  //     ⚠ **そのとおりで、当社の使い方では一度も効いていない。**
+  //   ★理由（お客様側 `server/connection.rs` で確認）:
+  //       subscribe(カーソル, 相談員が操作できる || この設定)
+  //     ⚠ 相談員が操作できる状態では、⚠ **設定に関係なく必ず送られる**。
+  //     しかもこの釦は `enabled = !viewOnly` で、⚠ **効くはずの
+  //     「見るだけ」のときに限って灰色で押せない**。＝ 完全に空振り。
+  //   ⚠ 押しても何も変わらない項目は、迷いの元にしかならない。
+  //
+  //   ⚠ 社長のご要望「相談員のマウスの動きをお客様に見せない」は、
+  //     ⚠ **この設定とは向きが逆**（これはお客様のカーソルを相談員に見せる物）。
+  //     しかも Windows は⚠ **1つの画面にカーソルが1つ**しかないため、
+  //     動かしながら見せない、は原理的にできない。
+  //     ★同じ目的は既にある2つで達成できる:
+  //       ・画面共有（見るだけ）… そもそも相談員は動かさない
+  //       ・プライバシーモード … 画面ごと真っ暗にする
+  //   ⚠ 戻すときは、この `false &&` を消すだけ。処理は消していない。
+  if (false && // ignore: dead_code
+      pi.platform != kPeerPlatformAndroid &&
       !ffi.canvasModel.cursorEmbedded &&
       !pi.isWayland) {
     final state = ShowRemoteCursorState.find(id);

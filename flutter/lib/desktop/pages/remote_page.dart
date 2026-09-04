@@ -766,13 +766,28 @@ class _ImagePaintState extends State<ImagePaint> {
           double getCursorScale() {
             var c = Provider.of<CanvasModel>(context);
             var cursorScale = 1.0;
+            // 🔴🔴 **意味を逆にした**（2026-09-04 社長のご指摘）。
+            //
+            //   ⚠ ご報告:「カーソルを拡大するにチェックすると**普通**の大きさ、
+            //     外すと**大きい**。私の認識と反対です」。⚠ **そのとおりでした。**
+            //   ★元の作り（upstream の "Zoom cursor"）はこうだった:
+            //     ・チェックなし … カーソルを**実寸**で描く。画面は縮めて
+            //       表示しているので、⚠ **カーソルだけ大きく浮く**
+            //     ・チェックあり … 画面と同じ倍率で縮む＝**普通に見える**
+            //   ⚠ 英語の "Zoom cursor" は「画面と一緒に拡大縮小する」の意味だが、
+            //     日本語の「拡大する」では⚠ **反対に読める**。
+            //     ＝ 名前が悪いのではなく、⚠ **既定と向きが人の期待と逆**だった。
+            //   ★直し方：既定を「画面に合わせる（＝普通の大きさ）」にし、
+            //     チェックしたときだけ実寸（＝大きく見える）にする。
+            //     これで名前どおりの動きになる。
+            //   ⚠ 戻すときは、下の2つの `!` を外すだけ。
+            final wantNativeSize = zoomCursor.value; // チェック＝実寸＝大きく見える
             if (isWindows) {
-              // debug win10
-              if (zoomCursor.value && isViewAdaptive()) {
+              if (!wantNativeSize && isViewAdaptive()) {
                 cursorScale = s * c.devicePixelRatio;
               }
             } else {
-              if (zoomCursor.value || isViewOriginal()) {
+              if (!wantNativeSize || isViewOriginal()) {
                 cursorScale = s;
               }
             }
