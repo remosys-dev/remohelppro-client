@@ -271,7 +271,27 @@ class ResumeResult {
   final String onetimeToken;
   final String shortId;
   final String? customerToken;
-  const ResumeResult(this.onetimeToken, this.shortId, this.customerToken);
+
+  /// 🔴🔴 **誰が繋がっているか**（2026-09-04 社長のご指摘）。
+  ///
+  ///   ⚠ ご指摘:「再起動後接続のあと、顧客プログラムに相談員の情報が出ない。
+  ///     `lim`（PC名）だけ」。⚠ **そのとおりだった。**
+  ///   ★会社名・電話番号は `verify-pin` の返事にしか入っていない。
+  ///     ⚠ 再起動をまたぐとコードを入れ直さない作りなので、
+  ///     ⚠ **二度と受け取る機会が無く、画面から消えたままになる。**
+  ///   ⚠ 消えるのは⚠ **いちばん不安な瞬間**（再起動直後に、誰かが
+  ///     自分のPCに入っている状態）。そこで相手が分からないのは良くない。
+  ///   ⚠ 中身は verify-pin と同じ形。番号が無ければ null（社名だけは出さない）。
+  final Map? supportContact;
+  final String? operatorName;
+
+  const ResumeResult(
+    this.onetimeToken,
+    this.shortId,
+    this.customerToken, {
+    this.supportContact,
+    this.operatorName,
+  });
 }
 
 /// `reg` を**黒い窓を出さずに**実行する（2026-08-27）。
@@ -362,7 +382,14 @@ Future<ResumeResult?> tryResume({
     final ot = j['onetimeToken'] as String?;
     final sid = j['shortId'] as String?;
     if (ot == null || ot.isEmpty || sid == null || sid.isEmpty) return null;
-    return ResumeResult(ot, sid, j['customerToken'] as String?);
+    final op = j['operator'];
+    return ResumeResult(
+      ot,
+      sid,
+      j['customerToken'] as String?,
+      supportContact: j['supportContact'] is Map ? j['supportContact'] as Map : null,
+      operatorName: op is Map ? op['name'] as String? : null,
+    );
   } catch (_) {
     // 通信できなかった。合言葉は残す（次の起動でもう一度試せる）。
     return null;

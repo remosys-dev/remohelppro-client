@@ -453,6 +453,20 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       if (res.customerToken != null && res.customerToken!.isNotEmpty) {
         _custToken = res.customerToken;
       }
+      // 🔴🔴 **誰が繋がっているかを、画面に戻す**（2026-09-04 社長のご指摘）。
+      //
+      //   ⚠ ご指摘:「再起動後接続のあと、相談員の情報が出ない。PC名だけ」。
+      //     ⚠ **そのとおりだった。** 会社名・電話番号は `verify-pin` の返事に
+      //     しか入っておらず、⚠ 再起動をまたぐとコードを入れ直さない作りなので、
+      //     ⚠ **二度と受け取る機会が無く、消えたままになっていた。**
+      //   ⚠ しかも消えるのは⚠ **いちばん不安な瞬間**（再起動した直後に、
+      //     誰かが自分のPCに入っている状態）。相手が分からないのは良くない。
+      //   ★復帰の返事にも同じものを載せてもらい、通常時と同じ道
+      //     （_readSupportContact）に通す。⚠ 接続の窓へ会社名を預ける処理も
+      //     この中に入っているので、⚠ **自分で代入せずここを通すこと。**
+      if (res.supportContact != null) {
+        _readSupportContact({'supportContact': res.supportContact});
+      }
       _connectedAt = DateTime.now();
       _clock?.cancel();
       _clock = Timer.periodic(const Duration(seconds: 1), (_) {
