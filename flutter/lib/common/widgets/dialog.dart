@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter_hbb/remohelppro_endpoints.dart';
 import 'dart:convert';
 
 import 'package:bot_toast/bot_toast.dart';
@@ -1417,7 +1418,7 @@ Future<bool> _rlPreparePrelogon(
         dialogManager, 'この接続からは準備を頼めませんでした。');
   }
 
-  const url = 'https://svr.remohelppro.jp/api/customer/prelogon-by-viewer';
+  const url = '$kRlApiBase/api/customer/prelogon-by-viewer';
   Future<Map?> post(Map<String, dynamic> body) async {
     try {
       final r = await http
@@ -2220,7 +2221,7 @@ Future<(String, int)> rlWatchReconnect(FFI ffi) async {
     if (id.isEmpty || token.isEmpty) return ('ended', 0);
     final res = await http
         .post(
-          Uri.parse('https://svr.remohelppro.jp/api/customer/reconnect-watch'),
+          Uri.parse('$kRlApiBase/api/customer/reconnect-watch'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'rustdeskId': id, 'token': token}),
         )
@@ -2263,7 +2264,7 @@ Future<void> notifySupportEnded(FFI ffi) async {
     // ⚠ この構成には既に http（utils/http_service.dart を as http で読み込み）がある。
     //   独自に package:http を足すと put/post の名前が衝突する。既存を使う。
     final res = await http.post(
-      Uri.parse('https://svr.remohelppro.jp/api/customer/end-by-viewer'),
+      Uri.parse('$kRlApiBase/api/customer/end-by-viewer'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'rustdeskId': id, 'token': token}),
     ).timeout(const Duration(seconds: 5));

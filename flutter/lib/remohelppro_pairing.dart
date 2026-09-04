@@ -26,7 +26,9 @@ import 'remohelppro_reconnect.dart'
         preparePrelogonResume,
         PrelogonResult;
 
-const String _kApiBase = 'https://svr.remohelppro.jp';
+// ⚠ 場所は remohelppro_endpoints.dart に集めた（2026-09-04）。
+//   ⚠ ここに直書きしないこと。散らばると切り替え忘れが必ず出る。
+const String _kApiBase = kRlApiBase;
 
 /// 相談員が居なくなってアプリが自分を終了する直前に、server_model から呼ばれる。
 ///
@@ -1219,7 +1221,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
           throw Exception(
               'このコードは「ブラウザ」でご利用ください。\n'
-              'ブラウザで svr.remohelppro.jp を開き、同じ認証コードを入力してください。\n'
+              // ⚠ ホスト名を直書きしない。切り替えたときに案内文だけ本番のまま
+              //   になる（remohelppro_endpoints.dart の説明）。
+              'ブラウザで $kRlApiHost を開き、同じ認証コードを入力してください。\n'
               '（カメラはアプリ不要でご利用いただけます）');
         }
         final isCamera = mode == 'camera';

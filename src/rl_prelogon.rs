@@ -596,8 +596,10 @@ pub fn start_watchdog(m: Marker) {
             }
 
             if let Some(c) = client.as_ref() {
+                // ⚠ 場所を直書きしない（2026-09-04）。集約先は AGENT_API_BASE。
                 let url = format!(
-                    "https://svr.remohelppro.jp/api/customer/session-status?shortId={}",
+                    "{}/api/customer/session-status?shortId={}",
+                    hbb_common::config::AGENT_API_BASE,
                     m.short_id
                 );
                 if let Ok(r) = c.get(&url).send() {

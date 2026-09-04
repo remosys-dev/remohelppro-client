@@ -33,7 +33,9 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-const String _kApiBase = 'https://svr.remohelppro.jp';
+// ⚠ 場所は remohelppro_endpoints.dart に集めた（2026-09-04）。
+//   ⚠ ここに直書きしないこと。散らばると切り替え忘れが必ず出る。
+const String _kApiBase = kRlApiBase;
 
 /// 1行の最大の長さ。長い例外文でファイルを膨らませない。
 const int _kMaxLineChars = 2000;

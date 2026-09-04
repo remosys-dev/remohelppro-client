@@ -26,8 +26,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-const VERSION_API: &str =
-    "https://svr.remohelppro.jp/api/app/version?kind=operator_exe";
+/// 当社サーバーの場所。⚠ **ここ1か所だけ**に書く（2026-09-04）。
+///   ⚠ ランチャーは hbb_common を使わない小さな実行ファイルなので、
+///     `AGENT_API_BASE` を参照できない。★同じ値をここに1つ持つ。
+///   ⚠ 試験用の版を作るときは、⚠ **ここも一緒に変えること。**
+const RL_API_BASE: &str = "https://svr.remohelppro.jp";
+
+/// ⚠ 場所は RL_API_BASE に集約（2026-09-04）。ここに直書きしないこと。
+const VERSION_API_PATH: &str = "/api/app/version?kind=operator_exe";
 /// 本体の実行ファイル名（持ち運び版）。ランチャーと同じフォルダに置く。
 const APP_EXE: &str = "remohelppro-operator.exe";
 /// 手元の版を覚えておくファイル。
@@ -154,7 +160,7 @@ fn try_update(dir: &Path) -> Result<(), String> {
     let app = dir.join(APP_EXE);
     let vfile = dir.join(VERSION_FILE);
 
-    let body = ureq::get(VERSION_API)
+    let body = ureq::get(&format!("{RL_API_BASE}{VERSION_API_PATH}"))
         .timeout(Duration::from_secs(10))
         .call()
         .map_err(|e| format!("version api: {e}"))?
@@ -175,8 +181,9 @@ fn try_update(dir: &Path) -> Result<(), String> {
     //   サーバー側の設定ミスや書き換えがあっても、別のホストからは取らない。
     //   ⚠ 前方一致で見る。`https://svr.remohelppro.jp.example.com/` のような
     //     紛らわしい名前を通さないため、区切りの `/` まで含めて比べる。
-    const ALLOWED_PREFIX: &str = "https://svr.remohelppro.jp/";
-    if !url.starts_with(ALLOWED_PREFIX) {
+    // ⚠ 場所は RL_API_BASE に集約（2026-09-04）。ここだけ本番のままにしない。
+    let allowed_prefix = format!("{RL_API_BASE}/");
+    if !url.starts_with(&allowed_prefix) {
         return Err(format!("refused update url: {url}"));
     }
 
@@ -322,7 +329,7 @@ fn notify_if_newer() {
     let Some(current) = installed_version() else {
         return; // 比べられないなら黙る
     };
-    let Ok(body) = ureq::get("https://svr.remohelppro.jp/api/app/version?kind=operator_msi")
+    let Ok(body) = ureq::get(&format!("{RL_API_BASE}/api/app/version?kind=operator_msi"))
         .timeout(Duration::from_secs(6))
         .call()
         .and_then(|r| Ok(r.into_string()?))

@@ -244,6 +244,62 @@ fn setup(
             }
         }
     }
+    // 🔴🔴 **書けたつもりで、そろっていないことがある**（2026-09-04 実顧客）。
+    //
+    //   ⚠ 実際に起きたこと: お客様の画面に
+    //       「desktop_multi_window_plugin.dll が見つからないため、
+    //         コードの実行を続行できません」
+    //     が**複数回**出た。⚠ 2回目は何事もなく繋がった。
+    //   ⚠ 上の書き出しは、書き込みが `Ok` なら成功として扱う。
+    //     ⚠ ところが**書いた直後に消える**ことがある（対策ソフトの検査・
+    //     残骸が握っていた枠の解放待ち・展開先の掃除）。
+    //     ＝ ⚠ **失敗が1件も記録されないまま、部品の無い状態で起動する。**
+    //   ★最後に「実物がそろっているか」を数える。⚠ **中身ではなく存在と大きさ**。
+    //     欠けていれば、もう一度だけ書き直す。それでも駄目なら止める。
+    //   ⚠ 止まる方がまだ良い。⚠ **壊れた起動は絶対に出さない**（1.4.98 の反省）。
+    {
+        let mut missing: Vec<String> = Vec::new();
+        for file in reader.files.iter() {
+            let lower = file.path.to_lowercase();
+            if !(lower.ends_with(".exe") || lower.ends_with(".dll")) {
+                continue; // 無くても動く物は数えない（翻訳・画像など）
+            }
+            let p = dir.join(&file.path);
+            let ok = std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false);
+            if !ok {
+                eprintln!("RL: 展開後に見当たりません {}", &file.path);
+                // ⚠ もう一度だけ書き直す。握りは数百ミリ秒で外れることが多い。
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let _ = file.write_to_file(&dir);
+                let ok2 =
+                    std::fs::metadata(&p).map(|m| m.len() > 0).unwrap_or(false);
+                if !ok2 {
+                    missing.push(file.path.clone());
+                }
+            }
+        }
+        if !missing.is_empty() {
+            let detail = format!(
+                "展開先: {}
+足りない部品 {} 件:
+{}",
+                dir.display(),
+                missing.len(),
+                missing
+                    .iter()
+                    .take(3)
+                    .map(|s| format!("  - {}", s))
+                    .collect::<Vec<_>>()
+                    .join("
+")
+            );
+            eprintln!("RL: 部品がそろっていないので中止します
+{}", detail);
+            #[cfg(windows)]
+            notify_extract_failed(&detail);
+            return None;
+        }
+    }
     if !failed.is_empty() {
         // 何件失敗したかと、最初の3件だけ伝える（全部並べても読めない）
         let detail = format!(

@@ -388,20 +388,33 @@ void runMultiWindow(
   if (isWindows &&
       (appType == kAppTypeDesktopRemote ||
           appType == kAppTypeDesktopViewCamera)) {
-    Future.delayed(const Duration(milliseconds: 300), () async {
-      try {
-        await windowManager.show();
-        await windowManager.focus();
-        await windowManager.setAlwaysOnTop(true);
-        await Future.delayed(const Duration(milliseconds: 600));
-        await windowManager.setAlwaysOnTop(false);
-        rlTrace('subwindow_front', {'app': appType, 'id': kWindowId});
-      } catch (e) {
+    // 🔴🔴 **`windowManager` は使わない**（2026-09-04 実機の結果で判明）。
+    //
+    //   ⚠ ご報告:「1回目でビュアーは出るが、⚠ **タスクバーに隠れる**」。
+    //     ＝ 窓は作られたが、⚠ **前に出す指示が効いていない。**
+    //   ★理由: ここは `desktop_multi_window` の**子窓**。
+    //     `windowManager` は⚠ **その処理の「主の窓」を指す**ので、
+    //     子窓には効かない（接続の窓(cm)は**別プロセスの主**なので効く）。
+    //     ⚠ 子窓を触れるのは `WindowController.fromWindowId(...)` の方。
+    //   ★既にある `windowOnTop(id)` を使う。あれは2つのことを同時にする:
+    //     ① `WindowController` で自分を出す（正しい相手）
+    //     ② ⚠ **主の窓に「この子窓を出して」と頼む**
+    //        Windows は「いま前面に居る窓」からの指示なら通すので、
+    //        ②が本命になりうる。
+    //   ⚠ 1回で通らないことがあるので、間を置いて3回試す
+    //     （接続の窓で実績のある形。⚠ 出ていれば害はない）。
+    for (final ms in const [300, 900, 2000]) {
+      Future.delayed(Duration(milliseconds: ms), () async {
         try {
-          rlTrace('subwindow_front_failed', {'e': e.toString()});
-        } catch (_) {}
-      }
-    });
+          await windowOnTop(kWindowId);
+          rlTrace('subwindow_front', {'app': appType, 'id': kWindowId, 'ms': ms});
+        } catch (e) {
+          try {
+            rlTrace('subwindow_front_failed', {'e': e.toString(), 'ms': ms});
+          } catch (_) {}
+        }
+      });
+    }
   }
   // we do not hide titlebar on win7 because of the frame overflow.
   if (kUseCompatibleUiMode) {
@@ -813,6 +826,21 @@ Future<void> forceShowCmWindow() async {
           try {
             focused = await windowManager.isFocused();
           } catch (_) {}
+          // 🔴🔴 **大きさも残す**（2026-09-04 実機の記録で必要と分かった）。
+          //
+          //   ⚠ 記録は opacity:1.0 / min:false / vis:true / **focus:true** /
+          //     画面内、と⚠ **すべて正常**を示していた。それでもお客様は
+          //     承諾を押せず、チャットも使えなかった。
+          //   ＝ ⚠ **「出ている」ことは分かるのに、「押せる形か」が分からない。**
+          //   ★大きさを残す。⚠ 幅か高さが 0 に近ければ、
+          //     窓は在っても⚠ **押す所が無い**。それが分かる1行にする。
+          var w = -1.0;
+          var h = -1.0;
+          try {
+            final sz = await windowManager.getSize();
+            w = sz.width;
+            h = sz.height;
+          } catch (_) {}
           final hidden =
               opacity != 1 || minimized || !visible || offscreen || !focused;
           try {
@@ -823,6 +851,8 @@ Future<void> forceShowCmWindow() async {
               'min': minimized,
               'vis': visible,
               'focus': focused,
+              'w': w.round(),
+              'h': h.round(),
               'x': pos.dx.round(),
               'y': pos.dy.round(),
               'off': offscreen,

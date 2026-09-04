@@ -10,7 +10,9 @@ import 'package:flutter_background/flutter_background.dart';
 ///   camera=false → 画面共有（RustDesk一本化後は通常使わないが、LiveKitへ戻せるよう温存）
 ///   camera=true  → カメラ配信（現地の様子を見せる。操作員はブラウザ/opで視聴）
 /// 遠隔操作(view/control)は RustDesk 経路（remohelppro_pairing.dart）。
-const String _kApiBase = 'https://svr.remohelppro.jp';
+// ⚠ 場所は remohelppro_endpoints.dart に集めた（2026-09-04）。
+//   ⚠ ここに直書きしないこと。散らばると切り替え忘れが必ず出る。
+const String _kApiBase = kRlApiBase;
 
 class RemohelpproLiveKitScreen extends StatefulWidget {
   final String shortId;

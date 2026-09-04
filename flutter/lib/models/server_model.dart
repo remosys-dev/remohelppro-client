@@ -1109,12 +1109,21 @@ class ServerModel with ChangeNotifier {
               //   ★鳴っている間だけ高くする。⚠ 幅は変えない
               //     （お客様が広げた幅を勝手に戻さない）。
               //   ⚠ 失敗しても先へ進む。ここで止めると窓そのものが出ない。
-              try {
-                final sz = await windowManager.getSize();
-                if (sz.height < 620) {
-                  await windowManager.setSize(Size(sz.width, 620));
-                }
-              } catch (_) {}
+              // 🔴🔴 **窓の大きさは触らない**（2026-09-04 実機の結果で外した）。
+              //
+              //   ⚠ ここで一度、こう書いた:
+              //       final sz = await windowManager.getSize();
+              //       await windowManager.setSize(Size(sz.width, 620));
+              //     ⚠ 結果、ご報告は「**両方でできない**」に**悪化**した。
+              //     （それまでは「顧客は2回目でできた」）
+              //   ★疑い: 隠れている窓の `getSize()` は当てにならない。
+              //     ⚠ 幅が 0 で返れば `setSize(0, 620)` となり、
+              //     ⚠ **押す所の無い窓**ができる。記録上は「表示中」のまま。
+              //   ⚠ そもそも「はみ出している」という推測に確証が無かった。
+              //     記録では窓は画面内に収まっていた。★測っていないものを
+              //     直そうとして、動いていたものを壊した。
+              //   ⚠ 大きさを変えたいときは、⚠ **測った値を使わず**
+              //     決まった大きさ（kConnectionManagerWindowSize…）から作ること。
               // ⚠ 受ける釦はこの窓の中にしかない。確実に出す方を使う。
               rlTrace('voice_call_show_cm');
               await forceShowCmWindow();

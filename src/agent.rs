@@ -605,7 +605,9 @@ mod imp {
     }
 
     async fn self_update(url: &str) -> Result<(), String> {
-        if !url.starts_with("https://svr.remohelppro.jp/") {
+        // ⚠ 場所を直書きしない（2026-09-04）。集約先は config::AGENT_API_BASE。
+        //   ⚠ ここだけ本番のままだと、試験用の版が自己更新できなくなる。
+        if !url.starts_with(&format!("{}/", config::AGENT_API_BASE)) {
             return Err(format!("入手先が当社のものではありません: {url}"));
         }
         let client = http().await;

@@ -36,7 +36,9 @@ import 'models/model.dart';
 import 'models/platform_model.dart';
 import 'remohelppro_trace.dart' show rlTrace;
 
-const String _kApiBase = 'https://svr.remohelppro.jp';
+// ⚠ 場所は remohelppro_endpoints.dart に集めた（2026-09-04）。
+//   ⚠ ここに直書きしないこと。散らばると切り替え忘れが必ず出る。
+const String _kApiBase = kRlApiBase;
 
 /// 送る画像の長辺の上限。
 ///

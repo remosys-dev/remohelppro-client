@@ -12,13 +12,14 @@
 //   遠隔が終わるとここに戻ってくるので、次の1台へ進む入口でもある。
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/remohelppro_endpoints.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../common.dart';
 import 'home_page.dart';
 
 /// 相談員画面（この一覧の「▶ 接続」からアプリが起動する）。
-const String kRlOperatorConsoleUrl = 'https://svr.remohelppro.jp/op/devices';
+const String kRlOperatorConsoleUrl = '$kRlApiBase/op/devices';
 
 class RlOperatorHomePage extends StatelessWidget implements PageShape {
   const RlOperatorHomePage({Key? key}) : super(key: key);
