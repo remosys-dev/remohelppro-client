@@ -112,6 +112,33 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
+  /// 🔴🔴 **いまの版を、押さずに読めるようにする**（2026-09-04 社長のご指示）。
+  ///
+  ///   ⚠ 版はこれまで「このアプリについて」を**押さないと**見えなかった。
+  ///     その結果、今日1日で何度も
+  ///     ⚠ 「直したはずなのに直っていない」→ **実は古い版のままだった**
+  ///     が起き、そのたびに社長にファイルの日付を見ていただいていた。
+  ///   ★電話口で「右下（左下）の数字を教えてください」と言える形にする。
+  ///
+  ///   ⚠ 3製品（顧客・常駐・相談員）で**同じ部品**を使う。
+  ///     別々に書くと、必ずどれかが古いままになる
+  ///     （同じ間違いを何度もしている）。
+  ///   ⚠ 取れないうちは**何も出さない**。`Instance of 'Future<String>'` を
+  ///     画面に出した事故があるので、必ず待ってから出す。
+  static Widget buildVersionLabel({double fontSize = 11}) {
+    return FutureBuilder<String>(
+      future: bind.mainGetVersion(),
+      builder: (_, snap) {
+        final v = (snap.data ?? '').trim();
+        if (v.isEmpty) return const SizedBox.shrink();
+        return Text(
+          'v$v',
+          style: TextStyle(fontSize: fontSize, color: const Color(0xFF98A2B3)),
+        );
+      },
+    );
+  }
+
   /// 改変の表示とライセンス本文の場所。
   /// ⚠ URL を変えないこと。ここが唯一の「本文を渡す」経路になっている。
   void _showAboutDialog(BuildContext context) {
@@ -222,7 +249,15 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           //   ⚠ 別の画面へ飛ばさない。窓が開いて閉じるだけなので、
           //     サポート中のお客様が迷子にならない。
           //   ⚠ 表示を消さないこと。消すとライセンス違反になる。
-          _buildAboutLink(context),
+          // ⚠ 版は**押さずに読めるように**、この一言の隣に出す（2026-09-04）。
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildAboutLink(context),
+              _DesktopHomePageState.buildVersionLabel(),
+            ],
+          ),
           const SizedBox(height: 14),
         ],
       ),
@@ -375,6 +410,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         },
       ),
       buildPluginEntry(),
+      // ⚠ 相談員版・常駐版にも、いまの版を出す（2026-09-04 社長のご指示）。
+      //   ⚠ ここは顧客版とは別の画面なので、⚠ **足し忘れると片方だけ出ない**。
+      //   ★出す部品は同じ（buildVersionLabel）。文字と色を揃える。
+      Center(child: buildVersionLabel()).marginOnly(top: 6, bottom: 4),
     ];
     if (isIncomingOnly) {
       children.addAll([
