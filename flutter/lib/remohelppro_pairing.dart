@@ -772,6 +772,38 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     return File('$base/REMOHELP PRO/end-requested');
   }
 
+  /// お客様が「担当者に伝える」を押したときの合図（2026-09-04）。
+  ///
+  /// ⚠ 接続の窓は**別プロセス**なので、変数では届かない。
+  ///   「終了して」の合図とまったく同じ形・同じ置き場にする。
+  ///   ⚠ 形を変えると、片方だけ直したときに気づけない。
+  File _showChatRequestFile() {
+    final base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+    return File('$base/REMOHELP PRO/show-chat-requested');
+  }
+
+  /// 「担当者に伝える」。⚠ 接続の窓を出して、チャット欄を開いてもらう。
+  ///
+  /// ⚠ 押しても何も起きない、を避ける。⚠ **押した手応え**を必ず出す。
+  ///   合図を置くだけなので、窓が出るまでに一呼吸ある。
+  void _askShowChat() {
+    try {
+      final f = _showChatRequestFile();
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(DateTime.now().toIso8601String());
+      rlTrace('customer_ask_chat');
+    } catch (e) {
+      rlTrace('customer_ask_chat_failed', {'e': e.toString()});
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('担当者との文字のやりとりを開きます'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   void _clearEndRequest() {
     try {
       final f = _endRequestFile();
@@ -2268,6 +2300,20 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
               RemohelpproResidentCard(
                   apiBase: _kApiBase, shortId: _shortId!, custToken: _custToken),
             const SizedBox(height: 16),
+            // 🔴🔴 **お客様から担当者へ伝える道**（2026-09-04 社長のご指摘）。
+            //
+            //   ⚠ ご指摘:「ワンタイムで、お客様から先にチャットができない」。
+            //     ⚠ **そのとおりだった。** 相談員から送れば窓は出るが（1.4.113）、
+            //     お客様の側には⚠ **チャットを開く手段が1つも無かった。**
+            //   ⚠ 文言を「チャット」にしない。ご高齢のお客様に伝わらない。
+            //     ★「担当者に伝える」。何をする釦かがそのまま読める。
+            //   ⚠ 「終了する」より**目立たせない**（押し間違いを避ける）。
+            //   ★接続の窓は**別プロセス**なので、変数では届かない。
+            //     「終了して」と同じ形で、⚠ **合図のファイル**を置く。
+            _outlineButton('担当者に伝える', Icons.chat_bubble_outline,
+                _askShowChat,
+                color: _accentDeep, border: const Color(0xFFBFE3F0)),
+            const SizedBox(height: 8),
             _outlineButton('終了する', Icons.stop_circle_outlined, _endByCustomer,
                 color: _danger, border: const Color(0xFFF3C9C9)),
             const SizedBox(height: 8),

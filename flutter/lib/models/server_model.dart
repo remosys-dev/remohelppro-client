@@ -198,6 +198,16 @@ class ServerModel with ChangeNotifier {
       }
 
       if (desktopType == DesktopType.cm) {
+        // 🔴🔴 **お客様から「担当者に伝える」が押されたか**（2026-09-04）。
+        //
+        //   ⚠ ご指摘:「ワンタイムで、お客様から先にチャットができない」。
+        //     相談員から送れば窓は出るが、⚠ **お客様には開く手段が無かった。**
+        //   ★本体（別プロセス）が置いた合図を、ここで拾う。
+        //     ⚠ 「終了して」の合図とまったく同じ形にしてある。
+        //   ⚠ 拾ったら**必ず消す**。消さないと毎秒開き直して窓が震える。
+        //   ⚠ 相手が居ないときは何もしない（開いても送れない）。
+        if (_clients.isNotEmpty) _consumeShowChatRequest();
+
         final res = await bind.cmCheckClientsLength(length: _clients.length);
         if (res != null) {
           debugPrint("clients not match!");
@@ -1037,6 +1047,38 @@ class ServerModel with ChangeNotifier {
     _clients.clear();
     tabController.state.value.tabs.clear();
     if (isAndroid) androidUpdatekeepScreenOn();
+  }
+
+  /// お客様が本体の画面で「担当者に伝える」を押したときの合図を拾う。
+  ///
+  /// ⚠ 合図の置き場は本体側（remohelppro_pairing.dart）と**同じ文字列**。
+  ///   ⚠ 片方だけ変えると、押しても何も起きない状態になる。
+  /// ⚠ 拾ったら**必ず消す**。残すと毎秒開き直して窓が震える。
+  /// ⚠ 何があっても投げない。合図の仕組みでサポートを止めない。
+  void _consumeShowChatRequest() {
+    try {
+      final base =
+          Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+      final f = File('$base/REMOHELP PRO/show-chat-requested');
+      if (!f.existsSync()) return;
+      f.deleteSync();
+      rlTrace('cm_show_chat_by_customer');
+      // ⚠ 引っ込めさせない札を立ててから出す。札が無いと毎秒の見張りに
+      //   引っ込められる（チャット受信で実際に起きた形）。
+      cmKeepVisible = true;
+      final client = _clients.first;
+      Future.delayed(Duration.zero, () async {
+        await forceShowCmWindow();
+        // ⚠ 窓を出すだけでは、お客様は**どこに書くのか分からない**。
+        //   相談員から届いたときと同じ道を通してチャット欄まで開く。
+        try {
+          await parent.target?.chatModel
+              .showChatPage(MessageKey(client.peerId, client.id));
+        } catch (_) {}
+      });
+    } catch (_) {
+      // ⚠ 読めなくても何もしない。次の1秒で拾い直す。
+    }
   }
 
   void jumpTo(int id) {

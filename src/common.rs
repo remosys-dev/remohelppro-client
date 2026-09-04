@@ -1247,7 +1247,19 @@ pub fn rl_allowed_features() -> serde_json::Value {
         "switch_sides": allow("rl-allow-switch-sides"),
         "reboot_resume": allow("rl-allow-reboot-resume"),
         "privacy_mode": allow("rl-allow-privacy-mode"),
-        "voice_call": allow("rl-allow-voice-call"),
+        // 🔴🔴 **常駐では音声通話を出さない**（2026-09-04 社長のご判断）。
+        //
+        //   ⚠ 常駐は「無人の業務用PCを保守する」ための製品。
+        //     ⚠ **承諾を押す人が、そこに居ない。**
+        //     承諾はお客様側の窓の中にしかないので、⚠ **通話は始まりようがない。**
+        //   ⚠ 相談員が遠隔で承諾を押せるようにする工夫も入れていたが、
+        //     それが今日の不具合の温床になった（窓を出す・引っ込めさせない・
+        //     前に出す…と積み重なった）。★無人の製品では、その工夫ごと要らない。
+        //   ★出さないので、押せない機能が menu に並ぶこともない。
+        //   ⚠ ワンタイム版（お客様が目の前にいる）は今までどおり。
+        //     ⚠ 会社ごとの設定で止められる形も残す（両方が効く）。
+        "voice_call": !hbb_common::config::IS_RESIDENT_BUILD
+            && allow("rl-allow-voice-call"),
         "ctrl_alt_del": allow("rl-allow-ctrl-alt-del"),
         "block_input": allow("rl-allow-block-input"),
     })
