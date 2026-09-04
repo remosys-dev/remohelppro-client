@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'remohelppro_endpoints.dart';
 import 'dart:convert';
 // Process / ProcessStartMode は Mac の自己削除で使う（自分を消す後始末を切り離して走らせる）。
 import 'dart:io' show Platform, File, Directory, exit, Process, ProcessStartMode;
