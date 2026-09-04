@@ -672,6 +672,11 @@ mod imp {
                 ("voiceCall", "rl-allow-voice-call"),
                 ("ctrlAltDel", "rl-allow-ctrl-alt-del"),
                 ("blockInput", "rl-allow-block-input"),
+                // 🔴 お客様が「終了する」を押せるか（2026-09-04 ご指示）。
+                //   ⚠ 既定は**出す**（アプリ側は `N` のときだけ隠す）。
+                //     受け取れなかっただけで釦が消えると、
+                //     ⚠ **お客様が止める手段を失う**。安全側に倒す。
+                ("residentEnd", "rl-allow-resident-end"),
             ] {
                 if let Some(b) = f.get(from).and_then(Value::as_bool) {
                     hbb_common::config::LocalConfig::set_option(

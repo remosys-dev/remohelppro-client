@@ -1,6 +1,7 @@
 // original cm window in Sciter version.
 
 import 'dart:async';
+import 'package:flutter_hbb/remohelppro_trace.dart' show rlTrace;
 // 顧客版の「切断」で、本体へ終了の合図を置くのに使う。
 import 'dart:io' show Directory, File, Platform;
 import 'package:flutter_hbb/rl_support.dart' show kRlSupportShowWindow;
@@ -1248,6 +1249,36 @@ class _CmControlPanel extends StatelessWidget {
             textColor: Colors.white,
           ),
         ),
+        // 🔴🔴 **常駐にも「終了する」を出す**（2026-09-04 社長のご判断・A案）。
+        //
+        //   ⚠ ご指摘:「常駐って顧客が終了する方法がないのね」。⚠ **そのとおりだった。**
+        //   ⚠ それまでの考えは「常駐は無人の保守なので、勝手に切られると困る」。
+        //     ★しかし⚠ **常駐PCの前に人が座っていることは実際にある**。
+        //       ・見られたくない画面を開いている
+        //       ・知らない誰かが操作していると感じる
+        //     ⚠ そのとき止める手段が1つも無いのは、お客様の安心の面で弱い。
+        //   ★出す。⚠ ただし**押し間違いを防ぐ確認**を必ず挟む
+        //     （夜間の無人保守を、通りすがりに止められては困る）。
+        //   ⚠ ワンタイムは本体の画面に「終了する」があるので、ここでは出さない。
+        //     ＝ ⚠ **止める釦が2つある状態を作らない**（迷いの元）。
+        // ⚠ 会社が「出さない」を選べる（2026-09-04 ご指示）。
+        //   ★既定は**出す**。⚠ 安全側に倒す。
+        //     受け取れなかっただけで釦が消えると、⚠ **止める手段が無い状態**に戻る。
+        //   ⚠ 明示的に `N` が入っているときだけ隠す（他の許可と同じ考え）。
+        if (rlIsResidentBuild() && _residentEndAllowed())
+          Row(
+            children: [
+              Expanded(
+                child: buildButton(context,
+                    color: const Color(0xFFB91C1C),
+                    onClick: () => _confirmEndResident(context),
+                    text: '終了する',
+                    icon: const Icon(Icons.stop_circle_outlined,
+                        color: Colors.white, size: 14),
+                    textColor: Colors.white),
+              ),
+            ],
+          ),
         // 🔴 「切断」は出さない（2026-09-01 ご判断）。
         //   ⚠ 止める釦が2つあるとお客様が迷う。しかも働きが違う:
         //     切断     … 接続を切るだけ
@@ -1425,6 +1456,58 @@ class _CmControlPanel extends StatelessWidget {
               )
             : btn)
         .marginAll(4);
+  }
+
+  /// お客様に「終了する」を出してよいか（2026-09-04 ご指示）。
+  ///
+  /// ⚠ **既定は出す。** 設定が届いていない・古い版のときに釦が消えると、
+  ///   ⚠ **お客様が止める手段を失う**（いちばん避けたい形）。
+  /// ⚠ 明示的に `N` が入っているときだけ隠す。他の許可と同じ考え。
+  bool _residentEndAllowed() {
+    try {
+      return bind.mainGetLocalOption(key: 'rl-allow-resident-end').trim() != 'N';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// 🔴 常駐で「終了する」を押したときの確認（2026-09-04 社長のご指示）。
+  ///
+  /// ⚠ **押し間違いを防ぐ**のが目的。⚠ 夜間の無人保守を、
+  ///   通りすがりの人が一押しで止められては困る。
+  /// ⚠ 既定は「キャンセル」側にする（うっかり Enter で終わらせない）。
+  /// ⚠ 文言で「担当者にひとこと」を促す。⚠ 黙って切られると、
+  ///   相談員は原因が分からないまま作業が消える。
+  Future<void> _confirmEndResident(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('遠隔サポートを終了しますか？',
+            style: TextStyle(fontSize: 16)),
+        content: const Text(
+          '担当者との接続が切れます。\n'
+          '作業中の場合は、担当者にひとこと伝えてからにしてください。',
+          style: TextStyle(fontSize: 13.5, height: 1.7),
+        ),
+        actions: [
+          // ⚠ キャンセルを左（既定）に置く。★危ない方を押しやすくしない。
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFB91C1C)),
+            child: const Text('終了する'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    // ⚠ 誰が止めたかを残す。⚠ 会社管理者が後から確かめられるように。
+    rlTrace('resident_end_by_customer');
+    await handleDisconnect();
   }
 
   Future<void> handleDisconnect() async {
