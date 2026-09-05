@@ -49,6 +49,23 @@ class MainFlutterWindow: NSWindow {
         RegisterGeneratedPlugins(registry: flutterViewController)
 
         FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+            // 🔴🔴 **Mac で全画面にならない**（2026-09-05 社長のご報告）。
+            //
+            //   遠隔操作の画面は、本体とは**別の窓**（desktop_multi_window）で開く。
+            //   その窓は次の形で作られている（パッケージ側・当社では触れない）:
+            //     styleMask: [.miniaturizable, .closable, .resizable, .titled,
+            //                 .fullSizeContentView]
+            //   ⚠ ここに **collectionBehavior の指定が無い**。
+            //   ⚠ macOS は `.fullScreenPrimary` が入っていない窓に対して、
+            //     ⚠ **`toggleFullScreen` を黙って無視する**（エラーも出ない）。
+            //     ＝ 全画面ボタンを押しても、何も起きないように見える。
+            //   ★窓が作られた合図はここで受け取れるので、当社側から足す。
+            //     ⚠ パッケージは上流の git 依存なので、こちらで直すのが正しい。
+            //   ⚠ 本体の窓（MainFlutterWindow）は storyboard 由来で元から全画面可。
+            //     ⚠ **効かないのは別窓だけ**なので、ここだけで足りる。
+            DispatchQueue.main.async {
+                controller.view.window?.collectionBehavior.insert(.fullScreenPrimary)
+            }
             // Register the plugin which you want access from other isolate.
             // DesktopLifecyclePlugin.register(with: controller.registrar(forPlugin: "DesktopLifecyclePlugin"))
             // Note: copy below from above RegisterGeneratedPlugins
