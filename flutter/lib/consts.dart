@@ -38,6 +38,14 @@ const String kPlatformAdditionsRlFeatures = "rl_features";
 const String kPlatformAdditionsSupportedPrivacyModeImpl =
     "supported_privacy_mode_impl";
 
+/// 当社方式のプライバシーモードの印（`src/privacy_mode.rs` の
+/// `PRIVACY_MODE_IMPL_RL_BLACK` と**同じ文字列**にすること）。
+///
+/// ⚠ 本家の方式は「1枚の画面しか隠せない」。当社方式は仮想スクリーン全体
+///   （＝全部の画面）をまとめて覆う（`src/privacy_mode/rl_black_screen.rs`）。
+///   この違いで、画面の選び直しを禁じるかどうかが変わる。
+const String kPrivacyModeImplRlBlack = "privacy_mode_impl_rl_black";
+
 const String kPeerPlatformWindows = "Windows";
 const String kPeerPlatformLinux = "Linux";
 const String kPeerPlatformMacOS = "Mac OS";

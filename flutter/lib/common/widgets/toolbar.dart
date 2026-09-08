@@ -17,8 +17,43 @@ bool isEditOsPassword = false;
 
 // macOS privacy mode blacks out all online displays, so switching the remote
 // display does not weaken the local privacy protection.
+//
+// 🔴🔴 **画面が複数あるPCでプライバシーモードが使えなかった**
+//   （2026-09-08 社長のご指摘「マルチモニターに出ないのね」）。
+//
+//   ⚠ ここが false だと、下の `toolbarPrivacyMode` は
+//     「見ている画面が画面1でも全画面でもない」ときに
+//     ⚠ **黒くせずに帰り**、英語の小窓 "Please switch to Display 1 first"
+//     を出すだけになる（`src/lang/` に訳が無く英語のまま出る）。
+//   ⚠ さらに悪いことに、繋いだ直後の「見ている画面」の番号は
+//     ⚠ **お客様の主画面の番号**（`src/server/connection.rs` の
+//     `display_idx: *display_service::PRIMARY_DISPLAY_IDX`）。
+//     ★主画面を2枚目にしているPCでは番号が 0 にならないので、
+//       ⚠ **相談員が何も選び直していなくても最初から必ず弾かれる。**
+//
+//   ★この制限は本家 RustDesk の名残。本家の方式は1枚しか隠せないので、
+//     画面を切り替えられると隠していない画面が見えてしまう。
+//     ⚠ **当社方式は仮想スクリーン全体を覆う**ので、この制限は要らない
+//     （`src/privacy_mode/rl_black_screen.rs` の `virtual_screen()`＝
+//       `SM_CXVIRTUALSCREEN`。窓を出すたびに範囲を取り直すので、
+//       お客様が画面を増やしても隙間ができない）。
+//
+//   ⚠ **古い版のお客様には制限を残す**こと。古い版は本家の方式
+//     （`privacy_mode_impl_mag` など）を申告してくる。そちらで緩めると
+//     ⚠ 1枚しか隠れていないのに「全部隠れている」と誤解する。
 bool allowDisplaySwitchInPrivacyMode(PeerInfo pi) {
-  return pi.platform == kPeerPlatformMacOS;
+  if (pi.platform == kPeerPlatformMacOS) return true;
+  // お客様が申告してきた方式が**当社方式だけ**なら、画面の選び直しを許す。
+  // ⚠ 「当社方式が含まれるか」ではなく「他の方式が無いか」で見る。
+  //   本家の方式が1つでも混ざっていたら、そちらが使われうるため。
+  try {
+    final impls = pi.platformAdditions[kPlatformAdditionsSupportedPrivacyModeImpl];
+    if (impls is List && impls.isNotEmpty) {
+      return impls.every((e) =>
+          e is List && e.isNotEmpty && e[0] == kPrivacyModeImplRlBlack);
+    }
+  } catch (_) {}
+  return false;
 }
 
 class TTextMenu {
