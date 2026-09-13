@@ -3513,20 +3513,80 @@ impl Connection {
                                  中継サーバーに登録されている番号と違う）",
                                 self.lr.my_id
                             );
-                            let spawned = crate::run_me(vec![
+                            // 🔴🔴 **SYSTEM で動いているなら、お客様の画面で起動する**（2026-09-13 実測）。
+                            //
+                            //   ⚠ 再起動再接続のあとは、接続を受けているのがログオン前から動く
+                            //     一時サービス（SYSTEM）になる。ここで `run_me` を使うと、
+                            //     ビュアーは**SYSTEM の見えない場所で起動**し、お客様の画面には
+                            //     何も出ない（相談員PCにも繋ぎに来ない）。
+                            //     新しい接続では本人の権限で動くので成功していた＝「再接続の後だけ出来ない」。
+                            //   ★接続の窓（Start cm）と同じく `run_as_user` で**いまのセッション**に起動する。
+                            //   ⚠ 誰もログインしていない（ログオン画面）ときは起動できないので、
+                            //     元の起動に戻す（動きを変えない）。
+                            let switch_uuid = uuid.to_string();
+                            let switch_args = vec![
                                 "--connect",
-                                &self.lr.my_id,
+                                self.lr.my_id.as_str(),
                                 "--switch_uuid",
-                                uuid.to_string().as_ref(),
-                            ]);
+                                switch_uuid.as_str(),
+                            ];
+                            // ⚠ SYSTEM からの起動は、成功しても子プロセスを返さない（Ok(None)）。
+                            //   「子が無い＝失敗」と読むと**二重に起動する**ので、Ok なら成功とする。
+                            //   ⚠ 相談員版・常駐版は今の起動で成功している（戻す側の実績あり）ので変えない。
+                            //     お客様用（ワンタイム）だけに効かせる。
+                            #[cfg(windows)]
+                            let spawned: Result<String, String> = if crate::platform::is_root()
+                                && !hbb_common::config::IS_RESIDENT_BUILD
+                                && !hbb_common::config::IS_OPERATOR_BUILD
+                            {
+                                // ① 自分と同じセッション（ログイン中のお客様の身分で）
+                                match crate::platform::run_as_user(switch_args.clone()) {
+                                    Ok(_) => Ok("SYSTEM なので同じセッションのお客様の身分で起動".to_owned()),
+                                    Err(e1) => {
+                                        // ② いま画面を使っているセッション
+                                        //    （ログオン前から動く一時サービスが別のセッションに居る場合）
+                                        let exe = std::env::current_exe()
+                                            .ok()
+                                            .and_then(|p| p.to_str().map(|s| s.to_owned()))
+                                            .unwrap_or_default();
+                                        let sid = crate::platform::get_current_session_id(false);
+                                        log::warn!(
+                                            "switch sides: 同じセッションで起動できません（{e1}）。画面のセッション {sid} で試します"
+                                        );
+                                        match crate::platform::run_exe_in_session(
+                                            &exe,
+                                            switch_args.clone(),
+                                            sid,
+                                            false,
+                                        ) {
+                                            Ok(_) => Ok(format!("SYSTEM なので画面のセッション {sid} で起動")),
+                                            Err(e2) => {
+                                                // ③ 元の起動（動きを変えない）
+                                                log::warn!(
+                                                    "switch sides: お客様のセッションで起動できません（{e2}）。元の起動に戻します"
+                                                );
+                                                crate::run_me(switch_args.clone())
+                                                    .map(|c| format!("pid={}", c.id()))
+                                                    .map_err(|e| e.to_string())
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                crate::run_me(switch_args.clone())
+                                    .map(|c| format!("pid={}", c.id()))
+                                    .map_err(|e| e.to_string())
+                            };
+                            #[cfg(not(windows))]
+                            let spawned: Result<String, String> = crate::run_me(switch_args.clone())
+                                .map(|c| format!("pid={}", c.id()))
+                                .map_err(|e| e.to_string());
                             match &spawned {
-                                Ok(child) => log::info!(
-                                    "switch sides: 入れ替えのために自分を起動した (pid={})",
-                                    child.id()
+                                Ok(how) => log::info!(
+                                    "switch sides: 入れ替えのために自分を起動した ({how})"
                                 ),
                                 Err(e) => log::error!(
-                                    "switch sides: 自分を起動できなかった: {e}. \
-                                     お客様の画面には何も出ないため、接続は切らない"
+                                    "switch sides: 自分を起動できなかった: {e}. お客様の画面には何も出ないため、接続は切らない"
                                 ),
                             }
                             // ⚠ 起動できていないのに接続を切ると、お客様は
