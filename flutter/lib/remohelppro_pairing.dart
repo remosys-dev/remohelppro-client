@@ -11,7 +11,12 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/common.dart' show gFFI;
 import 'remohelppro_livekit.dart';
-import 'rl_support.dart' show kRlSupportShowWindow;
+import 'rl_support.dart'
+    show
+        kRlSupportShowWindow,
+        rlStartPressWatch,
+        rlPressedByCustomerHand,
+        rlShowCustomerOnlyNotice;
 import 'remohelppro_netinfo.dart' show sendNetworkInfo;
 import 'remohelppro_trace.dart'
     show rlTrace, rlTraceBind, rlTraceSetRole, rlTraceFlushNow;
@@ -831,6 +836,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     rlTraceSetRole('main');
     rlTraceBind(shortId: shortId, custToken: _custToken);
     rlTrace('poll_start');
+    // 「終了する」を人の手で押したかを見分ける見張り。押される前に立てておく。
+    rlStartPressWatch();
     _statusPoll?.cancel();
     // 接続の窓（別プロセス）から「切断」が押されたときの合図を消しておく。
     //   ⚠ 前回の合図が残っていると、繋がった直後に終わってしまう。
@@ -2314,8 +2321,16 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                 _askShowChat,
                 color: _accentDeep, border: const Color(0xFFBFE3F0)),
             const SizedBox(height: 8),
-            _outlineButton('終了する', Icons.stop_circle_outlined, _endByCustomer,
-                color: _danger, border: const Color(0xFFF3C9C9)),
+            // 🔴 お客様本人の手でだけ押せる（2026-09-13 社長のご判断）。
+            //   ⚠ 相談員の遠隔操作で押されたら終わらせず、案内だけ出す。
+            _outlineButton('終了する', Icons.stop_circle_outlined, () {
+              if (!rlPressedByCustomerHand()) {
+                rlTrace('end_blocked_remote_press');
+                rlShowCustomerOnlyNotice(context);
+                return;
+              }
+              _endByCustomer();
+            }, color: _danger, border: const Color(0xFFF3C9C9)),
             const SizedBox(height: 8),
             const Text('押すと接続を切り、それ以降は誰も操作できません',
                 textAlign: TextAlign.center,

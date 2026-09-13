@@ -2305,6 +2305,136 @@ pub fn rl_set_input_lock(on: bool) {
     log::info!("RL input lock: {}", if on { "止めました" } else { "戻しました" });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 🔴 お客様の「終了する」はお客様本人の手でだけ押せるようにする（2026-09-13）
+//
+//   ⚠ 遠隔操作中は、相談員のマウスでお客様の画面の「終了する」も押せてしまい、
+//     押すと接続が切れる。
+//   ★上の入力ブロックと同じ印（INJECTED）で見分ける。遠隔から送り込まれた
+//     操作には印が付き、人がマウス・キーボードで押した操作には付かない。
+//   ★ここは**押された時刻を覚えるだけ**で、操作は一切止めない。
+//     判断は画面の側で「直前（数秒以内）に人の手の押下があったか」で行う。
+//   ⚠ 見張りを立てられないときは -1 を返し、画面の側は**押せる方に倒す**
+//     （お客様が止める手段を失うのがいちばん避けたい形）。
+static RL_PRESS_WATCH_BASE: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+// 0 = 見張りは居るがまだ人の手の押下が無い。それ以外は BASE からの経過ミリ秒 + 1。
+static RL_LAST_PHYSICAL_PRESS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+// 0 = 立てていない ／ 1 = 立てている途中・立っている ／ 2 = 立てられなかった
+static RL_PRESS_WATCH_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+// 人の手・送り込みを問わず、最後に押下を見た時刻（見張りが生きている証拠）。
+static RL_LAST_ANY_PRESS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn rl_note_press(physical: bool) {
+    if let Some(base) = RL_PRESS_WATCH_BASE.get() {
+        let now = base.elapsed().as_millis() as u64 + 1;
+        RL_LAST_ANY_PRESS.store(now, std::sync::atomic::Ordering::Relaxed);
+        if physical {
+            RL_LAST_PHYSICAL_PRESS.store(now, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+unsafe extern "system" fn rl_press_mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let msg = w as u32;
+        if msg == WM_LBUTTONDOWN
+            || msg == WM_RBUTTONDOWN
+            || msg == WM_MBUTTONDOWN
+            || msg == WM_XBUTTONDOWN
+        {
+            let p = l as *const MSLLHOOKSTRUCT;
+            if !p.is_null() {
+                rl_note_press(rl_is_physical(((*p).flags & LLMHF_INJECTED) != 0));
+            }
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, w, l)
+}
+
+unsafe extern "system" fn rl_press_key_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if code >= 0 {
+        let msg = w as u32;
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            let p = l as *const KBDLLHOOKSTRUCT;
+            if !p.is_null() {
+                rl_note_press(rl_is_physical(((*p).flags & LLKHF_INJECTED) != 0));
+            }
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, w, l)
+}
+
+/// 人の手の押下を覚える見張りを立てる（何度呼んでもよい）。
+pub fn rl_physical_press_watch_start() {
+    if RL_PRESS_WATCH_STATE
+        .compare_exchange(
+            0,
+            1,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return;
+    }
+    RL_PRESS_WATCH_BASE.get_or_init(Instant::now);
+    std::thread::spawn(|| unsafe {
+        let hm = SetWindowsHookExW(WH_MOUSE_LL, Some(rl_press_mouse_hook), std::ptr::null_mut(), 0);
+        let hk = SetWindowsHookExW(WH_KEYBOARD_LL, Some(rl_press_key_hook), std::ptr::null_mut(), 0);
+        if hm.is_null() {
+            // ⚠ マウスが見られないなら判断できない。押せる方に倒す。
+            log::error!("RL press watch: 見張りを立てられません（キー={}）", !hk.is_null());
+            if !hk.is_null() {
+                UnhookWindowsHookEx(hk);
+            }
+            RL_PRESS_WATCH_STATE.store(2, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+        log::info!("RL press watch: 見張りを立てました（キー={}）", !hk.is_null());
+        // ⚠ 待ち続けないと見張りは働かない。
+        let mut msg: MSG = std::mem::zeroed();
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        UnhookWindowsHookEx(hm);
+        if !hk.is_null() {
+            UnhookWindowsHookEx(hk);
+        }
+        RL_PRESS_WATCH_STATE.store(2, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// 最後に人の手で押されてから何ミリ秒か。
+/// -1 = 判断できない ／ -2 = 直前の押下は送り込まれた操作（人の手の押下が無い）。
+///
+/// ⚠ Windows は反応の遅い見張りを**黙って外す**ことがある。外れたまま
+///   「人の手の押下が古い」と答えると、⚠ **お客様本人まで押せなくなる**。
+///   ★いま押された釦のクリック自体を見張りが見ているはずなので、
+///     直前（3秒以内）に**どんな押下も**見ていなければ「見張りが死んでいる」とみなし、
+///     判断できない（-1）を返す。
+pub fn rl_ms_since_physical_press() -> i64 {
+    const RECENT_MS: u64 = 3000;
+    if RL_PRESS_WATCH_STATE.load(std::sync::atomic::Ordering::SeqCst) != 1 {
+        return -1;
+    }
+    let Some(base) = RL_PRESS_WATCH_BASE.get() else {
+        return -1;
+    };
+    let now = base.elapsed().as_millis() as u64 + 1;
+    let any = RL_LAST_ANY_PRESS.load(std::sync::atomic::Ordering::Relaxed);
+    if any == 0 || now.saturating_sub(any) > RECENT_MS {
+        return -1;
+    }
+    let phys = RL_LAST_PHYSICAL_PRESS.load(std::sync::atomic::Ordering::Relaxed);
+    if phys == 0 {
+        return -2;
+    }
+    now.saturating_sub(phys) as i64
+}
+
 pub fn block_input(v: bool) -> (bool, String) {
     let on = v;
     // 🔴🔴 **昇格していないなら、自分で呼ばない**（2026-09-03 実機の記録で確定）。

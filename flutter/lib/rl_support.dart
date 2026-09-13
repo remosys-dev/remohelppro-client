@@ -168,3 +168,52 @@ Future<bool> rlOpenTransferFile(String path, {bool share = false}) async {
     return false;
   }
 }
+
+/// 🔴 お客様の「終了する」は、お客様本人の手でだけ押せる（2026-09-13 社長のご判断）。
+///
+/// ⚠ 遠隔操作中は相談員のマウスでも押せてしまい、押すと接続が切れていた。
+/// ★遠隔から送り込まれた操作には印が付く（入力ブロックと同じ見分け方）。
+///   直前（3秒以内）に**人の手の押下**が無ければ、相談員が押したとみなす。
+/// ⚠ 見張りが立っていない・判断できないときは**押せる方に倒す**。
+///   お客様が止める手段を失うのが、いちばん避けたい形。
+/// ⚠ 見張りは押される**前**に立てておく必要がある（[rlStartPressWatch]）。
+void rlStartPressWatch() {
+  if (!Platform.isWindows) return;
+  try {
+    bind.mainRlPhysicalPressWatchStart();
+  } catch (_) {}
+}
+
+bool rlPressedByCustomerHand() {
+  if (!Platform.isWindows) return true;
+  try {
+    final ms = bind.mainRlPhysicalPressMsAgo();
+    if (ms == -1) return true; // 判断できない
+    if (ms < 0) return false; // 人の手の押下がまだ一度も無い
+    return ms <= 3000;
+  } catch (_) {
+    return true;
+  }
+}
+
+/// 相談員が押したときに出す案内（相談員の画面にも映る）。
+Future<void> rlShowCustomerOnlyNotice(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('終了はお客様ご自身で押してください',
+          style: TextStyle(fontSize: 16)),
+      content: const Text(
+        '「終了する」は、このパソコンの前にいる方がマウスで押したときだけ働きます。\n'
+        '担当者の遠隔操作では押せません。',
+        style: TextStyle(fontSize: 13.5, height: 1.7),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('閉じる'),
+        ),
+      ],
+    ),
+  );
+}

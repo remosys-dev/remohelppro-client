@@ -850,9 +850,15 @@ class WindowActionPanelState extends State<WindowActionPanel> {
               //   ⚠ 最小化の釦は常に残す。
               //   ⚠ 2026-08-27 には逆の直しを入れている（「×」で終わるようにした）。
               //     ご判断が変わった経緯なので、戻すときはここも一緒に見ること。
+              //   🔴🔴 **監視する値は必ず先に読む**（2026-09-13 社長のご報告で判明）。
+              //   ⚠ 元は `kRlSupportShowWindow && rlCustomerSupportActive.isTrue`。
+              //     相談員版・常駐版は kRlSupportShowWindow が false なので右側が読まれず、
+              //     Obx が「監視する値が無い」とエラーを出していた（trace の flutter_error）。
+              //   ⚠ 本番ビルドではエラーの部品が**灰色の箱**になり、上の帯を埋める。
+              //     ＝ ビューアの窓を**つかんで動かせない**・「×」が出ない（9/3 から）。
               if (widget.showClose && !isMacOS)
-                Obx(() => (kRlSupportShowWindow &&
-                        rlCustomerSupportActive.isTrue)
+                Obx(() => (rlCustomerSupportActive.isTrue &&
+                        kRlSupportShowWindow)
                     ? const Offstage()
                     : ActionIcon(
                         message: 'Close',

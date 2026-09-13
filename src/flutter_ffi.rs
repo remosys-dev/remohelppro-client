@@ -1191,6 +1191,21 @@ pub fn main_get_local_option(key: String) -> SyncReturn<String> {
     SyncReturn(get_local_option(key))
 }
 
+/// 人の手の押下を覚える見張りを立てる（お客様の「終了する」用。2026-09-13）。
+pub fn main_rl_physical_press_watch_start() -> SyncReturn<bool> {
+    #[cfg(windows)]
+    crate::platform::windows::rl_physical_press_watch_start();
+    SyncReturn(true)
+}
+
+/// 最後に人の手で押されてから何ミリ秒か。-1 = 判断できない ／ -2 = まだ押されていない。
+pub fn main_rl_physical_press_ms_ago() -> SyncReturn<i64> {
+    #[cfg(windows)]
+    return SyncReturn(crate::platform::windows::rl_ms_since_physical_press());
+    #[cfg(not(windows))]
+    return SyncReturn(-1);
+}
+
 pub fn main_get_use_texture_render() -> SyncReturn<bool> {
     SyncReturn(use_texture_render())
 }

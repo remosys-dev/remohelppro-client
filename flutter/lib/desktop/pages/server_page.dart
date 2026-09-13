@@ -4,7 +4,12 @@ import 'dart:async';
 import 'package:flutter_hbb/remohelppro_trace.dart' show rlTrace;
 // 顧客版の「切断」で、本体へ終了の合図を置くのに使う。
 import 'dart:io' show Directory, File, Platform;
-import 'package:flutter_hbb/rl_support.dart' show kRlSupportShowWindow;
+import 'package:flutter_hbb/rl_support.dart'
+    show
+        kRlSupportShowWindow,
+        rlStartPressWatch,
+        rlPressedByCustomerHand,
+        rlShowCustomerOnlyNotice;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -1265,13 +1270,21 @@ class _CmControlPanel extends StatelessWidget {
         //   ★既定は**出す**。⚠ 安全側に倒す。
         //     受け取れなかっただけで釦が消えると、⚠ **止める手段が無い状態**に戻る。
         //   ⚠ 明示的に `N` が入っているときだけ隠す（他の許可と同じ考え）。
-        if (rlIsResidentBuild() && _residentEndAllowed())
+        if (rlIsResidentBuild() && _residentEndAllowed() && _rlWatchStarted())
           Row(
             children: [
               Expanded(
                 child: buildButton(context,
                     color: const Color(0xFFB91C1C),
-                    onClick: () => _confirmEndResident(context),
+                    onClick: () {
+                      // 🔴 お客様本人の手でだけ押せる（2026-09-13 社長のご判断）。
+                      if (!rlPressedByCustomerHand()) {
+                        rlTrace('resident_end_blocked_remote_press');
+                        rlShowCustomerOnlyNotice(context);
+                        return;
+                      }
+                      _confirmEndResident(context);
+                    },
                     text: '終了する',
                     icon: const Icon(Icons.stop_circle_outlined,
                         color: Colors.white, size: 14),
@@ -1463,6 +1476,13 @@ class _CmControlPanel extends StatelessWidget {
   /// ⚠ **既定は出す。** 設定が届いていない・古い版のときに釦が消えると、
   ///   ⚠ **お客様が止める手段を失う**（いちばん避けたい形）。
   /// ⚠ 明示的に `N` が入っているときだけ隠す。他の許可と同じ考え。
+  /// 「終了する」を人の手で押したかを見分ける見張りを、釦を出す前に立てる。
+  /// ⚠ 何度呼んでもよい。釦の表示は妨げない（常に true）。
+  bool _rlWatchStarted() {
+    rlStartPressWatch();
+    return true;
+  }
+
   bool _residentEndAllowed() {
     try {
       return bind.mainGetLocalOption(key: 'rl-allow-resident-end').trim() != 'N';
@@ -1505,6 +1525,13 @@ class _CmControlPanel extends StatelessWidget {
       ),
     );
     if (ok != true) return;
+    // ⚠ 確認の「終了する」も同じ。お客様が1つ目を押した後に、
+    //   相談員が確認だけを遠隔で押す形も塞ぐ。
+    if (!rlPressedByCustomerHand()) {
+      rlTrace('resident_end_blocked_remote_press');
+      if (context.mounted) await rlShowCustomerOnlyNotice(context);
+      return;
+    }
     // ⚠ 誰が止めたかを残す。⚠ 会社管理者が後から確かめられるように。
     rlTrace('resident_end_by_customer');
     await handleDisconnect();
