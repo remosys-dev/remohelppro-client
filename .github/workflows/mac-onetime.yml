@@ -21,9 +21,10 @@ on:
   workflow_dispatch:
     inputs:
       onetime_valid_days:
+        # 🔴 7 → 365（2026-09-13）。理由は flutter-build.yml の onetime_valid_days を参照。
         description: 'ワンタイム版の有効期限（日数）'
         type: number
-        default: 7
+        default: 365
   push:
     tags:
       - 'mac-onetime-*'
@@ -40,4 +41,4 @@ jobs:
       upload-tag: "mac-onetime"
       mac_only: true
       support_show_window: true
-      onetime_valid_days: ${{ inputs.onetime_valid_days || 7 }}
+      onetime_valid_days: ${{ inputs.onetime_valid_days || 365 }}
