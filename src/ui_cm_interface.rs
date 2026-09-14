@@ -1315,6 +1315,21 @@ async fn start_read_job(
                 }
                 return;
             }
+            // Safety limit: reject when a single file is larger than the configured size.
+            if let Err(msg) =
+                crate::rl_limits::check_file_sizes(job.files().iter().map(|f| f.size))
+            {
+                if let Err(e) = tx.send(Data::ReadJobInitResult {
+                    id,
+                    file_num,
+                    include_hidden,
+                    conn_id,
+                    result: Err(msg),
+                }) {
+                    log::error!("error sending ReadJobInitResult via IPC: {}", e);
+                }
+                return;
+            }
 
             // Build FileDirectory from the job's file list and serialize
             let files = job.files().to_owned();

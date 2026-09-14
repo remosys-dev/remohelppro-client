@@ -348,6 +348,10 @@ pub struct Connection {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     start_cm_ipc_para: Option<StartCmIpcPara>,
     auto_disconnect_timer: Option<(Instant, u64)>,
+    // Safety auto-disconnect (rl_limits): when this remote connection started, and whether
+    // the one-minute warning was already sent for the current idle period.
+    rl_conn_started: Option<Instant>,
+    rl_limit_warned: bool,
     authed_conn_id: Option<self::raii::AuthedConnID>,
     file_remove_log_control: FileRemoveLogControl,
     last_supported_encoding: Option<SupportedEncoding>,
@@ -538,6 +542,8 @@ impl Connection {
                 tx_cm_stream_ready,
             }),
             auto_disconnect_timer: None,
+            rl_conn_started: None,
+            rl_limit_warned: false,
             authed_conn_id: None,
             file_remove_log_control: FileRemoveLogControl::new(id),
             last_supported_encoding: None,
@@ -1086,6 +1092,11 @@ impl Connection {
                     #[cfg(windows)]
                     conn.portable_check();
                     raii::AuthedConnID::check_wake_lock_on_setting_changed();
+                    if let Some(reason) = conn.rl_limit_tick().await {
+                        conn.send_close_reason_no_retry(reason).await;
+                        conn.on_close("rl auto end", false).await;
+                        break;
+                    }
                     if let Some((instant, minute)) = conn.auto_disconnect_timer.as_ref() {
                         if instant.elapsed().as_secs() > minute * 60 {
                             conn.send_close_reason_no_retry("Connection failed due to inactivity").await;
@@ -3097,6 +3108,7 @@ impl Connection {
                     }
                 }
                 Some(message::Union::FileAction(fa)) => {
+                    crate::rl_limits::touch();
                     let mut handle_fa = self.file_transfer.is_some();
                     if !handle_fa {
                         if let Some(file_action::Union::Send(s)) = fa.union.as_ref() {
@@ -3247,6 +3259,13 @@ impl Connection {
                             }
                             Some(file_action::Union::Receive(r)) => {
                                 // client to server
+                                if let Err(msg) = crate::rl_limits::check_file_sizes(
+                                    r.files.iter().map(|f| f.size),
+                                ) {
+                                    self.send(fs::new_error(r.id, msg.clone(), -1)).await;
+                                    self.rl_send_msgbox("ファイルの送受信", &msg).await;
+                                    return true;
+                                }
                                 // note: 1.1.10 introduced identical file detection, which breaks original logic of send/recv files
                                 // whenever got send/recv request, check peer version to ensure old version of rustdesk
                                 let od = can_enable_overwrite_detection(get_version_number(
@@ -3360,6 +3379,7 @@ impl Connection {
                 }
                 Some(message::Union::FileResponse(fr)) => match fr.union {
                     Some(file_response::Union::Block(block)) => {
+                        crate::rl_limits::touch();
                         self.send_fs(ipc::FS::WriteBlock {
                             id: block.id,
                             file_num: block.file_num,
@@ -4994,6 +5014,9 @@ impl Connection {
         match result {
             Err(error) => {
                 self.cm_read_job_ids.remove(&id);
+                if error.contains("MBを超えるファイル") {
+                    self.rl_send_msgbox("ファイルの送受信", &error).await;
+                }
                 self.send(fs::new_error(id, error, 0)).await;
             }
             Ok(dir_bytes) => {
@@ -5250,6 +5273,13 @@ impl Connection {
                         return;
                     }
                 }
+                if let Err(msg) =
+                    crate::rl_limits::check_file_sizes(job.files().iter().map(|f| f.size))
+                {
+                    self.send(fs::new_error(id, msg.clone(), -1)).await;
+                    self.rl_send_msgbox("ファイルの送受信", &msg).await;
+                    return;
+                }
                 self.process_new_read_job(job, path).await;
             }
         }
@@ -5334,7 +5364,83 @@ impl Connection {
         }
     }
 
+    /// Show a message to the operator (works with current operator versions).
+    async fn rl_send_msgbox(&mut self, title: &str, text: &str) {
+        let mut msg_out = Message::new();
+        msg_out.set_message_box(MessageBox {
+            msgtype: "nook-nocancel-hasclose".to_owned(),
+            title: title.to_owned(),
+            text: text.to_owned(),
+            link: "".to_owned(),
+            ..Default::default()
+        });
+        self.send(msg_out).await;
+    }
+
+    /// Safety auto-disconnect check, called every second. Returns the close reason when
+    /// this connection must end. Values come from rl_limits (never received = off).
+    async fn rl_limit_tick(&mut self) -> Option<&'static str> {
+        if !self.authorized {
+            return None;
+        }
+        // A file transfer in progress on any connection is activity.
+        if !self.read_jobs.is_empty() || !self.cm_read_job_ids.is_empty() {
+            crate::rl_limits::touch();
+        }
+        if !self.is_remote() {
+            return None;
+        }
+        let started = match self.rl_conn_started {
+            Some(t) => t,
+            None => {
+                crate::rl_limits::touch();
+                let t = Instant::now();
+                self.rl_conn_started = Some(t);
+                t
+            }
+        };
+        crate::rl_limits::poll_local_input();
+
+        let max = crate::rl_limits::max_limit_secs();
+        if max > 0 && started.elapsed().as_secs() >= max {
+            log::info!("rl_limits: max connected time reached ({}s)", max);
+            crate::rl_limits::record_auto_end(crate::rl_limits::REASON_MAX);
+            self.rl_send_msgbox(
+                "接続の終了",
+                crate::rl_limits::end_text(crate::rl_limits::REASON_MAX),
+            )
+            .await;
+            return Some(crate::rl_limits::REASON_MAX);
+        }
+
+        let idle_limit = crate::rl_limits::idle_limit_secs();
+        if idle_limit > 0 {
+            let idle = crate::rl_limits::idle_secs();
+            if idle >= idle_limit {
+                log::info!("rl_limits: idle limit reached ({}s)", idle_limit);
+                crate::rl_limits::record_auto_end(crate::rl_limits::REASON_IDLE);
+                self.rl_send_msgbox(
+                    "接続の終了",
+                    crate::rl_limits::end_text(crate::rl_limits::REASON_IDLE),
+                )
+                .await;
+                return Some(crate::rl_limits::REASON_IDLE);
+            }
+            if idle + 60 >= idle_limit {
+                if !self.rl_limit_warned {
+                    self.rl_limit_warned = true;
+                    self.rl_send_msgbox("まもなく自動終了", crate::rl_limits::idle_warning_text())
+                        .await;
+                }
+            } else {
+                self.rl_limit_warned = false;
+            }
+        }
+        None
+    }
+
     fn update_auto_disconnect_timer(&mut self) {
+        crate::rl_limits::touch();
         self.auto_disconnect_timer
             .as_mut()
             .map(|t| t.0 = Instant::now());

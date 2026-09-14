@@ -686,6 +686,21 @@ mod imp {
                 }
             }
         }
+        // 安全のための自動切断の値（無操作・最長・ファイルの大きさ）。2026-09-15 追加。
+        //   ⚠ 来ていない・0以下の値は触らない（一度も受け取れなければ接続側は何も切らない）。
+        if let Some(l) = v.get("limits") {
+            for (from, to) in [
+                ("idleMin", crate::rl_limits::OPT_IDLE_MIN),
+                ("maxMin", crate::rl_limits::OPT_MAX_MIN),
+                ("fileMaxMb", crate::rl_limits::OPT_FILE_MAX_MB),
+            ] {
+                if let Some(n) = l.get(from).and_then(Value::as_u64) {
+                    if n > 0 {
+                        hbb_common::config::LocalConfig::set_option(to.to_owned(), n.to_string());
+                    }
+                }
+            }
+        }
         let commands = match v.get("commands").and_then(Value::as_array) {
             Some(c) => c.clone(),
             None => return,

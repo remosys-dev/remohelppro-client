@@ -63,6 +63,8 @@ mod tray;
 mod whiteboard;
 #[cfg(windows)]
 mod safemode;
+/// 接続の安全設定（無操作・最長時間・ファイルの大きさ）。2026-09-15 追加。
+pub mod rl_limits;
 /// ログオン前の再接続（一時サービス）。2026-08-01 追加。
 #[cfg(windows)]
 pub mod rl_prelogon;

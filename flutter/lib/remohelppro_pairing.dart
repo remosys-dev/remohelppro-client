@@ -161,6 +161,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
   Timer? _statusPoll;
   Timer? _rearm; // 再起動の合言葉を取り直す
   bool _terminated = false;
+  // 安全のための自動切断で終わったときの、お客様向けの理由（終了の画面に出す）。
+  String? _autoEndText;
   /// ログオン前の再接続の用意が走っている最中か（二重起動を防ぐ）。
   bool _prelogonBusy = false;
   /// 常駐が入っているせいで繋がらない状態か（逃げ道のボタンを出すため）。
@@ -828,6 +830,62 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     }
   }
 
+  /// 自動切断の印があれば理由（app_idle / app_max）を返し、同時に消す。
+  String? _consumeAutoEnd() {
+    try {
+      final v = bind.mainGetLocalOption(key: 'rl-auto-end');
+      if (v.isEmpty) return null;
+      bind.mainSetLocalOption(key: 'rl-auto-end', value: '');
+      return v.startsWith('RL_AUTO_END_MAX') ? 'app_max' : 'app_idle';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// サーバーの安全設定（無操作・最長・ファイルの大きさ）を受け取って残す。
+  ///   ⚠ 来ていない・数でない値は触らない（一度も受け取れなければ、接続側は何も切らない）。
+  void _saveLimits(Object? raw) {
+    if (raw is! Map) return;
+    const pairs = <String, String>{
+      'idleMin': 'rl-limit-idle-min',
+      'maxMin': 'rl-limit-max-min',
+      'fileMaxMb': 'rl-limit-file-max-mb',
+    };
+    pairs.forEach((from, to) {
+      final v = raw[from];
+      if (v is! num || v <= 0) return;
+      try {
+        bind.mainSetLocalOption(key: to, value: v.toInt().toString());
+      } catch (_) {}
+    });
+  }
+
+  /// サーバーに終了を伝える（待たない・5秒で打ち切る）。
+  void _notifyServerEnd({String? endReason}) {
+    final sid = _shortId;
+    if (sid == null) {
+      rlTrace('end_no_shortid');
+      return;
+    }
+    http
+        .post(
+          Uri.parse('$_kApiBase/api/customer/session-end'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (_custToken != null) 'x-customer-token': _custToken!,
+          },
+          body: jsonEncode({
+            'shortId': sid,
+            if (endReason != null) 'endReason': endReason,
+          }),
+        )
+        .timeout(const Duration(seconds: 5))
+        .then((r) => rlTrace('end_notified', {'status': r.statusCode}))
+        .catchError((Object e) {
+      rlTrace('end_notify_failed', {'e': e.toString()});
+    });
+  }
+
   /// 相談員の終了を検知するポーリング（被操作が繋がったままにならないように）。
   void _startStatusPoll(String shortId) {
     // 🔴 ここから先の出来事を、当社のサーバーでも読めるようにする（2026-08-27）。
@@ -842,6 +900,10 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     // 接続の窓（別プロセス）から「切断」が押されたときの合図を消しておく。
     //   ⚠ 前回の合図が残っていると、繋がった直後に終わってしまう。
     _clearEndRequest();
+    // 前の接続で自動終了した印が残っていると、つながった直後に終わってしまう。
+    try {
+      bind.mainSetLocalOption(key: 'rl-auto-end', value: '');
+    } catch (_) {}
     _statusPoll = Timer.periodic(const Duration(seconds: 4), (_) async {
       // 🔴 顧客が接続の窓の「切断」を押したか（2026-08-27 ご指摘）。
       //   あちらは別プロセスなので、決まった場所の合図で受け取る。
@@ -849,6 +911,18 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       if (_consumeEndRequest()) {
         rlTrace('poll_end_request_file');
         await _endByCustomer();
+        return;
+      }
+      // 安全のための自動切断（接続側の Rust が閉じて印を残す）。
+      //   理由を覚えてサーバーに伝え、いつもの後始末（サービス停止・合言葉を潰す）へ進む。
+      final autoEnd = _consumeAutoEnd();
+      if (autoEnd != null) {
+        rlTrace('auto_end', {'reason': autoEnd});
+        _autoEndText = autoEnd == 'app_max'
+            ? '1回あたりの接続時間が上限に達したため、接続を自動的に終了いたしました。'
+            : '一定時間操作が行われなかったため、接続を自動的に終了いたしました。';
+        _notifyServerEnd(endReason: autoEnd);
+        await _terminateBySupportEnd();
         return;
       }
       // 🔴 生きている印を、一定の間隔で残す（2026-08-27）。
@@ -876,6 +950,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
           //   ⚠ 受け取れなかったときは**触らない**。
           //     ⚠ 消しにいくと、通信が一度失敗しただけで機能が消える。
           _saveFeatureFlags(j['features']);
+          _saveLimits(j['limits']);
           if (j['active'] == false) {
             rlTrace('poll_active_false');
             await _terminateBySupportEnd();
@@ -2164,6 +2239,16 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
             const Text('サポートを終了しました',
                 style: TextStyle(
                     fontSize: 20, fontWeight: FontWeight.bold, color: _ink)),
+            if (_autoEndText != null) ...[
+              const SizedBox(height: 8),
+              Text(_autoEndText!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13.5, color: _ink)),
+              const SizedBox(height: 4),
+              const Text('お客様の情報をお守りするため、一定の条件で接続を自動的に終了しております。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: _muted)),
+            ],
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(14),
