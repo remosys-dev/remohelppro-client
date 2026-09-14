@@ -12,7 +12,7 @@
 //!   - The check runs inside the connection loop (Rust), so it also works while the
 //!     pre-logon helper service is handling a reconnect and the UI process is not running.
 
-use hbb_common::config::LocalConfig;
+use hbb_common::{config::LocalConfig, log};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
