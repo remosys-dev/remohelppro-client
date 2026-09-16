@@ -1888,6 +1888,20 @@ impl<T: InvokeUiSession> Remote<T> {
                             );
                             return false;
                         }
+                        // 🔴 安全のための自動終了は、理由が分かる言葉で出す（2026-09-16 ご指摘）。
+                        //   ⚠ c に入るのは合図の記号（RL_AUTO_END_MAX / _IDLE）。
+                        //     そのまま出すと相談員の画面に記号が見える。
+                        //   ⚠ お客様側からは直前に同じ内容の知らせも送っているが、
+                        //     この「終了」の窓が後から出て上書きするため、ここでも同じ文言にする。
+                        if c == crate::rl_limits::REASON_MAX || c == crate::rl_limits::REASON_IDLE {
+                            self.handler.msgbox(
+                                "session-ended",
+                                "自動的に終了しました",
+                                crate::rl_limits::end_text(&c),
+                                "",
+                            );
+                            return false;
+                        }
                         self.handler
                             .msgbox("session-ended", "サポート終了", &c, "");
                         return false;
