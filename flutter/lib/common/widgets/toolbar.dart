@@ -491,7 +491,9 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
   // refresh
   if (pi.version.isNotEmpty) {
     v.add(TTextMenu(
-      child: Text(translate('Refresh')),
+      // 「更新」だけだと何が更新されるのか分からない（2026-09-16 ご指摘）。
+      // ⚠ 接続先の一覧の「更新」と同じ文言を使わない。別の語にする。
+      child: Text(translate('Refresh screen')),
       onPressed: () => sessionRefreshVideo(sessionId, pi),
     ));
   }

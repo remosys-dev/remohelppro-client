@@ -145,6 +145,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Insert Ctrl + Alt + Del", "Ctrl + Alt + Del を送信"),
         ("Insert Lock", "ロック命令を送信"),
         ("Refresh", "更新"),
+        ("Refresh screen", "画面更新"),
         ("ID does not exist", "ID が存在しません"),
         ("Failed to connect to rendezvous server", "ランデブーサーバーに接続できませんでした"),
         ("Please try later", "後でもう一度お試しください"),
