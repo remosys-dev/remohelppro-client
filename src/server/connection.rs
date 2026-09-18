@@ -2303,9 +2303,23 @@ impl Connection {
             // Since hashed storage uses a prefix-based encoding, a hard plaintext that
             // happens to look like hashed storage could be mis-detected. Validate local storage
             // and hard/preset plaintext via separate paths to avoid that ambiguity.
-            let (local_storage, _) = Config::get_local_permanent_password_storage_and_salt();
+            let (local_storage, local_salt) = Config::get_local_permanent_password_storage_and_salt();
             if !local_storage.is_empty() {
                 if self.validate_password_storage(&local_storage) {
+                    print_fallback();
+                    return true;
+                }
+                // 🔴🔴 1つ前の合言葉も、作り直してから30分だけ受け付ける（2026-09-18 社長のご指摘）。
+                //
+                //   ⚠ 常駐の合言葉は30分ごとに作り直される。相談員アプリは
+                //     **接続を始めたときの値を持ち続ける**ので、作り直した後に
+                //     ファイル送受信（別の接続）やつなぎ直しをすると必ず弾かれていた。
+                //     実機の記録: 17:15 接続 → 17:25「Wrong Password」。
+                //   ★受け付けるのは**1つ前の値だけ**、**30分だけ**。
+                //     それより古い物・さらに前の物は受け付けない。
+                //   ⚠ 塩が変わっていたら照合できないので、そのときは受け付けない。
+                if self.validate_previous_password(&local_salt) {
+                    log::info!("1つ前の固定パスワードで通しました（作り直しの直後・30分以内）");
                     print_fallback();
                     return true;
                 }
@@ -2323,6 +2337,36 @@ impl Connection {
             }
         }
         false
+    }
+
+    /// 1つ前の固定パスワードで照合する（作り直しから 30分だけ）。
+    ///
+    /// ⚠ 控えるのは agent.rs の apply_pending_password()。ここは読むだけ。
+    /// ⚠ 時間は「作り直した時刻」から数える。時計が巻き戻った等で
+    ///   計算できないときは**受け付けない**（安全な側に倒す）。
+    fn validate_previous_password(&self, current_salt: &str) -> bool {
+        const PREV_PW_GRACE_SECS: u64 = 30 * 60;
+        let storage = Config::get_option("rl-prev-password");
+        if storage.is_empty() {
+            return false;
+        }
+        // 塩が違うと、控えた形では照合できない
+        let salt = Config::get_option("rl-prev-password-salt");
+        if salt.is_empty() || salt != current_salt {
+            return false;
+        }
+        let at: u64 = match Config::get_option("rl-prev-password-at").parse() {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => d.as_secs(),
+            Err(_) => return false,
+        };
+        if now < at || now - at > PREV_PW_GRACE_SECS {
+            return false;
+        }
+        self.validate_password_storage(&storage)
     }
 
     fn is_recent_session(&mut self, tfa: bool) -> bool {

@@ -386,8 +386,21 @@ mod imp {
             Err(_) => None,
         };
         if let Some(pw) = pw {
+            // 🔴 1つ前の合言葉を、少しの間だけ受け付けられるように控える（2026-09-18）。
+            //
+            //   ⚠ 作り直した瞬間に古い方を無効にすると、**その時つないでいた相談員**が
+            //     ファイル送受信・つなぎ直しで弾かれる（相談員アプリは接続開始時の値を持ち続ける）。
+            //   ★控えるのは**保存の形（ハッシュ）**で、合言葉そのものではない。
+            //   ⚠ 塩（salt）が変わると古い形は照合できないので、塩も一緒に控える。
+            //   ⚠ 受け付ける時間は PREV_PW_GRACE_SECS（下の照合側と同じ値）。
+            let (old_storage, old_salt) = Config::get_local_permanent_password_storage_and_salt();
+            if !old_storage.is_empty() {
+                Config::set_option("rl-prev-password".to_owned(), old_storage);
+                Config::set_option("rl-prev-password-salt".to_owned(), old_salt);
+                Config::set_option("rl-prev-password-at".to_owned(), now_secs().to_string());
+            }
             Config::set_permanent_password(&pw);
-            log::info!("REMOHELP PRO agent: 固定パスワードを預けてから端末へ書き込みました");
+            log::info!("REMOHELP PRO agent: 固定パスワードを預けてから端末へ書き込みました（1つ前の合言葉は30分だけ受け付けます）");
         }
     }
 
@@ -884,8 +897,25 @@ mod imp {
             // 決めた間隔で揃え直す。何が壊しても、最長でこの間隔で自分で治る。
             //   ⚠ まだ預けきっていない分があるうちは作り直さない。
             //     作り直すたびに端末側だけ変わり、追いつけなくなる。
+            // 🔴🔴 誰かが繋いでいる間は作り直さない（2026-09-18 社長のご指摘）。
+            //
+            //   ⚠ 相談員アプリは**接続を始めたときの合言葉を持ち続ける**。
+            //     途中で作り直すと、その相談員が持つ合言葉は古くなる。
+            //     ⚠ ファイル送受信は**別の接続**なので、そこで改めて照合され、
+            //       「パスワードが間違っています」になる（実機の記録で確認:
+            //        17:15 接続 → 17:25 Wrong Password / 17:26 接続 → 18:00 Wrong Password）。
+            //     ⚠ 回線が切れて自動でつなぎ直すときも同じ理由で失敗する。
+            //   ★繋がっている間は見送り、終わってから作り直す。
+            //     ⚠ 数えるのは**すべての接続**（下の "inSession" は画面を見ている接続だけを
+            //       数えるので、ここでは使わない。ファイル送受信やカメラの最中も作り直さない）。
+            //     ⚠ lock が取れないときは「繋がっている」側に倒す（作り直さない＝安全な側）。
+            let someone_connected = crate::server::AUTHED_CONNS
+                .lock()
+                .map(|c| !c.is_empty())
+                .unwrap_or(true);
             if PENDING_PW.lock().map(|p| p.is_none()).unwrap_or(false)
                 && now_secs() >= NEXT_ROTATE_AT.load(std::sync::atomic::Ordering::Relaxed)
+                && !someone_connected
             {
                 rotate_fixed_password();
             }
