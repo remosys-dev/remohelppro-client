@@ -2230,25 +2230,26 @@ static RL_INPUT_LOCK: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 static RL_LOCK_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// 人が触った操作か（送り込まれた操作でないか）。
-#[inline]
-/// 🔴 タッチ・ペンの操作を「人の手」として扱う（2026-09-23 社長のご指摘で判明）。
-///
-/// ⚠ Windows は**タッチとペンの操作にも「送り込み」の印を付ける**。
-///   そのため、この関数が `injected` だけを見ていると
-///   ⚠ **タッチ画面のお客様は、指で押しても永久に「終了する」が押せない**。
-///   ＝ 止める手段が1つも無い状態になる。いちばん避けたい形。
-///
-/// ★見分け方: タッチ／ペンから来た操作には、追加情報に決まった印が付く
-///   （下位8ビットを除いた上位が 0xFF515700）。Microsoft が公開している印で、
-///   遠隔操作（SendInput）で作った操作には付かない。
-///   参考: "Distinguishing Pen and Touch Input" の signature。
-///
-/// ⚠ 迷ったときは**人の手**に倒す（押せる方に倒す）。
-///   押せない側に倒すと、お客様が止められなくなる。
+// 🔴 タッチ・ペンの操作を「人の手」として扱うための印（2026-09-23 社長のご指摘で判明）。
+//
+//   ⚠ Windows は**タッチとペンの操作にも「送り込み」の印を付ける**。
+//     `injected` だけを見ていると
+//     ⚠ **タッチ画面のお客様は、指で押しても永久に「終了する」が押せない**。
+//     ＝ 止める手段が1つも無い状態になる。いちばん避けたい形。
+//
+//   ★見分け方: タッチ／ペンから来た操作には、追加情報に決まった印が付く
+//     （下位8ビットを除いた上位が 0xFF515700）。Microsoft が公開している印で、
+//     遠隔操作（SendInput）で作った操作には付かない。
+//     参考: "Distinguishing Pen and Touch Input" の signature。
+//
+//   ⚠ 迷ったときは**人の手**に倒す（押せる方に倒す）。
+//     押せない側に倒すと、お客様が止められなくなる。
+// ⚠ ここに `#[inline]` を挟まないこと。定数には付けられず、ビルドが落ちる（2026-09-23 実際に落ちた）。
 const RL_TOUCH_SIGNATURE: usize = 0xFF51_5700;
 const RL_TOUCH_SIGNATURE_MASK: usize = 0xFFFF_FF00;
 
+/// 人が触った操作か（送り込まれた操作でないか）。タッチ・ペンは人の手として扱う。
+#[inline]
 fn rl_is_physical_ex(injected: bool, extra_info: usize) -> bool {
     if !injected {
         return true;
