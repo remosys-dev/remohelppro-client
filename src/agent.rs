@@ -699,6 +699,30 @@ mod imp {
                 }
             }
         }
+        // 🔴 使う中継（2026-09-23 社長のご指示「自社・無償提供は1番中継機を使う」）。
+        //
+        //   ⚠ 受付（hbbs）は会社を知らない（端末の番号しか持たない）。
+        //     そのため「この会社はこの中継」を**ここで受け取る**しかない。
+        //   ⚠ アプリの `relay-server` は**受付の指示より優先される**
+        //     （rendezvous_mediator.rs の get_relay_server）。
+        //     ★つまり、ここに値が入るとその中継に**固定**される。
+        //     ⚠ 固定先が落ちても他の中継へ逃げないので、外すときは空で上書きする。
+        //   ⚠ 鍵が来ていないとき（古いサーバー）は**触らない**。
+        //     触ると、通信が1回失敗しただけで設定が消える。
+        //   ⚠ LocalConfig ではなく Config に入れる。読む側が Config::get_option のため
+        //     （別の入れ物に書くと、設定したつもりで効かない）。
+        if let Some(r) = v.get("relayServer").and_then(Value::as_str) {
+            let want = r.trim().to_owned();
+            let now = hbb_common::config::Config::get_option("relay-server");
+            if now != want {
+                hbb_common::config::Config::set_option("relay-server".to_owned(), want.clone());
+                if want.is_empty() {
+                    log::info!("RL: 中継の指定を外しました（受付に任せます）");
+                } else {
+                    log::info!("RL: 中継を {} に設定しました", want);
+                }
+            }
+        }
         // 安全のための自動切断の値（無操作・最長・ファイルの大きさ）。2026-09-15 追加。
         //   ⚠ 来ていない・0以下の値は触らない（一度も受け取れなければ接続側は何も切らない）。
         if let Some(l) = v.get("limits") {

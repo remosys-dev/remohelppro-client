@@ -599,7 +599,8 @@ impl RendezvousMediator {
             return Ok(());
         }
         let peer_addr_v6 = hbb_common::AddrMangle::decode(&fla.socket_addr_v6);
-        let relay_server = self.get_relay_server(fla.relay_server.clone());
+        // ⚠ 優先中継が通じるか先に確かめる（この後すぐ相手へ知らせるため・[[切れるとだめ]]）
+        let relay_server = self.pick_relay_server(fla.relay_server.clone()).await;
         let relay = use_ws() || Config::is_proxy();
         let mut socket_addr_v6 = Default::default();
         if peer_addr_v6.port() > 0 && !relay {
@@ -698,7 +699,8 @@ impl RendezvousMediator {
             )
             .await;
         }
-        let relay_server = self.get_relay_server(ph.relay_server);
+        // ⚠ 同上。穴あけに失敗して中継へ回る道も、逃げ先を確かめてから名乗る
+        let relay_server = self.pick_relay_server(ph.relay_server).await;
         // for ensure, websocket go relay directly
         if ph.nat_type.enum_value() == Ok(NatType::SYMMETRIC)
             || Config::get_nat_type() == NatType::SYMMETRIC as i32
@@ -856,6 +858,48 @@ impl RendezvousMediator {
             relay_server = crate::increase_port(&self.host, 1);
         }
         relay_server
+    }
+
+    /// 🔴 中継を「優先して使う。ただし駄目なら受付の指示へ逃げる」（2026-09-23 社長のご指示）。
+    ///
+    /// 🔴 なぜ要るか
+    ///   会社ごとに中継を分けたい（自社・無償提供は1番中継）。
+    ///   ⚠ ところが `relay-server` を入れると**受付の指示より優先されて固定**になり、
+    ///     その中継が止まった瞬間に**その会社だけ一切つながらない**。
+    ///     社長のご指摘:「自社、無料でも、切れるとだめです」
+    ///
+    /// ★そこで、**名乗る前に通じるかを確かめる**。
+    ///   ⚠ 中継の名前は、この直後に相手へ知らせてしまう（RelayResponse）。
+    ///     つまり「つないでから駄目でした」では遅い。**先に試す**必要がある。
+    ///   ⚠ 待つのは 1.5 秒だけ。長くすると、中継が落ちているときに
+    ///     お客様が「つながらない」と感じる時間がそのまま延びる。
+    ///   ⚠ 指定が無い会社（＝ほとんどのお客様）では**何も増えない**（即座に従来どおり）。
+    async fn pick_relay_server(&self, provided_by_rendezvous_server: String) -> String {
+        let preferred = Config::get_option("relay-server");
+        if preferred.is_empty() {
+            // 指定なし＝いままでどおり（受付に任せる）
+            return self.get_relay_server(provided_by_rendezvous_server);
+        }
+        let target = check_port(&preferred, config::RELAY_PORT);
+        match connect_tcp(&*target, Duration::from_millis(1500)).await {
+            Ok(_) => preferred,
+            Err(err) => {
+                // ⚠ ここは「落ちている」以外に、会社の壁で塞がれている場合もある。
+                //   どちらでも、逃げ先は同じ（受付が教えてきた中継）。
+                let fallback = if provided_by_rendezvous_server.is_empty() {
+                    crate::increase_port(&self.host, 1)
+                } else {
+                    provided_by_rendezvous_server
+                };
+                log::warn!(
+                    "RL: 優先中継 {} に届きません（{}）。{} へ逃げます",
+                    preferred,
+                    err,
+                    fallback
+                );
+                fallback
+            }
+        }
     }
 }
 
