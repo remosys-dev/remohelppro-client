@@ -2232,6 +2232,73 @@ static RL_LOCK_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU
 
 /// 人が触った操作か（送り込まれた操作でないか）。
 #[inline]
+/// 🔴 タッチ・ペンの操作を「人の手」として扱う（2026-09-23 社長のご指摘で判明）。
+///
+/// ⚠ Windows は**タッチとペンの操作にも「送り込み」の印を付ける**。
+///   そのため、この関数が `injected` だけを見ていると
+///   ⚠ **タッチ画面のお客様は、指で押しても永久に「終了する」が押せない**。
+///   ＝ 止める手段が1つも無い状態になる。いちばん避けたい形。
+///
+/// ★見分け方: タッチ／ペンから来た操作には、追加情報に決まった印が付く
+///   （下位8ビットを除いた上位が 0xFF515700）。Microsoft が公開している印で、
+///   遠隔操作（SendInput）で作った操作には付かない。
+///   参考: "Distinguishing Pen and Touch Input" の signature。
+///
+/// ⚠ 迷ったときは**人の手**に倒す（押せる方に倒す）。
+///   押せない側に倒すと、お客様が止められなくなる。
+const RL_TOUCH_SIGNATURE: usize = 0xFF51_5700;
+const RL_TOUCH_SIGNATURE_MASK: usize = 0xFFFF_FF00;
+
+fn rl_is_physical_ex(injected: bool, extra_info: usize) -> bool {
+    if !injected {
+        return true;
+    }
+    // 送り込みの印が付いていても、タッチ／ペンの印があれば人の手。
+    (extra_info & RL_TOUCH_SIGNATURE_MASK) == RL_TOUCH_SIGNATURE
+}
+
+/// 🔴 同じお客様用アプリが既に動いているか（2026-09-23）。
+///
+/// ⚠ ダウンロードの一覧から古い行を押し間違えるだけで2本立ち上がる。
+///   2本になると接続番号（MAC由来）を奪い合い、相談員が繋いでも別の方に届く。
+///
+/// ★Windows の「名前つきの目印（ミューテックス）」で見分ける。
+///   ⚠ 名前は**製品ごと**に分ける（ipc_app_namespace と同じ考え）。
+///     同じ名前にすると、常駐や相談員版まで巻き添えで起動できなくなる。
+/// ⚠ 目印はこのプロセスが終わるまで握ったままにする（**閉じない**）。
+///   閉じると、2本目が「居ない」と判断して立ち上がってしまう。
+/// ⚠ 判断できないときは **false**（起動させる）。
+///   起動できない方に倒すと、お客様がサポートを受けられなくなる。
+static RL_SINGLE_INSTANCE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+pub fn rl_another_instance_running() -> bool {
+    use winapi::um::synchapi::CreateMutexW;
+    // 共有識別子OK: 名前は `ipc_app_namespace()` から作る。
+    //   ⚠ この関数は**製品ごとに違う名前**を返す（常駐＝remohelppro／相談員＝-op／
+    //     お客様用＝-once／ログオン前の複製はさらに接尾辞が付く）。
+    //   ＝ RustDesk 系の他製品や、当社の別製品を掴むことはない。
+    //   ⚠ 固定の文字列を書かないこと。書いた瞬間に他製品と衝突する。
+    // ⚠ `Local\` は Windows の名前空間の区切り。エスケープを潰さないこと
+    let name = format!(r"Local\{}-single", hbb_common::config::ipc_app_namespace());
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let h = CreateMutexW(std::ptr::null_mut(), TRUE, wide.as_ptr());
+        if h.is_null() {
+            // 作れない＝判断できない。起動させる（押せる方に倒す）。
+            log::warn!("RL 二重起動の見分け: 目印を作れません err={}", GetLastError());
+            return false;
+        }
+        let already = GetLastError() == ERROR_ALREADY_EXISTS;
+        if already {
+            CloseHandle(h);
+            return true;
+        }
+        // ⚠ 握ったまま持ち続ける（閉じない）。
+        let _ = RL_SINGLE_INSTANCE.set(h as usize);
+        false
+    }
+}
+
 fn rl_is_physical(injected: bool) -> bool {
     !injected
 }
@@ -2346,7 +2413,12 @@ unsafe extern "system" fn rl_press_mouse_hook(code: i32, w: WPARAM, l: LPARAM) -
         {
             let p = l as *const MSLLHOOKSTRUCT;
             if !p.is_null() {
-                rl_note_press(rl_is_physical(((*p).flags & LLMHF_INJECTED) != 0));
+                // ⚠ タッチ・ペンにも「送り込み」の印が付く。追加情報の印で見分ける
+                //   （でないとタッチのお客様は永久に「終了する」を押せない）。
+                rl_note_press(rl_is_physical_ex(
+                    ((*p).flags & LLMHF_INJECTED) != 0,
+                    (*p).dwExtraInfo as usize,
+                ));
             }
         }
     }
@@ -2359,7 +2431,11 @@ unsafe extern "system" fn rl_press_key_hook(code: i32, w: WPARAM, l: LPARAM) -> 
         if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
             let p = l as *const KBDLLHOOKSTRUCT;
             if !p.is_null() {
-                rl_note_press(rl_is_physical(((*p).flags & LLKHF_INJECTED) != 0));
+                // ⚠ 画面キーボードからの入力も送り込み扱いになりうる。同じ見分け方を使う。
+                rl_note_press(rl_is_physical_ex(
+                    ((*p).flags & LLKHF_INJECTED) != 0,
+                    (*p).dwExtraInfo as usize,
+                ));
             }
         }
     }

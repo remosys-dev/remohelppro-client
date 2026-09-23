@@ -20,6 +20,8 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+// ⚠ 終わらせる道は1つに揃える（窓を隠すだけでは番号を握ったまま）
+import 'remohelppro_pairing.dart' show rlEndByCustomerOnClose;
 import 'package:url_launcher/url_launcher_string.dart';
 
 /// 常駐化の進み具合。サーバーの residentStage と同じ言葉を使う。
@@ -102,12 +104,50 @@ class _RemohelpproResidentCardState extends State<RemohelpproResidentCard> {
       if (r.statusCode != 200) return;
       final j = jsonDecode(r.body) as Map;
       if (!mounted) return;
+      final next = _parse(j['stage'] as String?);
+      // 🔴🔴 常駐の導入が終わったら、**このアプリは自分で終わる**（2026-09-23 実機で判明）。
+      //
+      //   ⚠ 接続番号は**そのPCのMACアドレスから作る**ので、
+      //     ワンタイムと常駐が同じPCで同時に動くと**同じ番号**で受付に登録される。
+      //     ＝ 相談員が常駐に繋ごうとしても**ワンタイムの方に届き**、
+      //     ⚠ 「パスワードが間違っています」になる（合言葉が別物のため）。
+      //   ⚠ これは「ワンタイムで繋ぐ → その場で常駐を入れる → 常駐で繋ぐ」という
+      //     **いちばん普通の手順**で必ず起きる。実際に起きた。
+      //   ★常駐が登録まで終われば、ワンタイムに残る理由は無い。終わらせる。
+      //   ⚠ 終わらせ方は「終了する」と同じ道を通す（被操作を止め、合言葉を潰し、
+      //     サーバーへ伝える）。窓を隠すだけでは番号を握ったままになる。
+      //   ⚠ お客様が驚かないよう、**数秒の案内を出してから**終わる。
+      if (next == ResidentStage.installed && _stage != ResidentStage.installed) {
+        _handOverToResident();
+      }
       setState(() {
-        _stage = _parse(j['stage'] as String?);
+        _stage = next;
         _operatorName = j['operatorName'] as String?;
       });
     } catch (_) {
       // 一時的な通信エラーは無視（次の tick で再確認）
+    }
+  }
+
+  /// 常駐へ引き継いで、このアプリを終える。
+  ///
+  /// ⚠ 二重に走らせない（見張りは4秒ごとに回っている）。
+  /// ⚠ 終わらせる道は「終了する」と同じものを使う（[rlEndByCustomerOnClose]）。
+  ///   受け口が預けられていない場合（万一）は、何もしない。
+  ///   ⚠ ここで無理に殺すと、サーバーに終了が伝わらず画面が嘘をつく。
+  bool _handingOver = false;
+  Future<void> _handOverToResident() async {
+    if (_handingOver) return;
+    _handingOver = true;
+    _poll?.cancel();
+    if (mounted) setState(() {});
+    // お客様に読んでいただく間（5秒）。⚠ 長くすると番号の取り合いが続く。
+    await Future<void>.delayed(const Duration(seconds: 5));
+    final end = rlEndByCustomerOnClose;
+    if (end != null) {
+      try {
+        await end();
+      } catch (_) {}
     }
   }
 
@@ -163,6 +203,21 @@ class _RemohelpproResidentCardState extends State<RemohelpproResidentCard> {
 
   @override
   Widget build(BuildContext context) {
+    // 引き継ぎ中は、終わることを必ずお伝えする（黙って消えない）。
+    if (_handingOver) {
+      return _box(
+        color: const Color(0xFFECFDF5),
+        border: const Color(0xFF34D399),
+        children: const [
+          Text('常駐の準備が終わりました',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF065F46))),
+          SizedBox(height: 6),
+          Text('次回からは番号の入力なしで接続できます。\nこのアプリは自動的に終了します。',
+              style: TextStyle(fontSize: 13)),
+        ],
+      );
+    }
     // 依頼が来ていない／導入済みなら何も出さない。
     if (_stage == ResidentStage.none || _stage == ResidentStage.installed) {
       return const SizedBox.shrink();
