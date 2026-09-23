@@ -158,6 +158,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
   // R2: 相談員の終了を検知して被操作を自動停止するためのポーリング
   String? _shortId;
+  /// 組になれないまま置き去りになったときに、自分を終わらせる砂時計（2026-09-23）。
+  /// ⚠ 組になったら必ず止める（対応中に終わってはいけない）。
+  Timer? _unpairedTimer;
   Timer? _statusPoll;
   Timer? _rearm; // 再起動の合言葉を取り直す
   bool _terminated = false;
@@ -207,6 +210,28 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _focus.addListener(() {
       if (mounted) setState(() {});
     });
+    // 🔴🔴 **組になれなかったアプリは、自分から終わる**（2026-09-23 社長のご指示）。
+    //
+    //   🔴 なぜ要るか（実機で起きた）
+    //     ⚠ 認証コードを通していないアプリは、サポートと結びついていないので
+    //       **終了を知らせる相手がいない**。＝ 永久に残る。
+    //     ⚠ 残ったアプリは接続番号（MAC由来）を握り続けるため、
+    //       同じPCの常駐に繋いでも**そちらに届き**「パスワードが間違っています」になる。
+    //     ⚠ お客様は閉じ方が分からない（「終了する」は遠隔からは押せない）。
+    //   ★30分たっても組になっていなければ、自分で終わる。
+    //   ⚠ 組になったら（認証コードが通ったら）この見張りは止める。
+    //     対応中に勝手に終わるのは**いちばんやってはいけない**。
+    //   ⚠ お客様用アプリだけ。常駐・相談員版では何もしない。
+    if (kRlSupportShowWindow) {
+      _unpairedTimer = Timer(const Duration(minutes: 30), () async {
+        if (!mounted || _shortId != null) return;
+        rlTrace('unpaired_auto_exit');
+        try {
+          await bind.mainGetCommon(key: 'rl-kill-siblings');
+        } catch (_) {}
+        exit(0);
+      });
+    }
     // 相談員が居なくなってアプリが自分を終了する直前に、
     //   サーバーへ「終わった」と伝えるための受け口を預ける。
     rlNotifySupportEnded = _notifySupportEndedToServer;
@@ -460,6 +485,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       await _writeOnetimePassword(res.onetimeToken);
       if (!mounted) return true;
       _shortId = res.shortId;
+      // ⚠ 組になった。置き去りの砂時計は必ず止める
+      _unpairedTimer?.cancel();
+      _unpairedTimer = null;
       if (res.customerToken != null && res.customerToken!.isNotEmpty) {
         _custToken = res.customerToken;
       }
@@ -614,6 +642,8 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     _rearm = null;
     _clock?.cancel();
     _clock = null;
+    _unpairedTimer?.cancel();
+    _unpairedTimer = null;
     _focus.dispose();
     _ctrl.dispose();
     super.dispose();
@@ -1443,6 +1473,9 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
 
     if (!mounted) return;
     _shortId = shortId;
+    // ⚠ 組になった。置き去りの砂時計は必ず止める
+    _unpairedTimer?.cancel();
+    _unpairedTimer = null;
     _connectedAt = DateTime.now();
     _clock?.cancel();
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {

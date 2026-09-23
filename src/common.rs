@@ -1060,6 +1060,51 @@ pub fn rl_kill_stale_onetime() {
     }
 }
 
+/// 🔴🔴 常駐が、お客様のPCに**残ったワンタイムを片付ける**（2026-09-23 社長のご指示）。
+///
+/// 🔴 なぜ要るか（実機で2回起きた）
+///   ⚠ 接続番号は**そのPCのMACアドレスから作る**ので、ワンタイムと常駐が
+///     同じPCで動くと**同じ番号**で受付に登録される。
+///     ＝ 相談員が常駐に繋いでも**ワンタイムの方に届き**、
+///     ⚠ 「パスワードが間違っています」になる。
+///   ⚠ ワンタイムは、認証コードで**組になっていれば**終了に気づいて自分で終わる。
+///     ⚠ ところが**組になっていないアプリ（押し間違いで2本目を起動した等）は、
+///       終了を知らせる相手がいないので永久に残る**。今日まさにこれが起きた。
+///   ★常駐が動き出すときに、残っているワンタイムを片付ける。
+///
+/// 共有識別子OK: 名前ではなく、CI が置く**目印ファイル**の有無で当社のワンタイム版だけに絞る。
+///   他製品の実行ファイルの隣にこの目印は存在しない。常駐・相談員版のフォルダにも無い。
+#[cfg(windows)]
+pub fn rl_kill_leftover_onetime_for_resident() {
+    use hbb_common::sysinfo::System;
+    // ⚠ 常駐版だけが呼ぶ。ワンタイム版が呼ぶと自分を殺す。
+    if !hbb_common::config::IS_RESIDENT_BUILD {
+        return;
+    }
+    const MARK: &str = "remohelppro-onetime.flag";
+    let my_pid = hbb_common::sysinfo::Pid::from_u32(std::process::id());
+    let mut sys = System::new();
+    sys.refresh_processes();
+    let mut killed = 0;
+    for (pid, p) in sys.processes().iter() {
+        if *pid == my_pid {
+            continue;
+        }
+        let Some(dir) = p.exe().parent() else { continue };
+        // ⚠ 目印が無いフォルダは触らない（他製品・常駐・相談員版を巻き込まない）
+        if !dir.join(MARK).exists() {
+            continue;
+        }
+        if p.kill() {
+            killed += 1;
+            log::info!("RL: 常駐が残っていたワンタイムを片付けました {:?}", dir);
+        }
+    }
+    if killed > 0 {
+        log::info!("RL: 残っていたワンタイムを {killed} 個片付けました");
+    }
+}
+
 pub fn rl_kill_sibling_processes() {
     use hbb_common::sysinfo::System;
     // ⚠ ワンタイム版だけの後始末。常駐版・相談員版では**絶対にやらない**。
