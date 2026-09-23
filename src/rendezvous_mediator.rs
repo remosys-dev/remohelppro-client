@@ -881,7 +881,9 @@ impl RendezvousMediator {
             return self.get_relay_server(provided_by_rendezvous_server);
         }
         let target = check_port(&preferred, config::RELAY_PORT);
-        match connect_tcp(&*target, Duration::from_millis(1500)).await {
+        // ⚠ connect_tcp の待ち時間は **ミリ秒の u64**（Duration ではない）。
+        //   2026-09-23 に Duration を渡して CI が落ちた（手元では組み立てられないので気づけない）。
+        match connect_tcp(&*target, 1500).await {
             Ok(_) => preferred,
             Err(err) => {
                 // ⚠ ここは「落ちている」以外に、会社の壁で塞がれている場合もある。
