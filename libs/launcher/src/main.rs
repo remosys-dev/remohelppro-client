@@ -148,7 +148,7 @@ fn main() {
             if starting_support {
                 eprintln!("skip update notice: starting a support session");
             } else {
-                notify_if_newer();
+                notify_if_newer(&app);
             }
             launch_app(&app);
         }
@@ -325,7 +325,83 @@ fn ver3(s: &str) -> (u32, u32, u32) {
     )
 }
 
-fn notify_if_newer() {
+/// インストール版を、その場で入れ直す（2026-09-25 社長のご指摘）。
+///
+/// 🔴🔴 なぜ要るか
+///   「更新ボタンが出てるから更新したのに更新できない？
+///     ログアウトしてから、ファイルダウンロードしてやって？これはおかしいね」
+///   ⚠ そのとおりだった。インストール版は**更新の仕組みそのものが無く**、
+///     知らせるだけで、入れ直しは全部手作業だった。
+///
+/// ⚠ 上書きはしない。**MSI を落として msiexec に任せる**。
+///   持ち運び版の exe で上書きするとインストールが壊れる（前からの注意書きのとおり）。
+/// ⚠ 管理者の権限が要るので、Windows の確認が**1回**出る。
+///   それでも「ログアウト→ダウンロード→入れ直す」より、ずっと短い。
+/// ⚠ 失敗しても**必ず本体を起動する**。相談員の仕事を止めない。
+/// ⚠ 動いている本体は先に閉じる。開いたままだと入れ替えに失敗する。
+fn try_update_installed(latest: &str, url: &str, app_path: &Path) -> Result<(), String> {
+    if url.is_empty() {
+        return Err("url なし".into());
+    }
+    // 一時フォルダへ落とす。⚠ Program Files には置かない（権限が要る）。
+    let tmp = std::env::temp_dir().join(format!("remohelppro-operator-{latest}.msi"));
+    let resp = ureq::get(url)
+        .timeout(Duration::from_secs(900))
+        .call()
+        .map_err(|e| format!("download: {e}"))?;
+    let mut buf = Vec::new();
+    resp.into_reader()
+        .take(300 * 1024 * 1024)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read body: {e}"))?;
+    // ⚠ 落とし切れていない物で入れ直さない。壊れた版を入れると二度と起動しない。
+    if (buf.len() as u64) < MIN_SIZE {
+        return Err(format!("too small: {} bytes", buf.len()));
+    }
+    fs::write(&tmp, &buf).map_err(|e| format!("write tmp: {e}"))?;
+
+    // 🔴🔴 動いている本体を閉じる。開いたままだと MSI が入れ替えられない。
+    //
+    //   共有識別子OK: ⚠ **名前では消さない。場所で絞る。**
+    //     `remohelppro.exe` は当社の中だけでも2か所にある（2026-09-25 実測）:
+    //       C:\Program Filesemohelppro\            … 相談員アプリ（これが狙い）
+    //       %LOCALAPPDATA%emohelppro-agent\         … ⚠ 常駐（絶対に落とさない）
+    //     `taskkill /IM remohelppro.exe` だと**常駐まで巻き添えで落ちる**。
+    //     同じ踏み方を 2026-08 にしている（常駐を入れた瞬間に接続が切れた）。
+    //   ★絞り込みの根拠は**実行ファイルの場所が一致すること**。
+    //     これなら他製品・他の版は絶対に掴まない。
+    //   ⚠ 自分（ランチャー）は別のファイル名なので落ちない。
+    //   ⚠ 黒い窓を出さない（CREATE_NO_WINDOW）。お客様の画面に出てしまう。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // ⚠ PowerShell の文字列なので、単引用符は2つ重ねて逃がす。
+        let target = app_path.to_string_lossy().replace('\'', "''");
+        let ps = format!(
+            "Get-Process -EA SilentlyContinue | Where-Object {{ $_.Path -eq '{target}' }} | Stop-Process -Force"
+        );
+        let _ = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        std::thread::sleep(Duration::from_millis(1200));
+    }
+
+    // ⚠ /qb は「進み具合だけ出す」。/qn（完全に無言）にしない。
+    //   1分ほど何も出ないと、相談員は固まったと思って別の操作をする。
+    let st = Command::new("msiexec")
+        .args(["/i", &tmp.to_string_lossy(), "/qb", "/norestart"])
+        .status()
+        .map_err(|e| format!("msiexec: {e}"))?;
+    let _ = fs::remove_file(&tmp);
+    if !st.success() {
+        return Err(format!("msiexec exit {:?}", st.code()));
+    }
+    Ok(())
+}
+
+fn notify_if_newer(app_path: &Path) {
     let Some(current) = installed_version() else {
         return; // 比べられないなら黙る
     };
@@ -340,6 +416,7 @@ fn notify_if_newer() {
         return;
     };
     let latest = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+    let url = v.get("url").and_then(|x| x.as_str()).unwrap_or("").to_string();
     if latest.is_empty() || ver3(latest) <= ver3(&current) {
         return;
     }
@@ -352,6 +429,85 @@ fn notify_if_newer() {
         let _ = fs::create_dir_all(dir);
     }
     let _ = fs::write(&marker, latest);
+
+    // 🔴🔴 ここで**入れ直すかを聞く**（2026-09-25 社長のご指摘）。
+    //   ⚠ 黙って入れ直さない。1〜2分かかり、その間アプリが閉じるため、
+    //     相談員が「今やってよいか」を決められる形にする。
+    //   ⚠ 既定は「はい」にしない。Enter の勢いで始まらないように。
+    #[cfg(windows)]
+    unsafe {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        let to_w = |s: &str| {
+            OsStr::new(s)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>()
+        };
+        let msg = format!(
+            "新しい版があります。いま入れ替えますか？
+
+\
+             お手元: {current}
+\
+             最新  : {latest}
+
+\
+             ・1〜2分かかります（その間アプリは閉じます）
+\
+             ・途中で Windows の許可の確認が1回出ます
+\
+             ・「いいえ」を選んでも、このまま接続できます"
+        );
+        let yes = winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            to_w(&msg).as_ptr(),
+            to_w("REMOHELP PRO の更新").as_ptr(),
+            winapi::um::winuser::MB_YESNO
+                | winapi::um::winuser::MB_ICONQUESTION
+                | winapi::um::winuser::MB_DEFBUTTON2,
+        ) == winapi::um::winuser::IDYES;
+        if yes {
+            match try_update_installed(latest, &url, &app_path) {
+                Ok(()) => {
+                    let m = format!("{latest} に入れ替えました。");
+                    winapi::um::winuser::MessageBoxW(
+                        std::ptr::null_mut(),
+                        to_w(&m).as_ptr(),
+                        to_w("REMOHELP PRO").as_ptr(),
+                        winapi::um::winuser::MB_OK
+                            | winapi::um::winuser::MB_ICONINFORMATION,
+                    );
+                }
+                Err(e) => {
+                    // ⚠ 黙って諦めない。何が起きたかを出す。仕事は止めない。
+                    eprintln!("installed update failed: {e}");
+                    let m = format!(
+                        "入れ替えられませんでした。
+
+\
+                         このままでも接続できます。
+\
+                         svr.remohelppro.jp/download から入れ直すこともできます。
+
+\
+                         （{e}）"
+                    );
+                    winapi::um::winuser::MessageBoxW(
+                        std::ptr::null_mut(),
+                        to_w(&m).as_ptr(),
+                        to_w("REMOHELP PRO").as_ptr(),
+                        winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONWARNING,
+                    );
+                }
+            }
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = url;
+    }
 
     #[cfg(windows)]
     unsafe {
