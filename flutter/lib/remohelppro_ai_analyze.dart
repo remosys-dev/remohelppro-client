@@ -478,10 +478,16 @@ Future<void> rlAiShowConfirm({
   required ({Uint8List bytes, int w, int h}) shot,
 }) async {
   final noteCtrl = TextEditingController();
+  // 🔴 「確かめました」のチェック（2026-09-25 社長のご指示）。
+  //   ⚠ 画像を出すだけでは、急いでいるときに**見ないまま押される**。
+  //     チェックを入れるまで送れなくして、必ず目を通してもらう。
+  //   ⚠ ブラウザ側（画面共有・現場カメラ）と同じ形にそろえる。
+  var confirmed = false;
   final ok = await showDialog<bool>(
     context: context,
     barrierDismissible: true,
-    builder: (ctx) => AlertDialog(
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setLocal) => AlertDialog(
       title: const Text('この画像をAIに送ります', style: TextStyle(fontSize: 16)),
       content: SizedBox(
         width: 460,
@@ -516,9 +522,24 @@ Future<void> rlAiShowConfirm({
               padding: const EdgeInsets.all(9),
               color: const Color(0xFFFEF3C7),
               child: const Text(
-                '⚠ お客様の画面の一部が、当社の外（AI）へ送られます。\n'
+                '⚠ お客様の氏名・住所・電話番号・口座番号・メールなどが\n'
+                '　写っていないか、必ずご確認ください。\n'
+                '画像は当社が委託するAIサービス提供事業者（国外の事業者を含みます）へ\n'
+                '送信されます。送信後に取り消すことはできません。\n'
                 '画像は保存しません。使った記録（日時・相談員）だけが残ります。',
                 style: TextStyle(fontSize: 11.5, color: Color(0xFF713F12)),
+              ),
+            ),
+            // ⚠ チェックを入れるまで送れない。読み飛ばしを防ぐ。
+            CheckboxListTile(
+              value: confirmed,
+              onChanged: (v) => setLocal(() => confirmed = v ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text(
+                'この画像を確認しました。お客様の個人情報は写っていません。',
+                style: TextStyle(fontSize: 12),
               ),
             ),
           ],
@@ -531,10 +552,12 @@ Future<void> rlAiShowConfirm({
           child: const Text('やめる'),
         ),
         ElevatedButton(
-          onPressed: () => Navigator.of(ctx).pop(true),
+          // ⚠ 確かめるまで押せない。
+          onPressed: confirmed ? () => Navigator.of(ctx).pop(true) : null,
           child: const Text('この画像を送る'),
         ),
       ],
+      ),
     ),
   );
   // ⚠ 閉じられた（Esc・外側を押した）ときは送らない。
