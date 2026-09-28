@@ -994,6 +994,15 @@ pub fn rl_remove_onetime_data() {
     }
 }
 
+/// スマホ版では何もしない。
+/// 🔴 2026-09-28: これが無かったため、Android で
+///   `error[E0425] cannot find function rl_remove_onetime_data` でビルドが落ちていた。
+/// ⚠ 呼び出し側（flutter_ffi.rs の `rl-wipe-onetime`）は**全機種で1つ**なので、
+///   上を cfg で消すだけでは足りない。⚠ **空の版を必ず置く**
+///   （rl_kill_sibling_processes と同じ流儀）。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn rl_remove_onetime_data() {}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// 🔴🔴 **起動するとき、前の版の残骸を片付ける**（2026-09-01 ご指摘）。
 ///
@@ -1105,6 +1114,10 @@ pub fn rl_kill_leftover_onetime_for_resident() {
     }
 }
 
+// 🔴 2026-09-28: ここに cfg が無かったため、Android では下の空の版と**2つ**になり
+//   `error[E0428] defined multiple times` でビルドが落ちていた。
+//   ⚠ 1か月Androidを作っていなかったので気づけなかった。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn rl_kill_sibling_processes() {
     use hbb_common::sysinfo::System;
     // ⚠ ワンタイム版だけの後始末。常駐版・相談員版では**絶対にやらない**。
@@ -1252,6 +1265,16 @@ pub async fn rl_refresh_global_ip() {
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub fn rl_global_ip() -> String {
     RL_GLOBAL_IP.lock().unwrap().clone()
+}
+
+/// スマホ版では常に空を返す。
+/// 🔴 2026-09-28: これが無かったため、Android で
+///   `error[E0425] cannot find function rl_global_ip` でビルドが落ちていた。
+/// ⚠ 呼び出し側（同じファイルの「相手のパソコンの情報」）は**全機種で1つ**。
+///   空を返せば `global_ip` の欄が出ないだけで、他に影響しない。
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+pub fn rl_global_ip() -> String {
+    String::new()
 }
 
 /// 🔴 サポートに要る「相手のパソコンの情報」（2026-08-26 ご要望）。
