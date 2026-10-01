@@ -3572,3 +3572,132 @@ mod tests {
         assert_eq!(combined_mask >> 3, MOUSE_BUTTON_LEFT | MOUSE_BUTTON_RIGHT);
     }
 }
+
+/// REMOHELP PRO: Mac の「新しい版があるか」を**自社の台帳**に聞く（2026-10-01 社長のご指示）。
+///
+/// 🔴🔴 なぜ要るか
+///   ⚠ Mac のアプリには**更新の仕組みが一度も無かった**。
+///     本家の更新確認（do_check_software_update）は、
+///     当社と無関係の先へ端末の指紋を送るので意図的に止めてある。
+///     その結果、⚠ **新しい版が出てもアプリは知る術がない**。
+///   ⚠ そのうえ相談員ビュアーは macOS の自動起動（LaunchAgent）に登録されており、
+///     手で入れ替えようとすると「使用中」で弾かれる。
+///     剛さん「終了しても、裏で何か起動したまま。削除もできない、更新もできない」
+///   ★本体の update_from_dmg() は、**自動起動を外す→終了→入れ替え→戻す**を
+///     正しい順でやる（privileges_scripts/update.scpt）。
+///     足りないのは「新しい版があると知る道」と「落とす道」だけ。ここで足す。
+///
+/// ⚠ 送るのは**何も無い**（GET するだけ）。端末の指紋は一切出さない。
+/// ⚠ 取れなくても落とさない。更新できないだけで、アプリは普通に使える。
+#[cfg(target_os = "macos")]
+pub async fn rl_check_mac_update() -> Option<(String, String)> {
+    // 戻り値: (新しい版, DMG の場所)
+    let base = hbb_common::config::AGENT_API_BASE;
+    let url = format!("{}/download/manifest.json", base);
+    let client = crate::hbbs_http::create_http_client_async_with_url(base).await;
+    let resp = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .ok()?;
+    let v: serde_json::Value = resp.json().await.ok()?;
+
+    // ⚠ 相談員版とお客様版で台帳の鍵が違う。⚠ 取り違えると**別の製品が入る**。
+    //   ★**いま動いている自分の場所**で決める。
+    //     Rust 側に相談員版かどうかの印は無い（Dart の dart-define でしか分からない）。
+    //     ⚠ get_app_name() で判断しない（記録: アプリ名を返す関数の罠）。
+    //     ★入れ替える対象は「自分がいる .app」そのものなので、それで判断するのが正しい。
+    let is_operator = std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            // …/REMOHELP PRO Operator.app/Contents/MacOS/<exe>
+            p.parent()
+                .and_then(|d| d.parent())
+                .and_then(|d| d.parent())
+                .and_then(|d| d.file_name().map(|n| n.to_string_lossy().to_string()))
+        })
+        .map(|name| name.to_lowercase().contains("operator"))
+        .unwrap_or(false);
+    let arch = if cfg!(target_arch = "aarch64") { "arm" } else { "intel" };
+    let key = if is_operator {
+        format!("mac_op_{arch}")
+    } else {
+        format!("mac_{arch}")
+    };
+    let ver = v[&key]["version"].as_str()?.to_owned();
+    let dl = v[&key]["url"].as_str()?.to_owned();
+    if ver.is_empty() || dl.is_empty() {
+        return None;
+    }
+    // ⚠ 落とし先が当社かどうかを必ず確かめる（別の場所から落とさない）。
+    if !dl.starts_with(&format!("{}/", base)) {
+        log::warn!("RL: 更新の入手先が当社ではありません: {dl}");
+        return None;
+    }
+    Some((ver, dl))
+}
+
+/// 上の確認を、Flutter から呼べる形（待つ）にしたもの。
+#[cfg(target_os = "macos")]
+pub fn rl_check_mac_update_blocking() -> Option<(String, String)> {
+    // ⚠ 画面を止めないよう、呼ぶ側（Dart）が別の仕事として呼ぶこと。
+    std::thread::spawn(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()
+            .and_then(|rt| rt.block_on(rl_check_mac_update()))
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
+/// REMOHELP PRO: 新しい版を落として、本体の入れ替えに渡す（2026-10-01）。
+///
+/// 🔴 入れ替えそのものは本体の update_from_dmg() に任せる。
+///   ⚠ 自分で ditto しない。本体は**自動起動を外してから**入れ替える。
+///     外さずに入れ替えると「使用中」で弾かれる（実機で確認）。
+#[cfg(target_os = "macos")]
+pub fn rl_download_and_update_mac(url: &str) -> hbb_common::ResultType<()> {
+    let base = hbb_common::config::AGENT_API_BASE;
+    // ⚠ 当社以外からは落とさない（ここでも必ず確かめる。入口は1つに頼らない）。
+    if !url.starts_with(&format!("{}/", base)) {
+        hbb_common::bail!("入手先が当社のものではありません");
+    }
+    let dir = std::env::temp_dir();
+    let path = dir.join("remohelppro-mac-update.dmg");
+
+    let url_owned = url.to_owned();
+    let path_owned = path.clone();
+    let got: hbb_common::ResultType<u64> = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        rt.block_on(async move {
+            let client = crate::hbbs_http::create_http_client_async_with_url(&url_owned).await;
+            let resp = client
+                .get(&url_owned)
+                .timeout(std::time::Duration::from_secs(900))
+                .send()
+                .await?;
+            let bytes = resp.bytes().await?;
+            // ⚠ 途中で切れた物・案内ページを掴んだ物で**上書きしない**。
+            if bytes.len() < 5_000_000 {
+                hbb_common::bail!("落とした物が小さすぎます（{} バイト）", bytes.len());
+            }
+            std::fs::write(&path_owned, &bytes)?;
+            Ok(bytes.len() as u64)
+        })
+    })
+    .join()
+    .map_err(|_| hbb_common::anyhow::anyhow!("落とす処理が終わりませんでした"))?;
+    let n = got?;
+    log::info!("RL: Mac の新しい版を落としました（{n} バイト）。入れ替えます");
+
+    let p = path
+        .to_str()
+        .ok_or_else(|| hbb_common::anyhow::anyhow!("置き場所を読めません"))?;
+    crate::platform::macos::update_from_dmg(p)
+}

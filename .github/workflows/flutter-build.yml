@@ -1347,6 +1347,28 @@ jobs:
           sed -i -e 's/com\.carriez\.rustdesk/jp.remohelppro.desktop/g' flutter/macos/Runner.xcodeproj/project.pbxproj
           echo "--- bundle identifier after patch ---"
           grep -n 'PRODUCT_BUNDLE_IDENTIFIER' flutter/macos/Runner.xcodeproj/project.pbxproj | head -5
+          # 🔴🔴 版の数字を焼き込む（2026-10-01 社長の実機で判明）。
+          #
+          #   ⚠ この工程は **Windows のジョブにしか無かった**。
+          #     Mac は flutter/pubspec.yaml の「1.4.9」のまま固定で出ており、
+          #     実際は 1.4.25 の端末も「1.4.9」と名乗っていた。
+          #     ＝ サポートで「どの版をお使いですか」が**成り立たない**。
+          #     ＝ 更新の道具も、入れ替わったことを版で確かめられない。
+          #   ⚠ 2026-08-06 に Windows、08-12 に Android を直したときの**取りこぼし**。
+          #     （記録: ★OSごとの出し忘れ）
+          #   ⚠ 版の形は x.y.z+n。ビルド番号(+n)は残す。
+          #   ★焼き込めなければ**中止する**（版が嘘のまま配らない）。
+          #   ⚠ macOS の sed は GNU とは別物（-i の書き方が違う）。awk で1行だけ置く。
+          RL_BUILDNO=$(grep -m1 '^version:' flutter/pubspec.yaml | sed 's/.*+//' | tr -d ' ')
+          test -n "$RL_BUILDNO" || { echo "RL: pubspec のビルド番号を読めませんでした"; exit 1; }
+          awk -v v="version: ${VERSION}+${RL_BUILDNO}" '
+            BEGIN { done = 0 }
+            /^version:/ && !done { print v; done = 1; next }
+            { print }' flutter/pubspec.yaml > flutter/pubspec.yaml.new
+          mv flutter/pubspec.yaml.new flutter/pubspec.yaml
+          echo "--- pubspec.yaml version ---"; grep -m1 '^version:' flutter/pubspec.yaml
+          grep -q "^version: ${VERSION}+" flutter/pubspec.yaml || {
+            echo "RL: pubspec の版を焼き込めませんでした。中止します"; exit 1; }
           # 🔴🔴 Mac の顧客版が、ずっと相談員向けのフル画面のままだった
           #   （2026-08-04 検証で確定。2026-07-29 に直したつもりが効いていなかった）。
           #

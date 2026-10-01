@@ -2415,6 +2415,43 @@ pub fn main_update_me() -> SyncReturn<bool> {
     SyncReturn(true)
 }
 
+/// REMOHELP PRO: Mac に新しい版があるかを自社の台帳に聞く（2026-10-01 社長のご指示）。
+///
+/// 戻り値: 新しい版があれば "版|DMGの場所"、無ければ空。
+/// ⚠ 版の比較はしない（Mac はアプリの中の版が当てにならないため・1.4.9 固定）。
+///   ★呼ぶ側（Dart）が、落とす前にお客様へ確かめる。
+#[cfg(target_os = "macos")]
+pub fn rl_mac_update_info() -> String {
+    match crate::common::rl_check_mac_update_blocking() {
+        Some((ver, url)) => format!("{ver}|{url}"),
+        None => String::new(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn rl_mac_update_info() -> String {
+    String::new()
+}
+
+/// REMOHELP PRO: Mac を最新の版に入れ替える（2026-10-01 社長のご指示）。
+///
+/// 🔴 本体の update_from_dmg() が、**自動起動を外す→終了→入れ替え→戻す**を
+///   正しい順でやる（privileges_scripts/update.scpt）。
+///   ⚠ この順でないと「使用中で上書きできない」になる（実機で確認）。
+/// ⚠ 落とすのは当社のサーバーからだけ（rl_check_mac_update で確かめ済み）。
+#[cfg(target_os = "macos")]
+pub fn rl_mac_do_update(url: String) -> String {
+    match crate::common::rl_download_and_update_mac(&url) {
+        Ok(_) => String::new(),
+        Err(e) => format!("{e}"),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn rl_mac_do_update(_url: String) -> String {
+    "この端末では使えません".to_owned()
+}
+
 pub fn set_cur_session_id(session_id: SessionID) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         set_cur_session_id_(session_id, &session.get_keyboard_mode())
