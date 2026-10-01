@@ -2420,17 +2420,24 @@ pub fn main_update_me() -> SyncReturn<bool> {
 /// 戻り値: 新しい版があれば "版|DMGの場所"、無ければ空。
 /// ⚠ 版の比較はしない（Mac はアプリの中の版が当てにならないため・1.4.9 固定）。
 ///   ★呼ぶ側（Dart）が、落とす前にお客様へ確かめる。
-#[cfg(target_os = "macos")]
+///
+/// ⚠⚠ **関数は1つだけ定義する**（2026-10-01 のビルド失敗で判明）。
+///   `#[cfg]` で OS ごとに2つ書くと、橋の生成器（flutter_rust_bridge）が
+///   ⚠ **「symbols have already been defined」で止まる**。
+///   生成器は cfg を見ずにソースを読むため、同じ名前が2つあると数えてしまう。
+///   ★中身の分岐を `#[cfg]` で書く。外側は1つ。
 pub fn rl_mac_update_info() -> String {
-    match crate::common::rl_check_mac_update_blocking() {
-        Some((ver, url)) => format!("{ver}|{url}"),
-        None => String::new(),
+    #[cfg(target_os = "macos")]
+    {
+        return match crate::common::rl_check_mac_update_blocking() {
+            Some((ver, url)) => format!("{ver}|{url}"),
+            None => String::new(),
+        };
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn rl_mac_update_info() -> String {
-    String::new()
+    #[cfg(not(target_os = "macos"))]
+    {
+        String::new()
+    }
 }
 
 /// REMOHELP PRO: Mac を最新の版に入れ替える（2026-10-01 社長のご指示）。
@@ -2439,17 +2446,20 @@ pub fn rl_mac_update_info() -> String {
 ///   正しい順でやる（privileges_scripts/update.scpt）。
 ///   ⚠ この順でないと「使用中で上書きできない」になる（実機で確認）。
 /// ⚠ 落とすのは当社のサーバーからだけ（rl_check_mac_update で確かめ済み）。
-#[cfg(target_os = "macos")]
+/// ⚠ 上と同じ理由で、関数は1つだけ定義する。
 pub fn rl_mac_do_update(url: String) -> String {
-    match crate::common::rl_download_and_update_mac(&url) {
-        Ok(_) => String::new(),
-        Err(e) => format!("{e}"),
+    #[cfg(target_os = "macos")]
+    {
+        return match crate::common::rl_download_and_update_mac(&url) {
+            Ok(_) => String::new(),
+            Err(e) => format!("{e}"),
+        };
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn rl_mac_do_update(_url: String) -> String {
-    "この端末では使えません".to_owned()
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+        "この端末では使えません".to_owned()
+    }
 }
 
 pub fn set_cur_session_id(session_id: SessionID) {
