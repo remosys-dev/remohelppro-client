@@ -1,0 +1,31 @@
+# 🔴 試験用（開発機向け）常駐アプリ・Windows（2026-10-03 社長のご指示）
+#
+#   ⚠ 本番用（resident-build.yml）と**中身は同じソース**。同じコミットから作られる。
+#     違うのは dev_server: true で書き換える名前と接続先だけ。
+#   ⚠ 鍵が違うので、これを入れても**本番の受付には繋がれない**。
+#   ⚠ MSI の UpgradeCode も変わるので、本番用を**上書きしません**（別製品として並びます）。
+#   ⚠ 常駐は名前に関係なく必ずインストールされる作り。だからこそ名前を分けておく。
+#
+#   使い方:  git tag dev-resident-1 && git push origin dev-resident-1
+name: dev resident (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-resident-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-resident:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "dev-resident"
+      support_show_window: false
+      windows_only: true
+      resident: true
+      dev_server: true

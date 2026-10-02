@@ -390,7 +390,9 @@ jobs:
       #
       #   ⚠ Mac の相談員版(mac-operator)も同じ。両方を対象にする。
       - name: Operator build flag (sed)
-        if: ${{ inputs.upload-tag == 'operator' || inputs.upload-tag == 'mac-operator' }}
+        # ⚠ 試験用（dev-operator）も通す。contains にしておけば、
+        #   試験用を足すたびに条件を書き足さなくてよい（2026-10-03）。
+        if: ${{ contains(inputs.upload-tag, 'operator') }}
         shell: bash
         run: |
           sed -i 's/pub const IS_OPERATOR_BUILD: bool = false;/pub const IS_OPERATOR_BUILD: bool = true;/' libs/hbb_common/src/config.rs
@@ -423,7 +425,7 @@ jobs:
         run: |
           if [ "${{ inputs.resident }}" = "true" ]; then
             NAME="REMOHELP PRO Agent"
-          elif [ "${{ inputs.upload-tag }}" = "operator" ] || [ "${{ inputs.upload-tag }}" = "mac-operator" ]; then
+          elif case "${{ inputs.upload-tag }}" in *operator*) true;; *) false;; esac; then
             NAME="REMOHELP PRO Operator"
           elif [ "${{ inputs.support_show_window }}" = "true" ]; then
             NAME="REMOHELP PRO Support"
@@ -599,6 +601,36 @@ jobs:
           [ "$ng" = "0" ] || { echo "RL: 試験用の焼き込みに失敗しました。中止します"; exit 1; }
           echo "RL: 試験用に焼き込みました（受付=${DEV_RD} / 管理=${DEV_API} / アプリ名に -dev）"
 
+          # 🔴🔴 社長のご指示（2026-10-03）
+          #   「開発機と名前だけがちがうだけど、ソースは同じくしないと
+          #     直しても違う結果にならないようにしてね」
+          #
+          #   ★ソースは1本。試験用と本番用は**同じコミット**から作られる。
+          #     違うのは、ここで書き換える**名前と接続先だけ**。
+          #   ⚠ それを言葉で約束しない。⚠ **機械で数える。**
+          #     試験用の値が、決めた4つのファイル以外に入り込んでいたら止める。
+          #     （いつか別の場所に書き足して、気づかないまま枝分かれするのを防ぐ）
+          echo "--- 試験用の値が入ってよいファイル（この4つだけ）---"
+          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc'
+          for a in $ALLOWED; do echo "    $a"; done
+          STRAY=$(grep -rl -e 'dev-rd\.remohelppro\.jp' -e 'X16EW5WI' -e 'remohelppro-dev' \
+                    --include='*.rs' --include='*.rc' --include='*.dart' --include='*.toml' \
+                    --include='*.yaml' --include='*.json' . 2>/dev/null \
+                  | sed 's|^\./||' | sort -u || true)
+          BAD=""
+          for f in $STRAY; do
+            ok=0
+            for a in $ALLOWED; do [ "$f" = "$a" ] && ok=1; done
+            [ "$ok" = "1" ] || BAD="$BAD $f"
+          done
+          if [ -n "$BAD" ]; then
+            echo "RL: ⚠ 試験用の値が想定外のファイルに入っています:$BAD"
+            echo "RL: ソースが枝分かれしかけています。中止します"
+            exit 1
+          fi
+          echo "RL: ✓ 試験用と本番用の違いは、この4ファイルの名前と接続先だけです（同じコミットから作られます）"
+          echo "RL: commit = $(git rev-parse HEAD)"
+
       # ⚠ 試験用は画面でも見分けられるようにする（2026-10-02）。
       #   ⚠ 本番用と試験用を同じPCに入れるので、見た目が同じだと必ず取り違える。
       - name: 試験用の表示名にする（dev only）
@@ -606,14 +638,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # 🔴🔴 2026-10-03: ⚠ **最初に書いた置換は壊れていた。**
+          #   `"REMOHELP PRO \(.*\)"` は**最長一致**なので、Runner.rc の
+          #     VALUE "FileDescription", "REMOHELP PRO Support" "\0"
+          #   から `Support" "\0` までを1つの名前として取ってしまい、
+          #     VALUE "FileDescription", "REMOHELP PRO Support" "\0 [試験用]"
+          #   ＝ ⚠ **表示名は元のまま**で、終端記号の後ろに文字が付いただけだった。
+          #   ⚠ しかも下の「表示名が期待どおりか」の検査は**正しく通ってしまう**
+          #     （表示名は本当に変わっていないため）。黙って見分けの付かない物ができる。
+          #   ★引用符の中だけを取る（[^"]*）。.* を使わない。
           for f in build.rs libs/portable/build.rs; do
-            sed -i 's/\.set("FileDescription", "REMOHELP PRO \(.*\)")/.set("FileDescription", "REMOHELP PRO \1 [試験用]")/' "$f"
+            sed -i 's/\.set("FileDescription", "\([^"]*\)")/.set("FileDescription", "\1 [試験用]")/' "$f"
             grep -n 'FileDescription' "$f"
+            grep -q '\.set("FileDescription", "[^"]*\[試験用\]")' "$f" || {
+              echo "RL: $f の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
           done
           R=flutter/windows/runner/Runner.rc
-          sed -i 's/VALUE "FileDescription", "REMOHELP PRO \(.*\)"/VALUE "FileDescription", "REMOHELP PRO \1 [試験用]"/' "$R"
+          sed -i 's/VALUE "FileDescription", "\([^"]*\)"/VALUE "FileDescription", "\1 [試験用]"/' "$R"
           grep -n 'FileDescription' "$R"
-          grep -q '試験用' "$R" || { echo "RL: 表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
+          # ⚠ 「試験用 という字がどこかにある」では足りない（前は終端の後ろにあっても通った）。
+          #   ★**表示名の引用符の中**に入っていることを確かめる。
+          grep -q 'VALUE "FileDescription", "[^"]*\[試験用\]"' "$R" || {
+            echo "RL: Runner.rc の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
           echo "RL: 表示名に [試験用] を付けました"
 
       - name: Build rustdesk
@@ -635,8 +681,12 @@ jobs:
           #     違っていればビルドを止める（緑のまま古い物を配らない）。
           $want = "REMOHELP PRO Remote Desktop"
           if ("${{ inputs.resident }}" -eq "true") { $want = "REMOHELP PRO Agent" }
-          elseif ("${{ inputs.upload-tag }}" -eq "operator" -or "${{ inputs.upload-tag }}" -eq "mac-operator") { $want = "REMOHELP PRO Operator" }
+          elseif ("${{ inputs.upload-tag }}" -like "*operator*") { $want = "REMOHELP PRO Operator" }
           elseif ("${{ inputs.support_show_window }}" -eq "true") { $want = "REMOHELP PRO Support" }
+          # 🔴🔴 2026-10-03: 試験用は表示名に [試験用] が付く。ここに足さないと
+          #   ⚠ **付いていない物が「期待どおり」として通ってしまう**（実際に通った）。
+          #   ★名前を変える処理を足したら、必ずこの期待値にも足す。
+          if ("${{ inputs.dev_server }}" -eq "true") { $want = "$want [試験用]" }
           $got = (Get-Item ./rustdesk/rustdesk.exe).VersionInfo.FileDescription
           Write-Host "RL: 出来た実行ファイルの表示名 = [$got] / 期待 = [$want]"
           if ($got -ne $want) {
@@ -865,9 +915,23 @@ jobs:
           #   ⚠ 自己展開の中身は上の generate.py で確定済みなので、
           #     ここで戻しても配布物には影響しない。
           #   ⚠ コピーで両方残すと、payload に2本入って容量が倍になる。必ず mv。
-          if [ "$INNER_EXE" != "remohelppro.exe" ]; then
-            mv ./rustdesk/$INNER_EXE ./rustdesk/remohelppro.exe
-            echo "RL: inner exe name restored for MSI step"
+          # 🔴🔴 試験用は MSI の中の名前も変える（2026-10-03 社長のご指示「名前を全て変えて」）。
+          #   ⚠ MSI の UpgradeCode は **app_name から作られる**（res/msi/preprocess.py）。
+          #     ＝ 名前を変えると Windows が**別の製品**として扱う。
+          #     ★そうしないと、本番用が入っているPCに入れたとき
+          #       **本番用を上書き（アップグレード）してしまう**。
+          #   ⚠ インストール先フォルダ・ARPの表示・独自URLも app_name から派生する。
+          MSI_BIN="remohelppro"
+          if [ "${{ inputs.dev_server }}" = "true" ]; then
+            MSI_BIN="remohelppro-dev"
+            echo "RL: MSI も試験用の名前にします（$MSI_BIN）"
+          fi
+          # ⚠ 次の工程（MSI 作成）は PowerShell なので、ここの変数は引き継がれない。
+          #   ★GITHUB_ENV に書いて渡す。
+          echo "RL_MSI_BIN=$MSI_BIN" >> "$GITHUB_ENV"
+          if [ "$INNER_EXE" != "$MSI_BIN.exe" ]; then
+            mv ./rustdesk/$INNER_EXE ./rustdesk/$MSI_BIN.exe
+            echo "RL: inner exe name restored for MSI step ($MSI_BIN.exe)"
           fi
           mkdir -p ./SignOutput
           # 🔴 継続用は名前を分ける。同じリリースに並んでも取り違えないため、
@@ -959,7 +1023,9 @@ jobs:
               exit 1
             }
           }
-          python preprocess.py --arp --bin-name remohelppro --version ${{ env.VERSION }} -d ../../rustdesk
+          # ⚠ 試験用は app-name も bin-name も変える（UpgradeCode が変わり別製品になる）。
+          #   本番用は今までどおり remohelppro。RL_MSI_BIN は前の工程が入れている。
+          python preprocess.py --arp --app-name $env:RL_MSI_BIN --bin-name $env:RL_MSI_BIN --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
           # 🔴 試験用は名前でも分ける（2026-10-03）。⚠ このステップは PowerShell なので

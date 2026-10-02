@@ -1,0 +1,36 @@
+# 🔴 試験用（開発機向け）相談員アプリ・Windows（2026-10-03 社長のご指示）
+#
+#   社長「本場とまったく同じくつくるが、名前を全て変えて」
+#       「開発機と名前だけがちがうだけど、ソースは同じくしないと
+#         直しても違う結果にならないようにしてね」
+#
+#   ⚠ 本番用（operator-build.yml）と**中身は同じソース**。同じコミットから作られる。
+#     違うのは dev_server: true で書き換える名前と接続先だけ。
+#   ⚠ 鍵が違うので、これを入れても**本番の受付には繋がれない**。
+#   ⚠ MSI の UpgradeCode も変わるので、本番用を**上書きしません**（別製品として並びます）。
+#
+#   使い方:  git tag dev-operator-1 && git push origin dev-operator-1
+#   ⚠ タグは**1本ずつ** push する（3本を超えると Actions が黙って起動しない）。
+name: dev operator (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-operator-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-operator:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      # ⚠ 本番の配布タグ（operator）と**別のタグ**。同じにすると本番の配布物を上書きする。
+      # ⚠ 名前に operator を含めること。相談員版かどうかの判定がこの語を見ている。
+      upload-tag: "dev-operator"
+      support_show_window: false
+      windows_only: true
+      dev_server: true
