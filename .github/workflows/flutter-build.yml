@@ -879,6 +879,15 @@ jobs:
             SUFFIX="-keep"
             echo "RL: keep build (no self-delete, no expiry)"
           fi
+          # 🔴 試験用は**名前でも**分ける（2026-10-03 社長のご指示）。
+          #   ⚠ 中身は分かれている（受付も鍵もアプリ名も別）のに、
+          #     ファイル名が本番と同じだと ⚠ **落としたあと手元で見分けられない**。
+          #     同じPCに本番用と試験用を並べて入れる前提なので、取り違えが必ず起きる。
+          #   ⚠ 版の数字は真ん中に置いたまま（-1.4.15- の形）。配布側がこの並びを見ている。
+          if [ "${{ inputs.dev_server }}" = "true" ]; then
+            SUFFIX="${SUFFIX}-dev"
+            echo "RL: dev build (test server)"
+          fi
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${SUFFIX}.exe
 
       # remohelppro: 単一「自己展開・ダブルクリック起動」exe を成果物化（MSIビルドより前＝MSI失敗でも取れる）
@@ -953,7 +962,13 @@ jobs:
           python preprocess.py --arp --bin-name remohelppro --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
-          mv ./Package/bin/x64/Release/ja-jp/Package.msi ../../SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
+          # 🔴 試験用は名前でも分ける（2026-10-03）。⚠ このステップは PowerShell なので
+          #   bash の SUFFIX は引き継がれない。ここで独立に組み立てる。
+          $suffix = ""
+          if ("${{ inputs.dev_server }}" -eq "true") { $suffix = "-dev"; Write-Host "RL: dev build (test server)" }
+          # ⚠ PowerShell は "$suffix.msi" を「$suffix の msi という項目」と読む（空になる）。
+          #   ★必ず ${suffix} と括弧で囲む。囲まないと拡張子の無いファイルができる。
+          mv ./Package/bin/x64/Release/ja-jp/Package.msi "../../SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${suffix}.msi"
           sha256sum ../../SignOutput/remohelppro-*.msi
 
       # remohelppro: MSIが出来ていれば上げる（MSI失敗でもjobは失敗させない＝単一exeは別ステップで取得済み）
