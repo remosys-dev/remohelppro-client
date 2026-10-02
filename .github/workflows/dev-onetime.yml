@@ -1,0 +1,37 @@
+# 🔴 試験用（開発機向け）お客様アプリ・Windows（2026-10-02 社長のご指示）
+#
+#   社長「本番機と衝突しないで同じPCで共存できるようにしてテストできるようにしてください」
+#
+#   ⚠ 本番用（onetime-portable.yml）と**中身は同じソース**。
+#     違うのは dev_server: true で焼き込む値だけ（受付・鍵・管理サーバー・アプリ名）。
+#   ⚠ 鍵が違うので、これを入れても**本番の受付には繋がれない**。
+#   ⚠ アプリ名が違うので、同じPCに本番用と並べて入れられる。
+#
+#   ⚠ 試験用の成果物は**お客様のダウンロード画面に出しません**。
+#     最高管理者の画面からだけ落とせるようにします。
+#
+#   使い方:  git tag dev-onetime-1 && git push origin dev-onetime-1
+#   ⚠ タグは**1本ずつ** push する（3本を超えると Actions が黙って起動しない）。
+name: dev onetime (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-onetime-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-onetime:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      # ⚠ 本番の配布タグ（onetime-portable）と**別のタグ**にする。
+      #   同じにすると、試験用が本番の配布物を上書きする。
+      upload-tag: "dev-onetime"
+      support_show_window: true
+      windows_only: true
+      dev_server: true

@@ -71,6 +71,22 @@ on:
         #     ファイル単体では何もできない（常駐版のような無人アクセスとは別物）。
         type: boolean
         default: false
+      dev_server:
+        # 🔴 REMOHELP PRO: true のとき「試験用」としてビルドする（2026-10-02 社長のご指示）。
+        #   社長「本番機と衝突しないで同じPCで共存できるようにしてテストできるように」
+        #
+        #   焼き込む値を4つ差し替える（ソースは1本のまま）:
+        #     受付        rd.remohelppro.jp  → dev-rd.remohelppro.jp
+        #     受付の公開鍵  本番の鍵           → 開発機で作った別の鍵
+        #     管理サーバー  svr.remohelppro.jp → dev.remohelppro.jp
+        #     アプリ名     remohelppro…       → remohelppro-dev…
+        #
+        #   ⚠ 鍵が違うので、試験用アプリは**本番の受付に受け付けてもらえない**。
+        #     設定を間違えても本番には物理的に繋がれない。これが一番の守り。
+        #   ⚠ アプリ名が違うので、通信路も保存先も別。同じPCに本番用と並べて入れられる。
+        #   ⚠ 試験用の成果物は**お客様のダウンロード画面に出さない**。
+        type: boolean
+        default: false
       onetime_valid_days:
         # REMOHELP PRO: ワンタイム版の有効期限（日数）。support_show_window のときだけ効く。
         #   期限を過ぎたファイルは**起動そのものを断る**（認証コード画面を出さない）。
@@ -521,6 +537,84 @@ jobs:
             echo "RL: 製品ごとの印を付ける処理が見つかりません。中止します"; exit 1; }
           echo "--- config.rs apply_product_id_bit ---"
           grep -n -A6 'fn apply_product_id_bit' libs/hbb_common/src/config.rs
+
+      # 🔴🔴 試験用（開発機向け）に焼き込み直す（2026-10-02 社長のご指示）。
+      #
+      #   社長「本番機と衝突しないで同じPCで共存できるようにしてテストできるようにしてください」
+      #
+      #   ⚠ なぜ要るか
+      #     アプリの中には**接続先・鍵・管理サーバー・アプリ名が焼き込まれており**、
+      #     すべて本番を指している。開発機で試そうとして入れると、
+      #     ⚠ 本番の受付に登録しに行き、⚠ **本番の常駐PCと接続番号を奪い合う**
+      #       （接続番号は MAC アドレス由来なので実際に重なる）。
+      #     ⚠ さらにアプリ名が同じなので、同じPC内で**通信路も奪い合う**。
+      #
+      #   ★ソースは1本のまま、**焼き込む値だけ**を変える。
+      #     ⚠ 試験用のソースを別に持たない。直しが2回になり、必ずどちらかが古くなる。
+      #     ⚠ すでにある流儀（APP_NAME を sed で変える）に1つ足すだけ。
+      #
+      #   ⚠ このステップは**他の sed が全部終わったあと**に置くこと。
+      #     APP_NAME は製品ごとに先に書き換えられる（-support / -agent）。
+      #     そのあとに -dev を差し込むので、順番が入れ替わると効かない。
+      #
+      #   ⚠ 鍵が違えば、試験用アプリは**本番の受付に受け付けてもらえない**。
+      #     設定を間違えても、本番には物理的に繋がれない。これが一番の守り。
+      - name: 試験用サーバー向けに焼き込む（dev only）
+        if: ${{ inputs.dev_server }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CFG=libs/hbb_common/src/config.rs
+          DEV_RD=dev-rd.remohelppro.jp
+          DEV_KEY=X16EW5WIutsAYbjd9yIrzR3HYEBYeKgMkmXQa2ByG7w=
+          DEV_API=https://dev.remohelppro.jp
+
+          echo "--- 変える前 ---"
+          grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
+
+          sed -i "s|RwLock::new(\"rd\.remohelppro\.jp\"\.to_owned())|RwLock::new(\"${DEV_RD}\".to_owned())|" "$CFG"
+          sed -i "s|&\[\"rd\.remohelppro\.jp\"\]|\&[\"${DEV_RD}\"]|" "$CFG"
+          sed -i "s|RS_PUB_KEY: &str = \"[^\"]*\"|RS_PUB_KEY: \&str = \"${DEV_KEY}\"|" "$CFG"
+          sed -i "s|AGENT_API_BASE: &str = \"[^\"]*\"|AGENT_API_BASE: \&str = \"${DEV_API}\"|" "$CFG"
+          # ★アプリ名に -dev を差し込む。remohelppro-support → remohelppro-dev-support
+          #   ⚠ これで通信路（\\.\pipe\<アプリ名>\…）と保存先（%APPDATA%\<アプリ名>）が
+          #     本番用と別になり、**同じPCに両方入れられる**。
+          sed -i "s|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro-dev|" "$CFG"
+
+          echo "--- 変えたあと ---"
+          grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
+
+          # ⚠ sed は一致しなくても成功で終わる。必ず変わったことを数える
+          #   （記録: check-tool-returned-success-while-failing）。
+          ng=0
+          grep -q "RwLock::new(\"${DEV_RD}\".to_owned())" "$CFG" || { echo "✗ 受付(PROD_RENDEZVOUS_SERVER)が変わっていません"; ng=1; }
+          grep -q "&\[\"${DEV_RD}\"\]"                    "$CFG" || { echo "✗ 受付(RENDEZVOUS_SERVERS)が変わっていません"; ng=1; }
+          grep -q "RS_PUB_KEY: &str = \"${DEV_KEY}\""     "$CFG" || { echo "✗ 公開鍵が変わっていません"; ng=1; }
+          grep -q "AGENT_API_BASE: &str = \"${DEV_API}\"" "$CFG" || { echo "✗ 管理サーバーが変わっていません"; ng=1; }
+          grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-dev' "$CFG" || { echo "✗ アプリ名に -dev が入っていません"; ng=1; }
+          # 🔴 本番の値が1つでも残っていたら出さない。残ったまま配ると本番を壊す。
+          grep -q '"rd\.remohelppro\.jp"'                 "$CFG" && { echo "✗ 本番の受付が残っています"; ng=1; }
+          grep -q '4OcCv+gE'                              "$CFG" && { echo "✗ 本番の公開鍵が残っています"; ng=1; }
+          grep -q 'svr\.remohelppro\.jp'                  "$CFG" && { echo "✗ 本番の管理サーバーが残っています"; ng=1; }
+          [ "$ng" = "0" ] || { echo "RL: 試験用の焼き込みに失敗しました。中止します"; exit 1; }
+          echo "RL: 試験用に焼き込みました（受付=${DEV_RD} / 管理=${DEV_API} / アプリ名に -dev）"
+
+      # ⚠ 試験用は画面でも見分けられるようにする（2026-10-02）。
+      #   ⚠ 本番用と試験用を同じPCに入れるので、見た目が同じだと必ず取り違える。
+      - name: 試験用の表示名にする（dev only）
+        if: ${{ inputs.dev_server }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in build.rs libs/portable/build.rs; do
+            sed -i 's/\.set("FileDescription", "REMOHELP PRO \(.*\)")/.set("FileDescription", "REMOHELP PRO \1 [試験用]")/' "$f"
+            grep -n 'FileDescription' "$f"
+          done
+          R=flutter/windows/runner/Runner.rc
+          sed -i 's/VALUE "FileDescription", "REMOHELP PRO \(.*\)"/VALUE "FileDescription", "REMOHELP PRO \1 [試験用]"/' "$R"
+          grep -n 'FileDescription' "$R"
+          grep -q '試験用' "$R" || { echo "RL: 表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
+          echo "RL: 表示名に [試験用] を付けました"
 
       - name: Build rustdesk
         run: |
