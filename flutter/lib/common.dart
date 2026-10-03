@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+// 🔴 当社サーバーの場所はここと1か所だけ。
+import 'package:flutter_hbb/remohelppro_endpoints.dart';
 import 'dart:math';
 
 import 'package:back_button_interceptor/back_button_interceptor.dart';
@@ -2388,6 +2390,27 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
   return false;
 }
 
+/// 🔴 自分のバージョンを管理サーバーへ名乗る（2026-10-03 社長のご指示）。
+///
+///   社長「認証コードが画面開く時に自動でバージョン情報をしらべて表示」
+///
+/// ⚠ 待たない（呼ぶ側が await しない）。接続の起動を遅らせないため。
+/// ⚠ 送れなくても接続は止めない（名乗れないだけ）。
+/// ⚠ 橋渡しの関数を増やさない（同名関数の衝突を避ける）。Dart から直接送る。
+Future<void> rlReportAppVersion(String token) async {
+  try {
+    final v = (await bind.mainGetVersion()).trim();
+    if (v.isEmpty) return;
+    await http.post(
+      Uri.parse('$kRlApiBase/api/op/report-version'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'token': token, 'version': v}),
+    );
+  } catch (e) {
+    debugPrint('[rlReportAppVersion] 送れませんでした: $e');
+  }
+}
+
 List<String>? urlLinkToCmdArgs(Uri uri) {
   String? command;
   String? id;
@@ -2553,6 +2576,21 @@ List<String>? urlLinkToCmdArgs(Uri uri) {
     }.entries) {
       final denied = opDeny.split(',').contains(e.key);
       bind.mainSetLocalOption(key: e.value, value: denied ? 'Y' : '');
+    }
+    // 🔴🔴 自分のバージョンを名乗る（2026-10-03 社長のご指示）。
+    //
+    //   社長「認証コードが画面開く時に自動でバージョン情報をしらべて表示」
+    //
+    //   ⚠ ブラウザは、このPCに入っている操作アプリの版を**知らない**。
+    //   ⚠ 専用のボタンは置かない。知らないURLを渡すと、アプリは
+    //     **接続先のIDだと思って**ビュアーを開き「ID が存在しません」を出す
+    //     （2026-10-03 録画で確認）。
+    //   ★接続の合図に**相乗り**させる。札が無ければ何もしない。
+    //   ⚠ 送れなくても接続は止めない（名乗れないだけ）。
+    final rv = (param["rv"] ?? '').trim();
+    if (rv.isNotEmpty) {
+      // ⚠ 待たない。接続の起動を遅らせないため。
+      rlReportAppVersion(rv);
     }
     return args;
   }

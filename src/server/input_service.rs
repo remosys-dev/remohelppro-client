@@ -450,6 +450,20 @@ lazy_static::lazy_static! {
         Arc::new(Mutex::new(Enigo::new()))
     };
     static ref KEYS_DOWN: Arc<Mutex<HashMap<KeysDown, Instant>>> = Default::default();
+    /// 🔴🔴 **遠隔から押したままのマウスボタン**（2026-10-03 社長・剛さんのご報告）。
+    ///
+    ///   ⚠ 症状: 常駐で接続した瞬間、⚠ **顧客PCの左上にデスクトップの右クリックメニューが開く**。
+    ///     録画で確認: 相談員のカーソルは映像の外。押したわけではない。
+    ///
+    ///   ⚠ なぜ起きるか
+    ///     接続が切れたときに入力の状態を戻す処理（reset_input_ondisconn）は
+    ///     ⚠ **macOS にしか無かった**。Windows では押されたままのボタンが残る。
+    ///     次に接続すると try_activate_screen がカーソルを左上(-6,-6)へ飛ばし、
+    ///     そこで残っていたボタンが離れて**メニューが開く**。
+    ///
+    ///   ★遠隔から押した物だけを覚える。⚠ お客様がご自分で押しているボタンは絶対に触らない。
+    ///     （全部まとめて離すと、お客様の操作を横から壊すことになる）
+    static ref REMOTE_MOUSE_DOWN: Arc<Mutex<std::collections::HashSet<i32>>> = Default::default();
     static ref LATEST_PEER_INPUT_CURSOR: Arc<Mutex<Input>> = Default::default();
     static ref LATEST_SYS_CURSOR_POS: Arc<Mutex<(Option<Instant>, (i32, i32))>> = Arc::new(Mutex::new((None, (INVALID_CURSOR_POS, INVALID_CURSOR_POS))));
     // Track connections that are currently using relative mouse movement.
@@ -1063,6 +1077,15 @@ pub fn handle_mouse_simulation_(evt: &MouseEvent, conn: i32) {
     crate::platform::windows::try_change_desktop();
     let buttons = evt.mask >> 3;
     let evt_type = evt.mask & MOUSE_TYPE_MASK;
+    // 🔴 遠隔から押した／離したボタンを覚える（2026-10-03 社長・剛さんのご報告）。
+    //   ⚠ 切断のときに**ここで覚えた物だけ**を離す。
+    //     お客様がご自分で押しているボタンは絶対に触らない。
+    //   ⚠ 覚えるだけ。ここでは何も送らない（今までの動きは1ミリも変えない）。
+    if evt_type == MOUSE_TYPE_DOWN {
+        REMOTE_MOUSE_DOWN.lock().unwrap().insert(buttons);
+    } else if evt_type == MOUSE_TYPE_UP {
+        REMOTE_MOUSE_DOWN.lock().unwrap().remove(&buttons);
+    }
     let mut en = ENIGO.lock().unwrap();
     #[cfg(target_os = "macos")]
     en.set_ignore_flags(enigo_ignore_flags());
@@ -1368,6 +1391,55 @@ fn reset_input() {
 #[cfg(target_os = "macos")]
 pub fn reset_input_ondisconn() {
     QUEUE.exec_async(reset_input);
+    release_remote_mouse_buttons();
+}
+
+/// 🔴🔴 接続が切れたとき、**遠隔から押したままのマウスボタンを離す**
+/// （2026-10-03 社長・剛さんのご報告）。
+///
+///   ⚠ 症状: 常駐で接続した瞬間、⚠ **顧客PCの左上にデスクトップの右クリックメニューが開く**。
+///     録画で確認: 相談員のカーソルは映像の外。押したわけではない。
+///
+///   ⚠ なぜ起きるか
+///     接続が切れたときに入力の状態を戻す処理は ⚠ **macOS にしか無かった**。
+///     Windows では押されたままのボタンが残る。次に接続すると
+///     try_activate_screen がカーソルを左上(-6,-6)へ飛ばし、
+///     そこで残っていたボタンが離れて**メニューが開く**。
+///
+///   ★遠隔から押した物だけを離す。
+///     ⚠ お客様がご自分で押しているボタンは**絶対に触らない**
+///       （全部まとめて離すと、お客様の操作を横から壊すことになる）。
+///   ⚠ 覚えていない＝押していない。何もしない（余計なイベントを出さない）。
+pub fn release_remote_mouse_buttons() {
+    let held: Vec<i32> = {
+        let mut m = REMOTE_MOUSE_DOWN.lock().unwrap();
+        let v = m.iter().copied().collect();
+        m.clear();
+        v
+    };
+    if held.is_empty() {
+        return;
+    }
+    log::info!("RL: 接続が切れたので、押したままのボタンを離します: {:?}", held);
+    let mut en = ENIGO.lock().unwrap();
+    for b in held {
+        match b {
+            MOUSE_BUTTON_LEFT => en.mouse_up(MouseButton::Left),
+            MOUSE_BUTTON_RIGHT => en.mouse_up(MouseButton::Right),
+            MOUSE_BUTTON_WHEEL => en.mouse_up(MouseButton::Middle),
+            MOUSE_BUTTON_BACK => en.mouse_up(MouseButton::Back),
+            MOUSE_BUTTON_FORWARD => en.mouse_up(MouseButton::Forward),
+            _ => {}
+        }
+    }
+}
+
+/// ⚠ Windows / Linux にも後始末を用意する（2026-10-03）。
+///   ⚠ それまで reset_input_ondisconn は macOS にしか無く、
+///     呼び出し側も macOS だけだった。＝ Windows は**一度も後始末していなかった**。
+#[cfg(not(target_os = "macos"))]
+pub fn reset_input_ondisconn() {
+    release_remote_mouse_buttons();
 }
 
 fn sim_rdev_rawkey_position(code: KeyCode, keydown: bool) {

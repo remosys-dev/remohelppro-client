@@ -583,6 +583,18 @@ jobs:
           #     本番用と別になり、**同じPCに両方入れられる**。
           sed -i "s|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro-dev|" "$CFG"
 
+          # 🔴🔴 2026-10-03: 本番のURLは config.rs だけではなかった。
+          #   ⚠ Dart 側にも**別に**書かれていた（remohelppro_endpoints.dart）。
+          #     そのままだと試験用アプリが**本番の管理サーバーを見る**。
+          #   ⚠ 穴あけ（STUN）も rd.remohelppro.jp を直書きしていた。
+          #   ★名前と接続先が出る場所を**全部**書き換える。
+          DART_EP=flutter/lib/remohelppro_endpoints.dart
+          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" "$DART_EP"
+          sed -i "s|'svr[.]remohelppro[.]jp'|'dev.remohelppro.jp'|g" "$DART_EP"
+          sed -i "s|rd[.]remohelppro[.]jp|${DEV_RD}|g" libs/hbb_common/src/webrtc.rs src/common.rs
+          echo "--- Dart 側の行き先 ---"; grep -n 'kRlApiBase\|kRlApiHost' "$DART_EP"
+          echo "--- 穴あけ(STUN) ---"; grep -n 'STUNS_V4\|DEFAULT_ICE_SERVERS' libs/hbb_common/src/webrtc.rs src/common.rs | head -4
+
           echo "--- 変えたあと ---"
           grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
 
@@ -595,9 +607,19 @@ jobs:
           grep -q "AGENT_API_BASE: &str = \"${DEV_API}\"" "$CFG" || { echo "✗ 管理サーバーが変わっていません"; ng=1; }
           grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-dev' "$CFG" || { echo "✗ アプリ名に -dev が入っていません"; ng=1; }
           # 🔴 本番の値が1つでも残っていたら出さない。残ったまま配ると本番を壊す。
-          grep -q '"rd\.remohelppro\.jp"'                 "$CFG" && { echo "✗ 本番の受付が残っています"; ng=1; }
-          grep -q '4OcCv+gE'                              "$CFG" && { echo "✗ 本番の公開鍵が残っています"; ng=1; }
-          grep -q 'svr\.remohelppro\.jp'                  "$CFG" && { echo "✗ 本番の管理サーバーが残っています"; ng=1; }
+          # 🔴🔴 本番の値が**どこか1か所でも**残っていたら出さない（2026-10-03 強くした）。
+          #   ⚠ 最初は config.rs だけを見ていた。そのため
+          #     ⚠ **Dart 側の本番URLが残ったまま通っていた**。
+          #     試験用アプリが本番の管理サーバーを見るところだった。
+          #   ★ソース全体を数える。残っていたらビルドを止める。
+          LEFT=$(grep -rn -e 'svr[.]remohelppro[.]jp' -e 'rd[.]remohelppro[.]jp' -e '4OcCv+gE' \
+                   --include='*.rs' --include='*.dart' . 2>/dev/null \
+                 | grep -vE '^[^:]+:[0-9]+: *(//|///|#|\*)' || true)
+          if [ -n "$LEFT" ]; then
+            echo "RL: ✗ 本番の値が残っています:"
+            echo "$LEFT" | head -20
+            ng=1
+          fi
           [ "$ng" = "0" ] || { echo "RL: 試験用の焼き込みに失敗しました。中止します"; exit 1; }
           echo "RL: 試験用に焼き込みました（受付=${DEV_RD} / 管理=${DEV_API} / アプリ名に -dev）"
 

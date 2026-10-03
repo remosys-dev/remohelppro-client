@@ -510,6 +510,25 @@ pub fn core_main() -> Option<Vec<String>> {
         //   ⚠ 渡せたときだけ終わる。渡せなければ（まだ誰も動いていない等）
         //     今までどおり起動する。ここで止めると、相談員は
         //     「押しても何も起きない」になる。
+        // 🔴🔴 ［バージョン確認］（2026-10-03 社長のご指示）。
+        //   社長「今使ってるバージョンを確認できるように、バージョン確認 をクリックすると
+        //        今のバージョンが確認できるように」
+        //
+        //   ⚠ ブラウザは、このPCに入っている版を**知らない**。
+        //     ★相談員が押した瞬間に渡される「その場限りの札」と、自分の版を
+        //       管理サーバーへ送る。サーバーは札からその相談員を特定して覚える。
+        //
+        //   ⚠ **窓は開かない**。版を送って、そのまま終わる。
+        //     押すたびに本体が起動すると、接続番号や通信路を奪い合う
+        //     （[[remohelppro-duplicate-instances-break-everything]]）。
+        //   ⚠ ここは他のどの処理より先に置く。下の転送に入ると窓が開く。
+        if let Some(rest) = args[0].strip_prefix(&crate::get_uri_prefix()) {
+            if rest.starts_with("report-version") {
+                crate::rl_report_version(rest);
+                return None;
+            }
+        }
+
         //   ⚠ 送り先は uni_links_desktop の受け口（WM_USER+2）。
         //     受け側の作りは pub の uni_links_desktop_plugin.cpp で確認済み。
         #[cfg(windows)]

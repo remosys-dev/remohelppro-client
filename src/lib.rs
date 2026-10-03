@@ -92,4 +92,11 @@ pub mod privacy_mode;
 #[cfg(windows)]
 pub mod virtual_display_manager;
 
+// 🔴 相談員アプリが自分のバージョンを名乗る（2026-10-03 社長のご指示）。
+//   ⚠ 窓は開かない。送ってそのまま終わる。
+mod rl_report_version;
+pub use rl_report_version::rl_report_version;
+
 mod kcp_stream;
+// RemoSys自作エンジン I-1: QUICトランスポート(KCP→QUIC・HoL解消)。設計=docs/engine_integration_remohelppro.md
+mod quic_stream;

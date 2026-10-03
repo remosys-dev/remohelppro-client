@@ -1191,7 +1191,10 @@ impl Connection {
             rdev::set_mouse_extra_info(enigo::ENIGO_INPUT_EXTRA_VALUE);
             rdev::set_keyboard_extra_info(enigo::ENIGO_INPUT_EXTRA_VALUE);
         }
-        #[cfg(target_os = "macos")]
+        // 🔴🔴 2026-10-03: ⚠ **macOS だけ**になっていたのを全OSで呼ぶ。
+        //   Windows では一度も後始末しておらず、押したままのボタンが次の接続まで残った。
+        //   ＝ 常駐で接続した瞬間に、顧客PCの左上でメニューが開く原因
+        //     （社長・剛さんのご報告／録画で確認）。
         reset_input_ondisconn();
         loop {
             match receiver.recv_timeout(std::time::Duration::from_millis(500)) {
