@@ -617,7 +617,11 @@ jobs:
           #     ⚠ **Dart 側の本番URLが残ったまま通っていた**。
           #     試験用アプリが本番の管理サーバーを見るところだった。
           #   ★ソース全体を数える。残っていたらビルドを止める。
-          LEFT=$(grep -rn -e 'svr[.]remohelppro[.]jp' -e 'rd[.]remohelppro[.]jp' -e '4OcCv+gE' \
+          # ⚠⚠ 2026-10-03: この検査の書き方が間違っていた。
+          #   `rd.remohelppro.jp` は **`dev-rd.remohelppro.jp` の中にも含まれる**ので、
+          #   正しく書き換えた後でも「残っている」と言い続けていた。
+          #   ★前に dev- が**付いていない**ものだけを数える。
+          LEFT=$(grep -rnE '(^|[^.A-Za-z0-9-])(svr|rd)[.]remohelppro[.]jp|4OcCv[+]gE' \
                    --include='*.rs' --include='*.dart' . 2>/dev/null \
                  | grep -vE '^[^:]+:[0-9]+: *(//|///|#|\*)' || true)
           if [ -n "$LEFT" ]; then
