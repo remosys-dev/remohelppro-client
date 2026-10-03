@@ -642,7 +642,10 @@ jobs:
           #     試験用の値が、決めた4つのファイル以外に入り込んでいたら止める。
           #     （いつか別の場所に書き足して、気づかないまま枝分かれするのを防ぐ）
           echo "--- 試験用の値が入ってよいファイル（この4つだけ）---"
-          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc'
+          # ⚠ 2026-10-03: 書き換える場所を増やしたとき、この一覧に足すのを忘れていた。
+          #   ★書き換える sed とこの一覧は**必ず両方**に足す。
+          #   ⚠ 検査が鳴ったのは正しい。止めてくれたから気づけた。
+          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc flutter/lib/remohelppro_endpoints.dart libs/hbb_common/src/webrtc.rs src/common.rs libs/launcher/src/main.rs'
           for a in $ALLOWED; do echo "    $a"; done
           STRAY=$(grep -rl -e 'dev-rd\.remohelppro\.jp' -e 'X16EW5WI' -e 'remohelppro-dev' \
                     --include='*.rs' --include='*.rc' --include='*.dart' --include='*.toml' \
