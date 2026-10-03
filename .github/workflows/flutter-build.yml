@@ -592,6 +592,11 @@ jobs:
           sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" "$DART_EP"
           sed -i "s|'svr[.]remohelppro[.]jp'|'dev.remohelppro.jp'|g" "$DART_EP"
           sed -i "s|rd[.]remohelppro[.]jp|${DEV_RD}|g" libs/hbb_common/src/webrtc.rs src/common.rs
+          # ⚠ ランチャー（別クレート）も本番を直書きしていた（2026-10-03 検査が鳴って気づいた）。
+          #   ★案内文の中のホスト名も含めて全部変える（社長「名前を全て変えて」）。
+          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" libs/launcher/src/main.rs
+          sed -i "s|svr[.]remohelppro[.]jp|dev.remohelppro.jp|g" libs/launcher/src/main.rs
+          echo "--- ランチャー ---"; grep -n 'remohelppro[.]jp' libs/launcher/src/main.rs | head -4
           echo "--- Dart 側の行き先 ---"; grep -n 'kRlApiBase\|kRlApiHost' "$DART_EP"
           echo "--- 穴あけ(STUN) ---"; grep -n 'STUNS_V4\|DEFAULT_ICE_SERVERS' libs/hbb_common/src/webrtc.rs src/common.rs | head -4
 
