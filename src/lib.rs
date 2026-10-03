@@ -98,5 +98,3 @@ mod rl_report_version;
 pub use rl_report_version::rl_report_version;
 
 mod kcp_stream;
-// RemoSys自作エンジン I-1: QUICトランスポート(KCP→QUIC・HoL解消)。設計=docs/engine_integration_remohelppro.md
-mod quic_stream;
