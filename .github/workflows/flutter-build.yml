@@ -969,8 +969,17 @@ jobs:
                       | grep -oE '"[^"]+"' | tr -d '"' | head -1)
             # ⚠ 読めなかったら止める。空のまま進むと MSI の名前が壊れて
             #   「作れたのに中身が違う」いちばん気づけない形になる。
+            #
+            # 🔴 **-dev は真ん中に入る**（2026-10-06 実測で確認）。
+            #   試験用の sed は `"remohelppro` を `"remohelppro-dev` に置換するので、
+            #   製品ごとの `-support` / `-agent` は**その後ろに残る**:
+            #     相談員  remohelppro         → remohelppro-dev
+            #     遠隔    remohelppro-support → remohelppro-dev-support
+            #     常駐    remohelppro-agent   → remohelppro-dev-agent
+            #   ⚠ 最初「末尾が -dev」と決めつけて書き、遠隔と常駐が落ちた。
+            #     ★止まったこと自体は正しい（空のまま進まなかった）。
             case "$MSI_BIN" in
-              remohelppro*-dev|remohelppro-dev) : ;;
+              remohelppro-dev|remohelppro-dev-*) : ;;
               *) echo "✗ MSI の名前をアプリ名から取れませんでした（取れた値: '$MSI_BIN'）"; exit 1 ;;
             esac
             echo "RL: MSI も試験用の名前にします（$MSI_BIN）"
