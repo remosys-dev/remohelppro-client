@@ -957,7 +957,22 @@ jobs:
           #   ⚠ インストール先フォルダ・ARPの表示・独自URLも app_name から派生する。
           MSI_BIN="remohelppro"
           if [ "${{ inputs.dev_server }}" = "true" ]; then
-            MSI_BIN="remohelppro-dev"
+            # 🔴🔴 2026-10-06 社長のご指摘「本番と衝突しないようにファイル名を変える」で
+            #   調べて見つけた穴。⚠ ここは **3製品とも `remohelppro-dev` 固定**だった。
+            #   ＝ UpgradeCode が3製品で同じになり、⚠ **試験用どうしが互いを上書きする**。
+            #     本番とは分かれていたが、試験用の遠隔・常駐・相談員が1つしか入らない。
+            #   ★アプリ名をそのまま使う。APP_NAME はこの時点で既に製品ごとに
+            #     `remohelppro-support-dev` / `remohelppro-agent-dev` / `remohelppro-dev`
+            #     に書き換わっている（dev の sed は Build rustdesk の直前＝ここより前）。
+            CFG=libs/hbb_common/src/config.rs
+            MSI_BIN=$(grep -oE 'APP_NAME: RwLock<String> = RwLock::new\("[^"]+"' "$CFG" \
+                      | grep -oE '"[^"]+"' | tr -d '"' | head -1)
+            # ⚠ 読めなかったら止める。空のまま進むと MSI の名前が壊れて
+            #   「作れたのに中身が違う」いちばん気づけない形になる。
+            case "$MSI_BIN" in
+              remohelppro*-dev|remohelppro-dev) : ;;
+              *) echo "✗ MSI の名前をアプリ名から取れませんでした（取れた値: '$MSI_BIN'）"; exit 1 ;;
+            esac
             echo "RL: MSI も試験用の名前にします（$MSI_BIN）"
           fi
           # ⚠ 次の工程（MSI 作成）は PowerShell なので、ここの変数は引き継がれない。
@@ -982,11 +997,19 @@ jobs:
           #     ファイル名が本番と同じだと ⚠ **落としたあと手元で見分けられない**。
           #     同じPCに本番用と試験用を並べて入れる前提なので、取り違えが必ず起きる。
           #   ⚠ 版の数字は真ん中に置いたまま（-1.4.15- の形）。配布側がこの並びを見ている。
+          # 🔴🔴 試験用は**製品名もファイル名に入れる**（2026-10-06 社長のご指摘で判明）。
+          #   ⚠ 直す前は 3製品とも `remohelppro-<版>-x86_64-dev.exe` で、
+          #     ⚠ **どれが遠隔でどれが常駐か、落としたあと見分けられなかった**。
+          #     本番は配布のときに名前を付け替えるので表に出ていなかっただけ。
+          #   ★アプリ名（remohelppro-support-dev など）をそのまま頭に使う。
+          #     アプリ名とファイル名が必ず一致するので、取り違えようがない。
+          #   ⚠ 版の数字は真ん中に置いたまま（-1.4.15- の形）。配布側がこの並びを見ている。
+          BASE="remohelppro"
           if [ "${{ inputs.dev_server }}" = "true" ]; then
-            SUFFIX="${SUFFIX}-dev"
-            echo "RL: dev build (test server)"
+            BASE="$MSI_BIN"   # 上でアプリ名から取って検証済み
+            echo "RL: dev build (test server) — 名前の頭: $BASE"
           fi
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${SUFFIX}.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/${BASE}-${{ env.VERSION }}-${{ matrix.job.arch }}${SUFFIX}.exe
 
       # remohelppro: 単一「自己展開・ダブルクリック起動」exe を成果物化（MSIビルドより前＝MSI失敗でも取れる）
       - name: Upload single self-extracting exe
@@ -1065,10 +1088,21 @@ jobs:
           # 🔴 試験用は名前でも分ける（2026-10-03）。⚠ このステップは PowerShell なので
           #   bash の SUFFIX は引き継がれない。ここで独立に組み立てる。
           $suffix = ""
-          if ("${{ inputs.dev_server }}" -eq "true") { $suffix = "-dev"; Write-Host "RL: dev build (test server)" }
+          if ("${{ inputs.keep_mode }}" -eq "true") { $suffix = "-keep" }
+          # 🔴🔴 名前の頭はアプリ名（2026-10-06）。exe 側と同じ形に揃える。
+          #   ⚠ 直す前は 3製品とも `remohelppro-<版>-x64-dev.msi` で、
+          #     ⚠ **どれが遠隔でどれが常駐か見分けられなかった**。
+          #   ⚠ RL_MSI_BIN は前の工程がアプリ名から取って入れている
+          #     （remohelppro-support-dev / remohelppro-agent-dev / remohelppro-dev）。
+          $base = "remohelppro"
+          if ("${{ inputs.dev_server }}" -eq "true") {
+            $base = $env:RL_MSI_BIN
+            if (-not $base) { Write-Host "RL: RL_MSI_BIN が空。MSI を作らない"; exit 1 }
+            Write-Host "RL: dev build (test server) — 名前の頭: $base"
+          }
           # ⚠ PowerShell は "$suffix.msi" を「$suffix の msi という項目」と読む（空になる）。
           #   ★必ず ${suffix} と括弧で囲む。囲まないと拡張子の無いファイルができる。
-          mv ./Package/bin/x64/Release/ja-jp/Package.msi "../../SignOutput/remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${suffix}.msi"
+          mv ./Package/bin/x64/Release/ja-jp/Package.msi "../../SignOutput/${base}-${{ env.VERSION }}-${{ matrix.job.arch }}${suffix}.msi"
           sha256sum ../../SignOutput/remohelppro-*.msi
 
       # remohelppro: MSIが出来ていれば上げる（MSI失敗でもjobは失敗させない＝単一exeは別ステップで取得済み）
