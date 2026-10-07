@@ -966,7 +966,21 @@ jobs:
           }
           # ⚠ 試験用は app-name も bin-name も変える（UpgradeCode が変わり別製品になる）。
           #   本番用は今までどおり remohelppro。RL_MSI_BIN は前の工程が入れている。
-          python preprocess.py --arp --app-name $env:RL_MSI_BIN --bin-name $env:RL_MSI_BIN --version ${{ env.VERSION }} -d ../../rustdesk
+          # 🔴🔴 2026-10-07: --product-lower も**必ず**渡す（社長の実機で事故が起きた）。
+          #   ⚠ 渡していなかったため、試験用の MSI も既定の `remohelppro` で
+          #     **独自URL `remohelppro://` を登録し、本番から奪っていた**。
+          #     ＝ 本番の相談員画面で「接続」を押すと試験用のランチャーが動き
+          #       「相談員プログラムが見つかりません」になる（2026-10-07 実機で発生）。
+          #   ⚠ Windows では**1つのURLスキームを持てるアプリは1つだけ**。
+          #     UpgradeCode（別製品）を分けても、URLは共有の入口なので奪い合う。
+          #   ★奪う対象は res/msi/Package/Components/Regs.wxs の5か所:
+          #     HKCR\<ProductLower> ／ …\shell\open\command ／ HKCU\Software\Classes\<ProductLower>
+          #   ★RL_APP_BASE（remohelppro-dev…）を使えば試験用は `remohelppro-dev://` を
+          #     登録し、本番の `remohelppro://` に**触れない**。
+          $plower = $env:RL_APP_BASE
+          if (-not $plower) { $plower = "remohelppro" }
+          Write-Host "RL: MSI の独自URLスキーム: ${plower}://"
+          python preprocess.py --arp --app-name $env:RL_MSI_BIN --bin-name $env:RL_MSI_BIN --product-lower $plower --version ${{ env.VERSION }} -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 /p:SuppressIces="ICE30" /p:Cultures=ja-jp
           # 🔴 試験用は名前でも分ける（2026-10-03）。⚠ このステップは PowerShell なので
