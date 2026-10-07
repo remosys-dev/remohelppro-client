@@ -1,0 +1,31 @@
+# 🔴 試験用（開発機向け）相談員アプリ・Android（2026-10-07 社長のご指示）
+#
+#   ⚠ 本番用（android-operator.yml）と**中身は同じソース**。同じコミットから作られる。
+#     違うのは dev_server: true で書き換える名前と接続先だけ。
+#   ⚠ 鍵が違うので、これを入れても**本番の受付には繋がれない**。
+#   ⚠ Play Protect に「安全でないアプリ」と警告されます（本番の APK と同じ）。
+#
+#   使い方:  git tag dev-android-operator-1 && git push origin dev-android-operator-1
+#   ⚠ タグは**1本ずつ** push する（3本を超えると Actions が黙って起動しない）。
+name: dev android operator (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-android-operator-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-android-operator:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      # ⚠ 本番の配布タグ（android-operator）と**別のタグ**。
+      upload-tag: "dev-android-operator"
+      android_only: true
+      remohelppro_operator: true
+      dev_server: true

@@ -1,0 +1,32 @@
+# 🔴 試験用（開発機向け）相談員アプリ・Mac（2026-10-07 社長のご指示）
+#
+#   ⚠ 本番用（mac-operator.yml）と**中身は同じソース**。同じコミットから作られる。
+#     違うのは dev_server: true で書き換える名前と接続先だけ。
+#   ⚠ 鍵が違うので、これを入れても**本番の受付には繋がれない**。
+#   ⚠ 署名（Apple の公証）はしない。Mac 側で「開発元を確認できない」と出る。
+#     右クリック →「開く」で進めてください。
+#
+#   使い方:  git tag dev-mac-operator-1 && git push origin dev-mac-operator-1
+#   ⚠ タグは**1本ずつ** push する（3本を超えると Actions が黙って起動しない）。
+name: dev mac operator (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-mac-operator-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-mac-operator:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      # ⚠ 本番の配布タグ（mac-operator）と**別のタグ**。同じにすると本番の配布物を上書きする。
+      upload-tag: "dev-mac-operator"
+      mac_only: true
+      support_show_window: false
+      dev_server: true

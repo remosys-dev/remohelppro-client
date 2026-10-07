@@ -1,0 +1,34 @@
+# 🔴 試験用（開発機向け）お客様用アプリ・Mac（2026-10-07 社長のご指示）
+#
+#   ⚠ 本番用（mac-onetime.yml）と**中身は同じソース**。
+#   ⚠ 鍵が違うので**本番の受付には繋がれない**。⚠ 署名しない。
+#   ⚠ お客様用は使用期限が**ビルドした日から**数えられる（既定365日）。
+#
+#   使い方:  git tag dev-mac-onetime-1 && git push origin dev-mac-onetime-1
+name: dev mac onetime (test build)
+
+on:
+  workflow_dispatch:
+    inputs:
+      onetime_valid_days:
+        description: '使用期限（日）'
+        required: false
+        default: '365'
+  push:
+    tags:
+      - 'dev-mac-onetime-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-mac-onetime:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "dev-mac-onetime"
+      mac_only: true
+      support_show_window: true
+      onetime_valid_days: ${{ inputs.onetime_valid_days || 365 }}
+      dev_server: true

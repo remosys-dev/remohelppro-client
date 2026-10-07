@@ -632,6 +632,25 @@ jobs:
           [ "$ng" = "0" ] || { echo "RL: 試験用の焼き込みに失敗しました。中止します"; exit 1; }
           echo "RL: 試験用に焼き込みました（受付=${DEV_RD} / 管理=${DEV_API} / アプリ名に -dev）"
 
+          # 🔴🔴 成果物の名前の頭を、ここで**1回だけ**決めて全工程へ渡す（2026-10-07）。
+          #   ⚠ これを入れる前は、exe / msi / dmg / apk が**それぞれの工程で別々に**
+          #     `remohelppro-` と直書きしていた。
+          #     ＝ 試験用も本番と同じ名前になり、⚠ **落としたあと見分けられない**。
+          #     Windows だけ直しても Mac と Android が残る形だった。
+          #   ★アプリ名（APP_NAME）をそのまま使う。アプリ名とファイル名が必ず一致する:
+          #     相談員  remohelppro-dev
+          #     遠隔    remohelppro-dev-support
+          #     常駐    remohelppro-dev-agent
+          #   ⚠ 本番では RL_APP_BASE を入れない。各工程が既定の remohelppro を使う。
+          APP_BASE=$(grep -oE 'APP_NAME: RwLock<String> = RwLock::new\("[^"]+"' "$CFG" \
+                     | grep -oE '"[^"]+"' | tr -d '"' | head -1)
+          case "$APP_BASE" in
+            remohelppro-dev|remohelppro-dev-*) : ;;
+            *) echo "RL: ✗ 成果物の名前をアプリ名から取れませんでした（取れた値: '$APP_BASE'）"; exit 1 ;;
+          esac
+          echo "RL_APP_BASE=$APP_BASE" >> "$GITHUB_ENV"
+          echo "RL: 成果物の名前の頭は $APP_BASE にします（exe / msi / dmg / apk 共通）"
+
           # 🔴🔴 社長のご指示（2026-10-03）
           #   「開発機と名前だけがちがうだけど、ソースは同じくしないと
           #     直しても違う結果にならないようにしてね」
@@ -1013,11 +1032,10 @@ jobs:
           #   ★アプリ名（remohelppro-support-dev など）をそのまま頭に使う。
           #     アプリ名とファイル名が必ず一致するので、取り違えようがない。
           #   ⚠ 版の数字は真ん中に置いたまま（-1.4.15- の形）。配布側がこの並びを見ている。
-          BASE="remohelppro"
-          if [ "${{ inputs.dev_server }}" = "true" ]; then
-            BASE="$MSI_BIN"   # 上でアプリ名から取って検証済み
-            echo "RL: dev build (test server) — 名前の頭: $BASE"
-          fi
+          # ⚠ 名前の頭は RL_APP_BASE（試験用の焼き込み工程が決める）。
+          #   本番では空なので remohelppro のまま。★exe/msi/dmg/apk で同じ決め方にする。
+          BASE="${RL_APP_BASE:-remohelppro}"
+          [ -n "${RL_APP_BASE:-}" ] && echo "RL: dev build (test server) — 名前の頭: $BASE"
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/${BASE}-${{ env.VERSION }}-${{ matrix.job.arch }}${SUFFIX}.exe
 
       # remohelppro: 単一「自己展開・ダブルクリック起動」exe を成果物化（MSIビルドより前＝MSI失敗でも取れる）
@@ -1101,12 +1119,13 @@ jobs:
           # 🔴🔴 名前の頭はアプリ名（2026-10-06）。exe 側と同じ形に揃える。
           #   ⚠ 直す前は 3製品とも `remohelppro-<版>-x64-dev.msi` で、
           #     ⚠ **どれが遠隔でどれが常駐か見分けられなかった**。
-          #   ⚠ RL_MSI_BIN は前の工程がアプリ名から取って入れている
-          #     （remohelppro-support-dev / remohelppro-agent-dev / remohelppro-dev）。
-          $base = "remohelppro"
+          #   ⚠ RL_APP_BASE は試験用の焼き込み工程がアプリ名から取って入れている
+          #     （remohelppro-dev / remohelppro-dev-support / remohelppro-dev-agent）。
+          #   ★2026-10-07: exe / dmg / apk と**同じ変数**に揃えた。
+          $base = $env:RL_APP_BASE
+          if (-not $base) { $base = "remohelppro" }
           if ("${{ inputs.dev_server }}" -eq "true") {
-            $base = $env:RL_MSI_BIN
-            if (-not $base) { Write-Host "RL: RL_MSI_BIN が空。MSI を作らない"; exit 1 }
+            if (-not $env:RL_APP_BASE) { Write-Host "RL: RL_APP_BASE が空。MSI を作らない"; exit 1 }
             Write-Host "RL: dev build (test server) — 名前の頭: $base"
           }
           # ⚠ PowerShell は "$suffix.msi" を「$suffix の msi という項目」と読む（空になる）。
@@ -1764,9 +1783,14 @@ jobs:
       - name: Rename rustdesk
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
+          # ⚠ 名前の頭は RL_APP_BASE（試験用の焼き込み工程が決める。本番では空）。
+          #   ★2026-10-07: exe / msi / apk と同じ決め方に揃えた。
+          #   ⚠ 揃える前は dmg も `remohelppro-` 固定で、
+          #     試験用の Mac 版が本番と同じ名前になるところだった。
+          BASE="${RL_APP_BASE:-remohelppro}"
           SIGNED="remohelppro-${{ env.VERSION }}.dmg"
           if [ -f "$SIGNED" ]; then
-              mv "$SIGNED" "remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg"
+              mv "$SIGNED" "${BASE}-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg"
           fi
           ls -la *.dmg
 
@@ -2081,7 +2105,7 @@ jobs:
               # build flutter
               pushd flutter
               RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
-              mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../${RL_APP_BASE:-remohelppro}-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             armv7-linux-androideabi)
               mkdir -p ./flutter/android/app/src/main/jniLibs/armeabi-v7a
@@ -2090,7 +2114,7 @@ jobs:
               # build flutter
               pushd flutter
               RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
-              mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../${RL_APP_BASE:-remohelppro}-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             x86_64-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/x86_64
@@ -2099,7 +2123,7 @@ jobs:
               # build flutter
               pushd flutter
               RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-x64 --split-per-abi
-              mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-x86_64-${{ matrix.job.reltype }}.apk ../${RL_APP_BASE:-remohelppro}-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             i686-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/x86
@@ -2108,12 +2132,12 @@ jobs:
               # build flutter
               pushd flutter
               RL_LEGACY_PACKAGING=true flutter build apk ${RL_DART_DEFINES} "--${{ matrix.job.reltype }}" --target-platform android-x86 --split-per-abi
-              mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-x86-${{ matrix.job.reltype }}.apk ../${RL_APP_BASE:-remohelppro}-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
           esac
           popd
           mkdir -p signed-apk; pushd signed-apk
-          mv ../remohelppro-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
+          mv ../${RL_APP_BASE:-remohelppro}-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
 
       # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable

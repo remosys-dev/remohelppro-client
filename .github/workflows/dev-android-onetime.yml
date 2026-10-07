@@ -1,0 +1,27 @@
+# 🔴 試験用（開発機向け）お客様用アプリ・Android（2026-10-07 社長のご指示）
+#
+#   ⚠ 本番用（android-only.yml）と**中身は同じソース**。
+#   ⚠ 鍵が違うので**本番の受付には繋がれない**。
+#   ⚠ Play Protect に警告されます（本番の APK と同じ）。
+#
+#   使い方:  git tag dev-android-onetime-1 && git push origin dev-android-onetime-1
+name: dev android onetime (test build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'dev-android-onetime-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-dev-android-onetime:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "dev-android-onetime"
+      android_only: true
+      dev_server: true
