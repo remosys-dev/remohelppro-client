@@ -1,0 +1,170 @@
+# 🔴🔴 試験用（開発機向け）の焼き込み ― 共通部品（2026-10-07）
+#
+#   社長のご指示「全ては本番と一緒、しかし dev がついて本番と区別するだけ」
+#               「本番と同じではないと、開発機での本番で動作チェックができないよね」
+#               「くれぐれも本番機を壊さないで」
+#
+#   ⚠ なぜ共通部品にしたか
+#     直す前、この焼き込みは **build-for-windows-flutter ジョブにしか無かった**。
+#     ＝ Mac / Android で dev_server: true を渡しても、
+#       ⚠ **何のエラーも出ずに本番向きのアプリができていた**（2026-10-07 に実際に起きた）。
+#     ★3か所に書き写すと必ず片方が古くなるので、1か所にまとめて各ジョブから呼ぶ。
+#
+#   ⚠ 中身は移しただけで、1行も変えていない。
+#   ⚠ 呼ぶ側で `if: inputs.dev_server` を付けること（本番では呼ばれない）。
+name: 試験用サーバー向けの焼き込み
+description: 接続先・鍵・管理サーバー・アプリ名を試験用に書き換え、本番の値が残っていないか数える
+
+runs:
+  using: composite
+  steps:
+    - name: 試験用サーバー向けに焼き込む（dev only）
+      shell: bash
+      run: |
+          set -euo pipefail
+          CFG=libs/hbb_common/src/config.rs
+          DEV_RD=dev-rd.remohelppro.jp
+          DEV_KEY=X16EW5WIutsAYbjd9yIrzR3HYEBYeKgMkmXQa2ByG7w=
+          DEV_API=https://dev.remohelppro.jp
+
+          echo "--- 変える前 ---"
+          grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
+
+          sed -i "s|RwLock::new(\"rd\.remohelppro\.jp\"\.to_owned())|RwLock::new(\"${DEV_RD}\".to_owned())|" "$CFG"
+          sed -i "s|&\[\"rd\.remohelppro\.jp\"\]|\&[\"${DEV_RD}\"]|" "$CFG"
+          sed -i "s|RS_PUB_KEY: &str = \"[^\"]*\"|RS_PUB_KEY: \&str = \"${DEV_KEY}\"|" "$CFG"
+          sed -i "s|AGENT_API_BASE: &str = \"[^\"]*\"|AGENT_API_BASE: \&str = \"${DEV_API}\"|" "$CFG"
+          # ★アプリ名に -dev を差し込む。remohelppro-support → remohelppro-dev-support
+          #   ⚠ これで通信路（\\.\pipe\<アプリ名>\…）と保存先（%APPDATA%\<アプリ名>）が
+          #     本番用と別になり、**同じPCに両方入れられる**。
+          sed -i "s|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro-dev|" "$CFG"
+
+          # 🔴🔴 2026-10-03: 本番のURLは config.rs だけではなかった。
+          #   ⚠ Dart 側にも**別に**書かれていた（remohelppro_endpoints.dart）。
+          #     そのままだと試験用アプリが**本番の管理サーバーを見る**。
+          #   ⚠ 穴あけ（STUN）も rd.remohelppro.jp を直書きしていた。
+          #   ★名前と接続先が出る場所を**全部**書き換える。
+          DART_EP=flutter/lib/remohelppro_endpoints.dart
+          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" "$DART_EP"
+          sed -i "s|'svr[.]remohelppro[.]jp'|'dev.remohelppro.jp'|g" "$DART_EP"
+          sed -i "s|rd[.]remohelppro[.]jp|${DEV_RD}|g" libs/hbb_common/src/webrtc.rs src/common.rs
+          # ⚠ ランチャー（別クレート）も本番を直書きしていた（2026-10-03 検査が鳴って気づいた）。
+          #   ★案内文の中のホスト名も含めて全部変える（社長「名前を全て変えて」）。
+          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" libs/launcher/src/main.rs
+          sed -i "s|svr[.]remohelppro[.]jp|dev.remohelppro.jp|g" libs/launcher/src/main.rs
+          echo "--- ランチャー ---"; grep -n 'remohelppro[.]jp' libs/launcher/src/main.rs | head -4
+          echo "--- Dart 側の行き先 ---"; grep -n 'kRlApiBase\|kRlApiHost' "$DART_EP"
+          echo "--- 穴あけ(STUN) ---"; grep -n 'STUNS_V4\|DEFAULT_ICE_SERVERS' libs/hbb_common/src/webrtc.rs src/common.rs | head -4
+
+          echo "--- 変えたあと ---"
+          grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
+
+          # ⚠ sed は一致しなくても成功で終わる。必ず変わったことを数える
+          #   （記録: check-tool-returned-success-while-failing）。
+          ng=0
+          grep -q "RwLock::new(\"${DEV_RD}\".to_owned())" "$CFG" || { echo "✗ 受付(PROD_RENDEZVOUS_SERVER)が変わっていません"; ng=1; }
+          grep -q "&\[\"${DEV_RD}\"\]"                    "$CFG" || { echo "✗ 受付(RENDEZVOUS_SERVERS)が変わっていません"; ng=1; }
+          grep -q "RS_PUB_KEY: &str = \"${DEV_KEY}\""     "$CFG" || { echo "✗ 公開鍵が変わっていません"; ng=1; }
+          grep -q "AGENT_API_BASE: &str = \"${DEV_API}\"" "$CFG" || { echo "✗ 管理サーバーが変わっていません"; ng=1; }
+          grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-dev' "$CFG" || { echo "✗ アプリ名に -dev が入っていません"; ng=1; }
+          # 🔴 本番の値が1つでも残っていたら出さない。残ったまま配ると本番を壊す。
+          # 🔴🔴 本番の値が**どこか1か所でも**残っていたら出さない（2026-10-03 強くした）。
+          #   ⚠ 最初は config.rs だけを見ていた。そのため
+          #     ⚠ **Dart 側の本番URLが残ったまま通っていた**。
+          #     試験用アプリが本番の管理サーバーを見るところだった。
+          #   ★ソース全体を数える。残っていたらビルドを止める。
+          # ⚠⚠ 2026-10-03: この検査の書き方が間違っていた。
+          #   `rd.remohelppro.jp` は **`dev-rd.remohelppro.jp` の中にも含まれる**ので、
+          #   正しく書き換えた後でも「残っている」と言い続けていた。
+          #   ★前に dev- が**付いていない**ものだけを数える。
+          LEFT=$(grep -rnE '(^|[^.A-Za-z0-9-])(svr|rd)[.]remohelppro[.]jp|4OcCv[+]gE' \
+                   --include='*.rs' --include='*.dart' . 2>/dev/null \
+                 | grep -vE '^[^:]+:[0-9]+: *(//|///|#|\*)' || true)
+          if [ -n "$LEFT" ]; then
+            echo "RL: ✗ 本番の値が残っています:"
+            echo "$LEFT" | head -20
+            ng=1
+          fi
+          [ "$ng" = "0" ] || { echo "RL: 試験用の焼き込みに失敗しました。中止します"; exit 1; }
+          echo "RL: 試験用に焼き込みました（受付=${DEV_RD} / 管理=${DEV_API} / アプリ名に -dev）"
+
+          # 🔴🔴 成果物の名前の頭を、ここで**1回だけ**決めて全工程へ渡す（2026-10-07）。
+          #   ⚠ これを入れる前は、exe / msi / dmg / apk が**それぞれの工程で別々に**
+          #     `remohelppro-` と直書きしていた。
+          #     ＝ 試験用も本番と同じ名前になり、⚠ **落としたあと見分けられない**。
+          #     Windows だけ直しても Mac と Android が残る形だった。
+          #   ★アプリ名（APP_NAME）をそのまま使う。アプリ名とファイル名が必ず一致する:
+          #     相談員  remohelppro-dev
+          #     遠隔    remohelppro-dev-support
+          #     常駐    remohelppro-dev-agent
+          #   ⚠ 本番では RL_APP_BASE を入れない。各工程が既定の remohelppro を使う。
+          APP_BASE=$(grep -oE 'APP_NAME: RwLock<String> = RwLock::new\("[^"]+"' "$CFG" \
+                     | grep -oE '"[^"]+"' | tr -d '"' | head -1)
+          case "$APP_BASE" in
+            remohelppro-dev|remohelppro-dev-*) : ;;
+            *) echo "RL: ✗ 成果物の名前をアプリ名から取れませんでした（取れた値: '$APP_BASE'）"; exit 1 ;;
+          esac
+          echo "RL_APP_BASE=$APP_BASE" >> "$GITHUB_ENV"
+          echo "RL: 成果物の名前の頭は $APP_BASE にします（exe / msi / dmg / apk 共通）"
+
+          # 🔴🔴 社長のご指示（2026-10-03）
+          #   「開発機と名前だけがちがうだけど、ソースは同じくしないと
+          #     直しても違う結果にならないようにしてね」
+          #
+          #   ★ソースは1本。試験用と本番用は**同じコミット**から作られる。
+          #     違うのは、ここで書き換える**名前と接続先だけ**。
+          #   ⚠ それを言葉で約束しない。⚠ **機械で数える。**
+          #     試験用の値が、決めた4つのファイル以外に入り込んでいたら止める。
+          #     （いつか別の場所に書き足して、気づかないまま枝分かれするのを防ぐ）
+          echo "--- 試験用の値が入ってよいファイル（この4つだけ）---"
+          # ⚠ 2026-10-03: 書き換える場所を増やしたとき、この一覧に足すのを忘れていた。
+          #   ★書き換える sed とこの一覧は**必ず両方**に足す。
+          #   ⚠ 検査が鳴ったのは正しい。止めてくれたから気づけた。
+          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc flutter/lib/remohelppro_endpoints.dart libs/hbb_common/src/webrtc.rs src/common.rs libs/launcher/src/main.rs'
+          for a in $ALLOWED; do echo "    $a"; done
+          STRAY=$(grep -rl -e 'dev-rd\.remohelppro\.jp' -e 'X16EW5WI' -e 'remohelppro-dev' \
+                    --include='*.rs' --include='*.rc' --include='*.dart' --include='*.toml' \
+                    --include='*.yaml' --include='*.json' . 2>/dev/null \
+                  | sed 's|^\./||' | sort -u || true)
+          BAD=""
+          for f in $STRAY; do
+            ok=0
+            for a in $ALLOWED; do [ "$f" = "$a" ] && ok=1; done
+            [ "$ok" = "1" ] || BAD="$BAD $f"
+          done
+          if [ -n "$BAD" ]; then
+            echo "RL: ⚠ 試験用の値が想定外のファイルに入っています:$BAD"
+            echo "RL: ソースが枝分かれしかけています。中止します"
+            exit 1
+          fi
+          echo "RL: ✓ 試験用と本番用の違いは、この4ファイルの名前と接続先だけです（同じコミットから作られます）"
+          echo "RL: commit = $(git rev-parse HEAD)"
+
+    - name: 試験用の表示名にする（dev only）
+      shell: bash
+      run: |
+          set -euo pipefail
+          # 🔴🔴 2026-10-03: ⚠ **最初に書いた置換は壊れていた。**
+          #   `"REMOHELP PRO \(.*\)"` は**最長一致**なので、Runner.rc の
+          #     VALUE "FileDescription", "REMOHELP PRO Support" "\0"
+          #   から `Support" "\0` までを1つの名前として取ってしまい、
+          #     VALUE "FileDescription", "REMOHELP PRO Support" "\0 [試験用]"
+          #   ＝ ⚠ **表示名は元のまま**で、終端記号の後ろに文字が付いただけだった。
+          #   ⚠ しかも下の「表示名が期待どおりか」の検査は**正しく通ってしまう**
+          #     （表示名は本当に変わっていないため）。黙って見分けの付かない物ができる。
+          #   ★引用符の中だけを取る（[^"]*）。.* を使わない。
+          for f in build.rs libs/portable/build.rs; do
+            sed -i 's/\.set("FileDescription", "\([^"]*\)")/.set("FileDescription", "\1 [試験用]")/' "$f"
+            grep -n 'FileDescription' "$f"
+            grep -q '\.set("FileDescription", "[^"]*\[試験用\]")' "$f" || {
+              echo "RL: $f の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
+          done
+          R=flutter/windows/runner/Runner.rc
+          sed -i 's/VALUE "FileDescription", "\([^"]*\)"/VALUE "FileDescription", "\1 [試験用]"/' "$R"
+          grep -n 'FileDescription' "$R"
+          # ⚠ 「試験用 という字がどこかにある」では足りない（前は終端の後ろにあっても通った）。
+          #   ★**表示名の引用符の中**に入っていることを確かめる。
+          grep -q 'VALUE "FileDescription", "[^"]*\[試験用\]"' "$R" || {
+            echo "RL: Runner.rc の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
+          echo "RL: 表示名に [試験用] を付けました"
+
