@@ -35,3 +35,8 @@ jobs:
       support_show_window: true
       windows_only: true
       dev_server: true
+      # 2026-10-07: version is pinned to the production build it corresponds to.
+      #   run_number counts per-workflow, so a new dev workflow starts at 1.4.1
+      #   and looks older than production even though it is the same commit.
+      #   target: お客様用ワンタイム（本番 onetime-portable）
+      app_version: "1.4.129"

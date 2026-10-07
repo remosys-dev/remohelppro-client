@@ -29,3 +29,8 @@ jobs:
       android_only: true
       remohelppro_operator: true
       dev_server: true
+      # 2026-10-07: version is pinned to the production build it corresponds to.
+      #   run_number counts per-workflow, so a new dev workflow starts at 1.4.1
+      #   and looks older than production even though it is the same commit.
+      #   target: 相談員 Android（本番 android-operator）
+      app_version: "1.4.8"

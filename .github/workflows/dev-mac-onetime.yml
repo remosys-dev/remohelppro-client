@@ -32,3 +32,8 @@ jobs:
       support_show_window: true
       onetime_valid_days: ${{ inputs.onetime_valid_days || 365 }}
       dev_server: true
+      # 2026-10-07: version is pinned to the production build it corresponds to.
+      #   run_number counts per-workflow, so a new dev workflow starts at 1.4.1
+      #   and looks older than production even though it is the same commit.
+      #   target: お客様用 Mac（本番 mac-onetime）
+      app_version: "1.4.129"
