@@ -1609,8 +1609,17 @@ jobs:
             mv "$REL/RustDesk.app" "$REL/REMOHELP PRO.app"
           fi
           PLIST="$REL/REMOHELP PRO.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleName REMOHELP PRO" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleName string REMOHELP PRO" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName REMOHELP PRO" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string REMOHELP PRO" "$PLIST"
+          # 🔴🔴 2026-10-08: 試験用は表示名に [試験用] を付ける（社長のご指示
+          #   「開発機アプリを全て調べて全部に dev いれて」）。
+          #   ⚠ 付けないと Mac の一覧・Dock で**本番と見分けがつかない**。
+          #   ⚠ RL_APP_LABEL_PREFIX は試験用の焼き込み（dev-bake）が入れる。
+          #     本番では空なので、⚠ **今までどおり「REMOHELP PRO」**になる。
+          #   ⚠ バンドルのフォルダ名（.app）は変えない。変えると署名・公証や
+          #     ランチャーの探し方に影響する。変えるのは**表示名だけ**。
+          LABEL="${RL_APP_LABEL_PREFIX:-}REMOHELP PRO"
+          echo "RL: Mac の表示名: $LABEL"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName $LABEL" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleName string $LABEL" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $LABEL" "$PLIST"             || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $LABEL" "$PLIST"
           echo "--- Info.plist after rename ---"
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST"

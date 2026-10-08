@@ -168,3 +168,26 @@ runs:
             echo "RL: Runner.rc の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
           echo "RL: 表示名に [試験用] を付けました"
 
+          # 🔴🔴 2026-10-08: Android の表示名にも [試験用] を入れる（社長のご指示
+          #   「開発機アプリを全て調べて全部に dev いれて」）。
+          #   ⚠ 上の Runner.rc は **Windows でしか使われない**。
+          #     Android のアプリ一覧に出る名前は AndroidManifest.xml の android:label で、
+          #     ⚠ これまで「REMOHELP PRO」固定だった。
+          #     ＝ スマホの一覧で**本番と見分けがつかない**（人が取り違える）。
+          #   ⚠ パッケージ名（jp.remohelppro.remote / .operator）は元から分かれているので
+          #     アプリ同士の入れ替わりは起きない。見分けの問題。
+          M=flutter/android/app/src/main/AndroidManifest.xml
+          if [ -f "$M" ]; then
+            sed -i 's/android:label="REMOHELP PRO"/android:label="[試験用] REMOHELP PRO"/' "$M"
+            grep -n 'android:label' "$M" | head -3
+            grep -q 'android:label="\[試験用\] REMOHELP PRO"' "$M" || {
+              echo "RL: Android の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
+            echo "RL: 表示名に [試験用] を付けました（Android）"
+          fi
+
+          # 🔴🔴 2026-10-08: Mac の表示名の目印を渡す。
+          #   ⚠ Mac のアプリ名は CI の「rename macOS app bundle」工程が
+          #     "REMOHELP PRO" と**直書き**している。その工程はビルドの後なので
+          #     ここでは直せない。★目印だけ置いて、向こうで読ませる。
+          echo "RL_APP_LABEL_PREFIX=[試験用] " >> "$GITHUB_ENV"
+          echo "RL: Mac の表示名の目印を渡しました（RL_APP_LABEL_PREFIX）"
