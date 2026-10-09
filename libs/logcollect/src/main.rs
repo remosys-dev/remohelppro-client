@@ -193,8 +193,11 @@ mod windows_impl {
     }
 
     /// この端末のこと（どのPCから出たログか）。⚠ 合言葉・認証コードは書かない。
+    ///   ⚠ 調査に役立つ物だけ: PC名・利用者・OS版・アプリの版・接続先・送信先。
+    ///   （.cmd 版 remohelppro-collect-logs.cmd と同じくらいの情報量にそろえる）
     fn machine_note(user: &UserDirs, elevated: bool) -> String {
         let mut s = String::new();
+        s.push_str(&format!("採取日時      : {}\r\n", now_string()));
         s.push_str(&format!("PC名          : {}\r\n", env_or("COMPUTERNAME", "?")));
         let uname = if user.username.is_empty() {
             env_or("USERNAME", "?")
@@ -210,10 +213,111 @@ mod windows_impl {
                 "いいえ（裏方の記録は集まりません）"
             }
         ));
-        s.push_str(&format!("OS            : {}\r\n", env_or("OS", "Windows")));
+        // OS: env の "Windows_NT" は版が分からないので `cmd /c ver` の実際の版を使う。
+        let os = run_hidden("cmd", &["/c", "ver"]);
+        let os = os.lines().find(|l| !l.trim().is_empty()).unwrap_or("Windows").trim();
+        s.push_str(&format!("OS            : {os}\r\n"));
         // 🔴 送信先を**実際に書く**＝ RL_API_BASE が実行ファイルに残り、焼き込みを grep で確かめられる。
         s.push_str(&format!("送信先        : {RL_API_BASE}\r\n"));
+
+        s.push_str("\r\n--- 入っているアプリの版 ---\r\n");
+        let mut any = false;
+        for (label, app) in [
+            ("相談員", "remohelppro"),
+            ("常駐", "remohelppro-agent"),
+            ("ワンタイム", "remohelppro-support"),
+        ] {
+            if let Some(v) = app_version(app) {
+                s.push_str(&format!("  {label}({app}) : {v}\r\n"));
+                any = true;
+            }
+        }
+        if !any {
+            s.push_str("  （入っているアプリが見つかりません）\r\n");
+        }
+
+        s.push_str("\r\n--- 接続先（秘密は出しません） ---\r\n");
+        let cfg = config_servers(user);
+        if cfg.is_empty() {
+            s.push_str("  （設定が見つかりません）\r\n");
+        } else {
+            s.push_str(&cfg);
+        }
         s
+    }
+
+    /// 入っているアプリの版を登録簿(Uninstall)から読む。⚠ 秘密ではない。
+    fn app_version(app: &str) -> Option<String> {
+        for base in [
+            "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+            "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        ] {
+            let out = run_hidden("reg", &["query", &format!("{base}\\{app}"), "/v", "DisplayVersion"]);
+            for line in out.lines() {
+                if let Some(i) = line.find("REG_SZ") {
+                    let v = line[i + 6..].trim();
+                    if !v.is_empty() {
+                        return Some(v.to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// 接続先だけを設定から拾う（custom-rendezvous-server / relay-server / api-server / host）。
+    /// ⚠ 合言葉・登録トークン・鍵の行は**絶対に出さない**。
+    fn config_servers(user: &UserDirs) -> String {
+        let mut out = String::new();
+        let windir = std::env::var("windir").unwrap_or_else(|_| "C:\\Windows".to_owned());
+        let dirs = [
+            Path::new(&user.appdata()).join("remohelppro").join("config"),
+            Path::new(&user.appdata()).join("remohelppro-agent").join("config"),
+            Path::new(&windir)
+                .join("ServiceProfiles")
+                .join("LocalService")
+                .join("AppData")
+                .join("Roaming")
+                .join("remohelppro-agent")
+                .join("config"),
+        ];
+        for dir in dirs {
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) != Some("toml") {
+                    continue;
+                }
+                let Ok(text) = std::fs::read_to_string(&p) else { continue };
+                for ln in text.lines() {
+                    let t = ln.trim_start();
+                    if t.starts_with("custom-rendezvous-server")
+                        || t.starts_with("relay-server")
+                        || t.starts_with("api-server")
+                        || t.starts_with("rendezvous_server")
+                        || t.starts_with("host ")
+                        || t.starts_with("host=")
+                    {
+                        let name = p.file_name().unwrap_or_default().to_string_lossy();
+                        out.push_str(&format!("  {name} : {}\r\n", ln.trim()));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// 窓を出さずにコマンドを実行して標準出力を返す（CREATE_NO_WINDOW）。
+    fn run_hidden(cmd: &str, args: &[&str]) -> String {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new(cmd)
+            .args(args)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output();
+        match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+            Err(_) => String::new(),
+        }
     }
 
     /// 集めて1つの ZIP（メモリ上）にまとめる。読めない物は飛ばす。
@@ -467,15 +571,31 @@ mod windows_impl {
         None
     }
 
-    /// `20261009-201530` のような印。⚠ 依存を増やさないため SystemTime から自前で作る。
+    /// いまの地方時刻を SYSTEMTIME から取る。
+    fn local_time() -> winapi::um::minwinbase::SYSTEMTIME {
+        unsafe {
+            let mut st: winapi::um::minwinbase::SYSTEMTIME = std::mem::zeroed();
+            winapi::um::sysinfoapi::GetLocalTime(&mut st);
+            st
+        }
+    }
+
+    /// `20261009-201530` のような、ファイル名向けの読みやすい印。
     fn timestamp() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        // ⚠ 正確な暦でなくてよい（ファイル名が重ならなければよい）。通し番号的に使う。
-        format!("{secs}")
+        let t = local_time();
+        format!(
+            "{:04}{:02}{:02}-{:02}{:02}{:02}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+        )
+    }
+
+    /// `2026-10-09 20:15:30` のような、読みやすい採取日時。
+    fn now_string() -> String {
+        let t = local_time();
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+        )
     }
 
     /// ごく小さな JSON 取り出し（"key":"value" の value）。依存を増やさないため。

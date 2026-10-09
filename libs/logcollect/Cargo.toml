@@ -31,6 +31,8 @@ winapi = { version = "0.3", features = [
     "handleapi",
     "synchapi",
     "errhandlingapi",
+    "minwinbase",
+    "sysinfoapi",
 ] }
 
 [package.metadata.winres]
