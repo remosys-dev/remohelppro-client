@@ -69,3 +69,4 @@ fastlane/**/images/
 
 # ログ集めプログラムの単体ビルド成果物（2026-10-09）
 /target-logcollect
+/target-logcollect-dev
