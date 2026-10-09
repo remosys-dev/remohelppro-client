@@ -86,6 +86,12 @@ fn rl_apply_public_config() {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<Vec<String>> {
+    // RemoSys自作エンジン I-1: QUIC 自己テスト。REMOSYS_QUIC_SELFTEST=1 のとき、ループバックで
+    //   connect/accept を1往復して結果を表示し終了する（rendezvous/2端末不要の実行時確認）。
+    if std::env::var("REMOSYS_QUIC_SELFTEST").is_ok() {
+        crate::quic_stream::selftest();
+        std::process::exit(0);
+    }
     // 🔴 前回のサポートで戻せていない設定があれば、**まずここで戻す**（2026-08-28）。
     //
     //   サポート中は管理者の確認（UAC）の出方を変える。正常に終われば
@@ -525,6 +531,14 @@ pub fn core_main() -> Option<Vec<String>> {
         if let Some(rest) = args[0].strip_prefix(&crate::get_uri_prefix()) {
             if rest.starts_with("report-version") {
                 crate::rl_report_version(rest);
+                return None;
+            }
+            // ★ログ分析依頼（2026-10-09 社長のご指示「自動で収集できるよね」）。
+            //   ⚠ ブラウザの画面からはPCの中のファイルを読めない。アプリが集めて送る。
+            //   ⚠ ここも**窓は開かない**。送って、そのまま終わる。
+            //   ⚠ 版の報告と同じ場所に置く。下の転送に入ると窓が開く。
+            if rest.starts_with("sendlog") {
+                crate::rl_send_log(rest);
                 return None;
             }
         }

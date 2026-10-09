@@ -11,6 +11,8 @@ pub enum Stream {
     WebRTC(webrtc::WebRTCStream),
     WebSocket(websocket::WsFramedStream),
     Tcp(tcp::FramedStream),
+    // RemoSys自作エンジン I-1.5: QUIC（制御=信頼stream / 映像=DATAGRAM）
+    Quic(crate::quic::QuicFramedStream),
 }
 
 impl Stream {
@@ -21,6 +23,7 @@ impl Stream {
             Stream::WebRTC(s) => s.set_send_timeout(ms),
             Stream::WebSocket(s) => s.set_send_timeout(ms),
             Stream::Tcp(s) => s.set_send_timeout(ms),
+            Stream::Quic(s) => s.set_send_timeout(ms),
         }
     }
 
@@ -31,6 +34,7 @@ impl Stream {
             Stream::WebRTC(s) => s.set_raw(),
             Stream::WebSocket(s) => s.set_raw(),
             Stream::Tcp(s) => s.set_raw(),
+            Stream::Quic(s) => s.set_raw(),
         }
     }
 
@@ -41,6 +45,7 @@ impl Stream {
             Stream::WebRTC(s) => s.send_bytes(bytes).await,
             Stream::WebSocket(s) => s.send_bytes(bytes).await,
             Stream::Tcp(s) => s.send_bytes(bytes).await,
+            Stream::Quic(s) => s.send_bytes(bytes).await,
         }
     }
 
@@ -51,6 +56,7 @@ impl Stream {
             Stream::WebRTC(s) => s.send_raw(bytes).await,
             Stream::WebSocket(s) => s.send_raw(bytes).await,
             Stream::Tcp(s) => s.send_raw(bytes).await,
+            Stream::Quic(s) => s.send_raw(bytes).await,
         }
     }
 
@@ -61,6 +67,7 @@ impl Stream {
             Stream::WebRTC(s) => s.set_key(key),
             Stream::WebSocket(s) => s.set_key(key),
             Stream::Tcp(s) => s.set_key(key),
+            Stream::Quic(s) => s.set_key(key),
         }
     }
 
@@ -71,6 +78,7 @@ impl Stream {
             Stream::WebRTC(s) => s.is_secured(),
             Stream::WebSocket(s) => s.is_secured(),
             Stream::Tcp(s) => s.is_secured(),
+            Stream::Quic(s) => s.is_secured(),
         }
     }
 
@@ -84,6 +92,7 @@ impl Stream {
             Stream::WebRTC(s) => s.next_timeout(timeout).await,
             Stream::WebSocket(s) => s.next_timeout(timeout).await,
             Stream::Tcp(s) => s.next_timeout(timeout).await,
+            Stream::Quic(s) => s.next_timeout(timeout).await,
         }
     }
 
@@ -109,6 +118,30 @@ impl Stream {
             Self::WebRTC(s) => s.send(msg).await,
             Self::WebSocket(ws) => ws.send(msg).await,
             Self::Tcp(tcp) => tcp.send(msg).await,
+            Self::Quic(s) => s.send(msg).await,
+        }
+    }
+
+    /// RemoSys自作エンジン I-1.5: 映像(VideoFrame)を送る。Quic は不確実 DATAGRAM、
+    /// それ以外は従来の信頼 send にフォールバック（既定動作を変えない）。
+    #[inline]
+    pub async fn send_video(&mut self, msg: &impl protobuf::Message) -> ResultType<()> {
+        match self {
+            #[cfg(feature = "webrtc")]
+            Self::WebRTC(s) => s.send(msg).await,
+            Self::WebSocket(ws) => ws.send(msg).await,
+            Self::Tcp(tcp) => tcp.send(msg).await,
+            Self::Quic(s) => s.send_video(msg).await,
+        }
+    }
+
+    /// RemoSys自作エンジン I-1.5-d 方式①: 受信側で映像のコマ落ちを検知していたら true（消費）。
+    /// Quic 以外は常に false ＝信頼輸送はコマ落ちしないので先行 refresh は不要（既定動作を変えない）。
+    #[inline]
+    pub fn took_video_loss(&self) -> bool {
+        match self {
+            Self::Quic(s) => s.took_video_loss(),
+            _ => false,
         }
     }
 
@@ -120,6 +153,7 @@ impl Stream {
             Self::WebRTC(s) => s.next().await,
             Self::WebSocket(ws) => ws.next().await,
             Self::Tcp(tcp) => tcp.next().await,
+            Self::Quic(s) => s.next().await,
         }
     }
 
@@ -130,6 +164,7 @@ impl Stream {
             Self::WebRTC(s) => s.local_addr(),
             Self::WebSocket(ws) => ws.local_addr(),
             Self::Tcp(tcp) => tcp.local_addr(),
+            Self::Quic(s) => s.local_addr(),
         }
     }
 

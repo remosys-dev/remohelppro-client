@@ -96,5 +96,10 @@ pub mod virtual_display_manager;
 //   ⚠ 窓は開かない。送ってそのまま終わる。
 mod rl_report_version;
 pub use rl_report_version::rl_report_version;
+// ★相談員のログを集めて送る（2026-10-09 社長のご指示）。詳しくは rl_send_log.rs。
+mod rl_send_log;
+pub use rl_send_log::rl_send_log;
 
 mod kcp_stream;
+// RemoSys自作エンジン I-1/I-1.5: QUICトランスポート(KCP→QUIC・HoL解消)。設計=docs/engine_integration_remohelppro.md
+mod quic_stream;

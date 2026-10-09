@@ -18,6 +18,8 @@ tokio = { version = "1.44", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 futures = "0.3"
 bytes = { version = "1.10", features = ["serde"] }
+# RemoSys自作エンジン I-1.5: QUIC(映像DATAGRAM)用。QuicFramedStream が quinn::Connection を保持。
+quinn = "0.11"
 log = "0.4"
 env_logger = "0.11"
 socket2 = { version = "0.3", features = ["reuseport"] }

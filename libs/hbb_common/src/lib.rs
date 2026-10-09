@@ -58,7 +58,12 @@ pub use toml;
 pub use uuid;
 pub mod fingerprint;
 pub use flexi_logger;
+
+/// ★ログを書く時点で暗号化する（2026-10-09）。詳しくは rl_logcrypt.rs。
+pub mod rl_logcrypt;
 pub mod stream;
+// RemoSys自作エンジン I-1.5: QUIC 映像DATAGRAM の QuicFramedStream
+pub mod quic;
 pub mod websocket;
 #[cfg(feature = "webrtc")]
 pub mod webrtc;
@@ -425,6 +430,33 @@ pub fn is_domain_port_str(id: &str) -> bool {
     }
 }
 
+
+/// ★暗号化したログの1行を書く（2026-10-09）。
+///
+/// ⚠ `opt_format` と同じ文面を作ってから封をする。
+///   ＝ 復号すれば、これまでとまったく同じ形で読める。
+/// ⚠ 封に失敗したら**何も書かない**。平文で書き戻さないこと。
+#[cfg(not(debug_assertions))]
+fn rl_encrypted_format(
+    w: &mut dyn std::io::Write,
+    now: &mut flexi_logger::DeferredNow,
+    record: &log::Record,
+) -> Result<(), std::io::Error> {
+    let line = format!(
+        "[{}] {} [{}:{}] {}",
+        now.format("%Y-%m-%d %H:%M:%S%.6f %:z"),
+        record.level(),
+        record.file().unwrap_or("<unknown>"),
+        record.line().unwrap_or(0),
+        &record.args()
+    );
+    match crate::rl_logcrypt::seal_line(&line) {
+        Some(sealed) => write!(w, "{}", sealed),
+        // ⚠ 封をできないときは黙って捨てる。アプリは止めない。
+        None => Ok(()),
+    }
+}
+
 pub fn init_log(_is_async: bool, _name: &str) -> Option<flexi_logger::LoggerHandle> {
     static INIT: std::sync::Once = std::sync::Once::new();
     #[allow(unused_mut)]
@@ -456,7 +488,14 @@ pub fn init_log(_is_async: bool, _name: &str) -> Option<flexi_logger::LoggerHand
                     } else {
                         WriteMode::Direct
                     })
-                    .format(opt_format)
+                    // 🔴🔴 ログを**書く時点で暗号化する**（2026-10-09 社長のご指示）。
+                    //   ⚠ お客様側のログはパブリックのフォルダに置かれ、
+                    //     そのPCを使う人全員が読める状態だった。
+                    //   ★当社の公開鍵で1行ずつ封をする。読めるのは秘密鍵を持つ当社だけ。
+                    //   ⚠ 封をできなかった行は**書かない**。
+                    //     ここで平文に戻すと、暗号化した意味が無くなる。
+                    //   ⚠ 中身は rl_logcrypt.rs の1か所だけ。ここで暗号を書かない。
+                    .format(rl_encrypted_format)
                     .rotate(
                         Criterion::Age(Age::Day),
                         Naming::Timestamps,

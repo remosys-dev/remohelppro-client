@@ -5334,7 +5334,13 @@ impl Connection {
 
     #[inline]
     async fn send(&mut self, msg: Message) {
-        allow_err!(self.stream.send(&msg).await);
+        // RemoSys自作エンジン I-1.5: 映像(VideoFrame)は不確実 DATAGRAM へ（QUIC時のみ・他は従来send）。
+        //   1パケット欠けで制御まで止まる HoL を解消。送信経路はこの1点なので union 判定で網羅。
+        if matches!(&msg.union, Some(message::Union::VideoFrame(_))) {
+            allow_err!(self.stream.send_video(&msg).await);
+        } else {
+            allow_err!(self.stream.send(&msg).await);
+        }
     }
 
     pub fn alive_conns() -> Vec<i32> {

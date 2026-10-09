@@ -1340,6 +1340,12 @@ impl<T: InvokeUiSession> Remote<T> {
                             thread.video_sender.send(MediaData::VideoQueue).ok();
                         }
                     }
+                    // ★I-1.5-d 方式①: QUIC(映像=DATAGRAM)でコマ落ちを輸送段で検知していたら、
+                    //   デコードが崩れる前に先行してキーフレーム(refresh)を要求＝崩れた絵を見せず早く復帰。
+                    //   ⚠ quic.rs 側で LOSS_SIGNAL_INTERVAL(500ms) に間引き済み。QUIC以外は常に false＝no-op。
+                    if peer.took_video_loss() {
+                        self.handler.refresh_video(display as _);
+                    }
                 }
                 Some(message::Union::Hash(hash)) => {
                     self.handler

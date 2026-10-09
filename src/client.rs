@@ -691,14 +691,18 @@ impl Client {
         let start = std::time::Instant::now();
 
         let mut connect_futures = Vec::new();
-        let fut = connect_tcp_local(peer, Some(local_addr), connect_timeout);
-        connect_futures.push(
-            async move {
-                let conn = fut.await?;
-                Ok((conn, None, "TCP"))
-            }
-            .boxed(),
-        );
+        // RemoSys I-1.5-e: REMOSYS_QUIC=1 の時は TCP直結を外し、UDP穴あけ(=QUIC)経路だけにして
+        //   QUIC を確実に使う（同一PC/LANだと TCP が先に勝って QUIC を通らないため・テスト用）。
+        if std::env::var("REMOSYS_QUIC").is_err() {
+            let fut = connect_tcp_local(peer, Some(local_addr), connect_timeout);
+            connect_futures.push(
+                async move {
+                    let conn = fut.await?;
+                    Ok((conn, None, "TCP"))
+                }
+                .boxed(),
+            );
+        }
         if let Some(udp_socket_nat) = udp_socket_nat {
             connect_futures.push(udp_nat_connect(udp_socket_nat, "UDP", connect_timeout).boxed());
         }
@@ -2857,6 +2861,8 @@ pub fn start_video_thread<F, T>(
         #[cfg(windows)]
         sync_cpu_usage();
         get_hwcodec_config();
+        // RemoSys I-1.5-d: QUIC(映像=DATAGRAM)経路か。コマ落ちをコーデック異常と誤判定させないための目印。
+        let quic_video = std::env::var("REMOSYS_QUIC").is_ok();
         let mut video_handler = None;
         let mut count = 0;
         let mut duration = std::time::Duration::ZERO;
@@ -2949,8 +2955,27 @@ pub fn start_video_thread<F, T>(
                         // check invalid decoders
                         let mut should_update_supported = false;
                         if let Some(handler) = video_handler.as_mut() {
+                            // RemoSys I-1.5-d: QUIC(映像=DATAGRAM)経路のデコード失敗は、コマ落ち
+                            //   (＝ロストした参照フレーム)が主因。これは「デコーダが壊れた」のでは
+                            //   なく「輸送でコマが欠けた」だけ。
+                            //   ⚠ fail_counter で H.264 を"非対応"にしてコーデックを落とすのは誤り
+                            //   （最初のキーフレームが1回欠けただけでも即 MAX に達する経路がある）。
+                            //   decoder.valid() が真の間は、キーフレーム(refresh)を要求して映像を
+                            //   立て直し、カウンタを戻す＝コーデック非対応化を避ける（HoL解消の副作用への手当て）。
+                            if quic_video
+                                && handler.decoder.valid()
+                                && handler.fail_counter >= MAX_DECODE_FAIL_COUNTER
+                            {
+                                log::info!(
+                                    "RemoSys QUIC: decode fail(={}) likely frame loss -> request keyframe, no codec fallback",
+                                    handler.fail_counter
+                                );
+                                session.refresh_video(display as _);
+                                handler.fail_counter = 0;
+                            }
                             if !handler.decoder.valid()
-                                || handler.fail_counter >= MAX_DECODE_FAIL_COUNTER
+                                || (!quic_video
+                                    && handler.fail_counter >= MAX_DECODE_FAIL_COUNTER)
                             {
                                 let mut lc = session.lc.write().unwrap();
                                 let format = handler.decoder.format();
@@ -4279,6 +4304,41 @@ async fn udp_nat_connect(
             log::debug!("{err}");
             anyhow!(err)
         })?;
+    // RemoSys自作エンジン I-1: QUIC opt-in（環境変数 REMOSYS_QUIC=1 の時だけ）。既定は KCP（無変更）。
+    // 穴あけ後ソケットは接続済み(peer_addr可)・punch_udpはクローンを保持しない(try_unwrapで所有権取得可)。
+    if std::env::var("REMOSYS_QUIC").is_ok() {
+        if let Ok(remote) = socket.peer_addr() {
+            match std::sync::Arc::try_unwrap(socket) {
+                Ok(tok) => match tok.into_std() {
+                    Ok(std_sock) => {
+                        match crate::quic_stream::QuicStream::connect(
+                            std_sock,
+                            remote,
+                            Duration::from_millis(ms_timeout),
+                        )
+                        .await
+                        {
+                            Ok((qs, stream)) => {
+                                // 接続ハンドルを生かし続ける（試験パス。戻り値型を変えない簡便策）
+                                let _ = Box::leak(Box::new(qs));
+                                return Ok((stream, None, "QUIC"));
+                            }
+                            Err(err) => {
+                                log::debug!("Failed to connect QUIC stream: {}", err);
+                                bail!(err);
+                            }
+                        }
+                    }
+                    Err(err) => bail!("QUIC into_std failed: {err}"),
+                },
+                Err(_shared) => {
+                    bail!("QUIC: udp socket still shared, cannot take ownership");
+                }
+            }
+        } else {
+            bail!("QUIC: socket has no peer_addr (not connected)");
+        }
+    }
     let res = KcpStream::connect(socket, Duration::from_millis(ms_timeout))
         .await
         .map_err(|err| {

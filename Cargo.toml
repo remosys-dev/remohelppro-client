@@ -66,6 +66,10 @@ clap = "4.2"
 rpassword = "7.2"
 num_cpus = "1.15"
 bytes = { version = "1.4", features = ["serde"] }
+# RemoSys自作エンジン I-1: QUICトランスポート(KCP→QUICでHoL解消)。版はCargo.lock既存(quinn0.11/rustls0.23)に準拠。
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = "0.13"
 default-net = "0.14"
 wol-rs = "1.0"
 flutter_rust_bridge = { version = "=1.80", features = ["uuid"], optional = true}

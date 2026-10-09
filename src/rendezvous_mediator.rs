@@ -1031,10 +1031,36 @@ async fn udp_nat_listen(
     control_permissions: Option<ControlPermissions>,
 ) -> ResultType<()> {
     let tm = Instant::now();
-    let socket_cloned = socket.clone();
+    // RemoSys I-1: try_unwrap(QUIC) を妨げないよう、エラー表示用の local_addr は文字列で先取りする（旧 socket_cloned を廃止）。
+    let local_addr_str = format!("{:?}", socket.local_addr());
     let func = async {
         socket.connect(peer_addr).await?;
         let res = crate::punch_udp(socket.clone(), true).await?;
+        // RemoSys自作エンジン I-1: QUIC opt-in（REMOSYS_QUIC=1 の時だけ）。既定は KCP（無変更）。
+        // ⚠ init_packet(res=handshake初弾)はquinnに渡せない→QUICのInitial再送で接続する想定（要実測）。
+        if std::env::var("REMOSYS_QUIC").is_ok() {
+            match std::sync::Arc::try_unwrap(socket) {
+                Ok(tok) => {
+                    let std_sock = tok.into_std()?;
+                    let (qs, stream) = crate::quic_stream::QuicStream::accept(
+                        std_sock,
+                        Duration::from_millis(CONNECT_TIMEOUT as _),
+                    )
+                    .await?;
+                    let _ = Box::leak(Box::new(qs)); // 接続ハンドルを生かし続ける（試験パス）
+                    crate::server::create_tcp_connection(
+                        server,
+                        stream,
+                        peer_addr_v4,
+                        true,
+                        control_permissions,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                Err(_shared) => bail!("QUIC: udp socket still shared (accept)"),
+            }
+        }
         let stream = crate::kcp_stream::KcpStream::accept(
             socket,
             Duration::from_millis(CONNECT_TIMEOUT as _),
@@ -1053,8 +1079,8 @@ async fn udp_nat_listen(
     };
     func.await.map_err(|e: anyhow::Error| {
         anyhow::anyhow!(
-            "Stop listening on {:?} for remote {peer_addr} with KCP, {:?} elapsed: {e}",
-            socket_cloned.local_addr(),
+            "Stop listening on {} for remote {peer_addr} with KCP, {:?} elapsed: {e}",
+            local_addr_str,
             tm.elapsed()
         )
     })?;
