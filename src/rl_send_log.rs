@@ -76,9 +76,9 @@ fn percent_decode(s: &str) -> String {
 ///   **同じ場所**を見ること。片方だけ足すと
 ///   「手で集めた物にはあるのに、自動には無い」が起きて原因を見失う。
 #[cfg(windows)]
-fn log_sources() -> Vec<(String, PathBuf)> {
+fn log_sources(rest: &str) -> Vec<(String, PathBuf)> {
     let mut v: Vec<(String, PathBuf)> = Vec::new();
-    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    let appdata = user_appdata(rest);
     let windir = std::env::var("windir").unwrap_or_else(|_| "C:\\Windows".to_owned());
     let public = std::env::var("PUBLIC").unwrap_or_else(|_| "C:\\Users\\Public".to_owned());
 
@@ -125,7 +125,7 @@ fn log_sources() -> Vec<(String, PathBuf)> {
 }
 
 #[cfg(not(windows))]
-fn log_sources() -> Vec<(String, PathBuf)> {
+fn log_sources(_rest: &str) -> Vec<(String, PathBuf)> {
     vec![("2-相談員のログ".to_owned(), config::Config::log_path())]
 }
 
@@ -164,9 +164,9 @@ fn machine_note(elevated: bool) -> String {
 }
 
 /// 1つの ZIP にまとめる。⚠ 読めない物は飛ばす（1つで全部を止めない）。
-fn build_zip(elevated: bool) -> std::io::Result<(PathBuf, usize)> {
+fn build_zip(rest: &str, elevated: bool) -> std::io::Result<(PathBuf, usize)> {
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-    let out = std::env::temp_dir().join(format!("remohelppro-evidence-{}.zip", stamp));
+    let out = std::env::temp_dir().join(format!("remohelppro-logs-{}.zip", stamp));
     let file = std::fs::File::create(&out)?;
     let mut zip = zip::ZipWriter::new(file);
     let opts = zip::write::FileOptions::default()
@@ -176,7 +176,7 @@ fn build_zip(elevated: bool) -> std::io::Result<(PathBuf, usize)> {
     zip.write_all(machine_note(elevated).as_bytes())?;
 
     let mut n = 0usize;
-    for (label, dir) in log_sources() {
+    for (label, dir) in log_sources(rest) {
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -216,10 +216,22 @@ fn is_elevated() -> bool {
 }
 
 /// 管理者で自分をもう一度動かす（1回だけ）。
-/// ⚠ 無限に自分を呼ばないよう、合図（環境変数）を付ける。
+///
+/// 🔴 戻り値は「昇格した側に引き継げた」ときだけ true（2026-10-09 直し）。
+///   ⚠ 以前は PowerShell を**起動できた**だけで true を返していた。
+///     UAC を断られても「引き継いだ」扱いで抜けるので、**1本も送らずに終わっていた**。
+///   ★確認の窓が閉じるまで待ち、Start-Process が成功したかを終了コードで受け取る。
+///
+/// ⚠ 無限に自分を呼ばないよう、URL に `el=1` の合図を付ける。
+///   以前は環境変数で付けていたが、**UAC を通った先には環境変数は渡らない**。
+///
+/// 🔴 この人の APPDATA を `ua=` で渡す。
+///   ⚠ 会社のPCでは、確認の窓に**別の人の管理者ID**を入れることがよくある。
+///     昇格した側の APPDATA はその管理者の物になり、相談員本人のログが入らない。
+///     （手で集める道具 remohelppro-collect-logs.cmd と同じ直し）
 #[cfg(windows)]
 fn relaunch_elevated(rest: &str) -> bool {
-    if std::env::var("RL_SENDLOG_ELEVATED").is_ok() {
+    if param_of(rest, "el").is_some() {
         // ⚠ すでに1回やっている。これ以上 UAC を出さない。
         return false;
     }
@@ -227,17 +239,60 @@ fn relaunch_elevated(rest: &str) -> bool {
         return false;
     };
     let scheme = config::APP_NAME.read().unwrap().to_lowercase();
-    let arg = format!("{}://{}", scheme, rest);
+    let sep = if rest.contains('?') { '&' } else { '?' };
+    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    let arg = format!(
+        "{}://{}{}el=1&ua={}",
+        scheme,
+        rest,
+        sep,
+        hex_encode(appdata.as_bytes())
+    );
     // ⚠ 単引用符は PowerShell の決まりで2つ重ねて逃がす。
     let ps = format!(
-        "$env:RL_SENDLOG_ELEVATED='1'; Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs",
+        "try {{ Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs -ErrorAction Stop; exit 0 }} catch {{ exit 1 }}",
         exe.display().to_string().replace('\'', "''"),
         arg.replace('\'', "''")
     );
-    std::process::Command::new("powershell")
-        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
-        .spawn()
-        .is_ok()
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps]);
+    {
+        // ⚠ 黒い窓を出さない（記録: windows-dart-process-shows-console と同じ）
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    matches!(cmd.status(), Ok(s) if s.success())
+}
+
+/// `ua=` 用。⚠ 道に `&` や `%` が入っても URL が崩れないよう、16進にする。
+#[cfg(windows)]
+fn hex_encode(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
+}
+
+#[cfg(windows)]
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
+}
+
+/// 相談員本人の APPDATA。昇格して取り直したときは、元の人の物を使う。
+/// ⚠ 外から来る値なので、実在するフォルダのときだけ採る。
+#[cfg(windows)]
+fn user_appdata(rest: &str) -> String {
+    if let Some(p) = param_of(rest, "ua")
+        .and_then(|h| hex_decode(&h))
+        .and_then(|b| String::from_utf8(b).ok())
+        .filter(|p| Path::new(p).is_absolute() && Path::new(p).is_dir())
+    {
+        return p;
+    }
+    std::env::var("APPDATA").unwrap_or_default()
 }
 
 #[cfg(not(windows))]
@@ -291,7 +346,7 @@ pub fn rl_send_log(rest: &str) {
         return;
     }
 
-    let (zip_path, n) = match build_zip(elevated) {
+    let (zip_path, n) = match build_zip(rest, elevated) {
         Ok(v) => v,
         Err(e) => {
             log::warn!("sendlog: まとめられません: {}", e);

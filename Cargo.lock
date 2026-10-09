@@ -7054,6 +7054,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "remohelppro-logcollect"
+version = "0.1.0"
+dependencies = [
+ "ureq",
+ "winapi 0.3.9",
+ "zip",
+]
+
+[[package]]
 name = "remote_printer"
 version = "0.1.0"
 dependencies = [

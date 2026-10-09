@@ -66,3 +66,6 @@ flutter/android/key.properties
 
 # store listing images (marketing) — REMOHELP PRO 版を用意してから公開
 fastlane/**/images/
+
+# ログ集めプログラムの単体ビルド成果物（2026-10-09）
+/target-logcollect

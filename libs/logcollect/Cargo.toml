@@ -1,0 +1,46 @@
+[package]
+name = "remohelppro-logcollect"
+version = "0.1.0"
+edition = "2021"
+description = "REMOHELP PRO log collector"
+
+# お客様・相談員の両方が使う「ログ集めプログラム」（2026-10-09 社長のご指示）。
+#   ・お客様: 相談員が送った URL のページから落とす。自分のファイル名の札で、
+#            どの依頼へ送るかを知り、集めて送る。
+#   ・相談員: 同じ exe。札が無ければ送らず ZIP を作って置くだけ（画面へドラッグ）。
+#
+# 🔴 hbb_common を使わない小さな単独 exe（手本=libs/launcher）。
+#   ⚠ 依存を増やさない。zip(本体と同じ版)・ureq(launcher と同じ)・winapi だけ。
+
+[[bin]]
+name = "remohelppro-logcollect"
+path = "src/main.rs"
+
+[dependencies]
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+ureq = { version = "2.9", features = ["tls"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "winbase",
+    "winuser",
+    "shellapi",
+    "processthreadsapi",
+    "securitybaseapi",
+    "winnt",
+    "handleapi",
+    "synchapi",
+    "errhandlingapi",
+] }
+
+[package.metadata.winres]
+LegalCopyright = "Copyright © 2026 Remosys Inc. All rights reserved."
+ProductName = "REMOHELP PRO"
+OriginalFilename = "remohelppro-logcollect.exe"
+FileDescription = "REMOHELP PRO ログ集め"
+CompanyName = "株式会社リモシス"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
