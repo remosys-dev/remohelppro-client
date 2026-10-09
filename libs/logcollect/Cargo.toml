@@ -2,6 +2,7 @@
 name = "remohelppro-logcollect"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 description = "REMOHELP PRO log collector"
 
 # お客様・相談員の両方が使う「ログ集めプログラム」（2026-10-09 社長のご指示）。
@@ -38,9 +39,13 @@ winapi = { version = "0.3", features = [
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2026 Remosys Inc. All rights reserved."
 ProductName = "REMOHELP PRO"
-OriginalFilename = "remohelppro-logcollect.exe"
+OriginalFilename = "remohelppro-logs.exe"
 FileDescription = "REMOHELP PRO ログ集め"
 CompanyName = "株式会社リモシス"
+
+# 🔴 manifest を埋め込む（互換性アシスタント抑止）ために winres を使う（2026-10-10）。
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
 
 [profile.release]
 opt-level = "z"
