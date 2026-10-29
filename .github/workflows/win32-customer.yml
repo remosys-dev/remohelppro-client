@@ -103,7 +103,11 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" != "0" ]; then
-            msg=$(grep -E -A6 "^error|panicked|^warning: unused" build.log | grep -v "^warning: unused" | head -120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            # ⚠ ここは pipefail を外す（head で途中を切ると grep が失敗扱いになり、注記を出す前に止まる）
+            set +e +o pipefail
+            grep -E -A8 "^error|panicked" build.log | head -150 > err.txt
+            [ -s err.txt ] || tail -80 build.log > err.txt
+            msg=$(sed 's/%/%25/g' err.txt | awk '{printf "%s%%0A", $0}')
             echo "::error title=cargo build failed::${msg}"
             exit 1
           fi
