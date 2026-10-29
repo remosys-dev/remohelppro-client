@@ -112,7 +112,9 @@ function tick() {
         lastMsg = st.message;
         $(body).content(<Customer />);
     }
-    self.timer(500ms, tick);
+    // !! sciter repeats the timer only while the callback returns true. Re-arming inside it
+    //    with the same function does not work (the screen froze on "connecting", 2026-10-29).
+    return true;
 }
 
 // On close, report the end first if connected (never leave the session open).
