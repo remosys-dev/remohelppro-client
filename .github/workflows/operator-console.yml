@@ -1,0 +1,62 @@
+name: Operator Console (WebView2)
+
+# 2026-10-29: 相談員の専用プログラム（operator-console/）。WebView2 で /console を出す窓。
+#   ⚠ 32ビット用（i686）の1個で 32/64 どちらの Windows にも入る（社長と合意）。
+#   ⚠ 署名は別途（EV トークン保持者）。ここでは署名しない。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'console-build-*'
+
+permissions:
+  contents: read
+
+env:
+  VERSION: "1.0.${{ github.run_number }}"
+
+jobs:
+  build-console:
+    name: i686-pc-windows-msvc (console)
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+        working-directory: operator-console
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-pc-windows-msvc
+
+      - name: Bake version
+        run: |
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" Cargo.toml
+          grep -q "^version = \"${{ env.VERSION }}\"" Cargo.toml || { echo "RL: 版を焼き込めませんでした"; exit 1; }
+
+      - name: Build
+        run: |
+          set +e
+          cargo build --release --target i686-pc-windows-msvc 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" != "0" ]; then
+            # ⚠ 記録はログインしないと読めないので、エラーを注記にも出す（最大10件）
+            sed 's/\x1b\[[0-9;]*m//g' build.log | grep -A5 -E '^error' | head -60 | paste -sd '|' | fold -w 900 | head -10 | while read -r l; do
+              echo "::error title=cargo::${l//%/%25}"; done
+            exit 1
+          fi
+          mkdir -p ../ConsoleOut
+          cp target/i686-pc-windows-msvc/release/remohelppro-console.exe ../ConsoleOut/remohelppro-console-${{ env.VERSION }}.exe
+          # 32ビット用にできたか（PE の machine が 0x14c）
+          python -c "import struct,sys;b=open(sys.argv[1],'rb').read();o=struct.unpack_from('<I',b,0x3c)[0];m=struct.unpack_from('<H',b,o+4)[0];print('machine',hex(m));sys.exit(0 if m==0x14c else 1)" ../ConsoleOut/remohelppro-console-${{ env.VERSION }}.exe
+          ls -la ../ConsoleOut
+
+      - name: Upload console exe (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: operator-console-x86-unsigned
+          path: ConsoleOut

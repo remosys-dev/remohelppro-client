@@ -1,0 +1,21 @@
+[package]
+name = "remohelppro-console"
+version = "1.0.0"
+edition = "2021"
+description = "REMOHELP PRO operator console"
+
+# 相談員の専用プログラム（2026-10-29）。本体の workspace とは別に組み立てる
+[workspace]
+
+[dependencies]
+tao = "0.30"
+wry = "0.45"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
