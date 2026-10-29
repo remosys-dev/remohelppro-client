@@ -133,12 +133,18 @@ jobs:
           export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
           export RL_APP_PREFIX="remohelppro-support"
           pushd ./libs/portable
-          pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe
+          pip3 install -r requirements.txt || { echo "::error title=packer::pip install failed"; exit 1; }
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe > ../../gen.log 2>&1 || {
+            echo "::error title=packer::generate.py failed: $(tail -8 ../../gen.log | paste -sd '|' | sed 's/%/%25/g')"; exit 1; }
           popd
+          echo "::notice title=packer::$(find . -name 'rustdesk-portable-packer.exe' -not -path './.git/*' | paste -sd ' ')"
           mkdir -p ./SignOutput
-          PACKER=$(ls ./target/release/rustdesk-portable-packer.exe ./target/*/release/rustdesk-portable-packer.exe 2>/dev/null | head -1)
-          test -n "$PACKER" || { echo "RL: 自己展開ファイルが見つかりません"; exit 1; }
+          # ⚠ ls で探さない（片方が無いと ls が失敗し、pipefail で止まる）
+          PACKER=""
+          for f in ./target/release/rustdesk-portable-packer.exe ./target/i686-pc-windows-msvc/release/rustdesk-portable-packer.exe ./libs/portable/target/release/rustdesk-portable-packer.exe; do
+            if [ -f "$f" ]; then PACKER="$f"; break; fi
+          done
+          test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
           mv "$PACKER" ./SignOutput/remohelppro-customer-x86-${{ env.VERSION }}.exe
           ls -la ./SignOutput
 
