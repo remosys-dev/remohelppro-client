@@ -134,6 +134,11 @@ pub fn start(args: &mut [String]) {
     #[cfg(windows)]
     allow_err!(sciter::set_options(sciter::RuntimeOptions::UxTheming(true)));
     frame.set_title(&crate::get_app_name());
+    // 🔴 お客様用は、接続中に出る窓（--cm）も含めて題名に製品名（remohelppro-support）を出さない（白ラベル）
+    #[cfg(windows)]
+    if crate::rl_customer::is_customer_build() {
+        frame.set_title("遠隔サポート");
+    }
     #[cfg(target_os = "macos")]
     crate::platform::delegate::make_menubar(frame.get_host(), args.is_empty());
     #[cfg(windows)]
