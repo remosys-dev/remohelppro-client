@@ -119,13 +119,15 @@ jobs:
         shell: bash
         run: |
           # 🔴 お客様用はこれが無いと、番号でつなぐ窓ではなく元の画面が出る（rl_customer::is_customer_build）
-          #   ⚠ 相談員用では付けない（元の画面＋ remohelppro:// で開くビュアー）
+          #   ⚠ 相談員用には付けない（相談員用は下の RL_SCITER_OPERATOR）
           if [ "$RL_KIND" = "customer" ]; then export RL_SCITER_CUSTOMER=1; fi
+          # 相談員用は、元の画面ではなくインストールと案内だけの窓（rl_operator::is_operator_build）
+          if [ "$RL_KIND" = "operator" ]; then export RL_SCITER_OPERATOR=1; fi
           APPBASE="${RL_APP_BASE:-}"
           if [ -z "$APPBASE" ]; then [ "$RL_KIND" = "operator" ] && APPBASE=remohelppro || APPBASE=remohelppro-support; fi
           echo "RL_APPBASE_FINAL=$APPBASE" >> "$GITHUB_ENV"
           # 🔴 窓の html/tis は英数字だけ（sciter が Shift_JIS で読み、日本語で真っ白になった 2026-10-29）
-          if LC_ALL=C grep -nP '[^\x00-\x7F]' src/ui/customer.html src/ui/customer.tis src/ui/common.tis src/ui/common.css; then
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' src/ui/customer.html src/ui/customer.tis src/ui/operator.html src/ui/operator.tis src/ui/common.tis src/ui/common.css; then
             echo "::error title=customer-ui::customer.html/tis に日本語などの英数字以外があります。文は rl_customer::texts_json へ"; exit 1
           fi
           python3 res/inline-sciter.py

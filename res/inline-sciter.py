@@ -28,6 +28,8 @@ remote = open('src/ui/remote.html').read() \
 
 # 32ビット版のお客様用の窓（2026-10-29）
 customer = open('src/ui/customer.html', encoding='UTF8').read().replace('include "customer.tis";', open('src/ui/customer.tis', encoding='UTF8').read())
+# 32ビット版の相談員用の窓（2026-10-30）
+operator = open('src/ui/operator.html', encoding='UTF8').read().replace('include "operator.tis";', open('src/ui/operator.tis', encoding='UTF8').read())
 
 chatbox = open('src/ui/chatbox.html').read()
 install = open('src/ui/install.html').read().replace('include "install.tis";', open('src/ui/install.tis').read())
@@ -53,6 +55,7 @@ with open('src/ui/inline.rs', 'wt') as fh:
     fh.write('const _INSTALL: ' + compress(strip(install)) + ';\n')
     fh.write('const _CONNECTION_MANAGER: ' + compress(strip(cm)) + ';\n')
     fh.write('const _CUSTOMER: ' + compress(strip(customer)) + ';\n')
+    fh.write('const _OPERATOR: ' + compress(strip(operator)) + ';\n')
     fh.write('''
 fn get(data: &[u8]) -> String {
     String::from_utf8_lossy(data).to_string()
@@ -82,6 +85,10 @@ pub fn get_chatbox() -> String {
 #[inline]
 pub fn get_customer() -> String {
     replace(&_CUSTOMER[..])
+}
+#[inline]
+pub fn get_operator() -> String {
+    replace(&_OPERATOR[..])
 }
 #[inline]
 pub fn get_cm() -> String {

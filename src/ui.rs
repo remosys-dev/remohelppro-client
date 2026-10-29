@@ -36,6 +36,14 @@ lazy_static::lazy_static! {
 
 struct UIHostHandler;
 
+/// 32ビット版の相談員用として組み立てたか（rl_operator.rs）
+fn rl_operator_build() -> bool {
+    #[cfg(windows)]
+    return crate::rl_operator::is_operator_build();
+    #[cfg(not(windows))]
+    return false;
+}
+
 /// 32ビット版の操作アプリ（sciter）で `remohelppro://<番号>?password=..` を受ける（2026-10-29）。
 /// ⚠ これまで URL の形は Flutter の窓だけが受けていた。sciter では「Wrong command」で黙って終わる。
 ///   相談員コンソールが送る形（launch-operator-remote.ts）を `--connect` / `--file-transfer` に直す。
@@ -169,6 +177,10 @@ pub fn start(args: &mut [String]) {
             #[cfg(windows)]
             crate::rl_customer::auto_start();
             page = "customer.html";
+        } else if rl_operator_build() {
+            // 32ビット版の相談員用：元の画面ではなく、インストールと案内だけの窓（rl_operator.rs）
+            frame.set_title("REMOHELP PRO");
+            page = "operator.html";
         } else {
             page = "index.html";
         }
@@ -178,7 +190,8 @@ pub fn start(args: &mut [String]) {
     } else if args[0] == "--install" {
         frame.event_handler(UI {});
         frame.sciter_handler(UIHostHandler {});
-        page = "install.html";
+        // 32ビット版の相談員用は、元のインストール画面（上流の案内入り）を出さない
+        page = if rl_operator_build() { "operator.html" } else { "install.html" };
     } else if args[0] == "--cm" {
         frame.register_behavior("connection-manager", move || {
             Box::new(cm::SciterConnectionManager::new())
@@ -234,6 +247,8 @@ pub fn start(args: &mut [String]) {
             inline::get_index()
         } else if page == "customer.html" {
             inline::get_customer()
+        } else if page == "operator.html" {
+            inline::get_operator()
         } else if page == "cm.html" {
             inline::get_cm()
         } else if page == "install.html" {
@@ -795,6 +810,22 @@ impl UI {
         #[cfg(not(windows))]
         return String::new();
     }
+    fn rl_operator_state(&self) -> String {
+        #[cfg(windows)]
+        return crate::rl_operator::state_json();
+        #[cfg(not(windows))]
+        return String::new();
+    }
+    fn rl_operator_texts(&self) -> String {
+        #[cfg(windows)]
+        return crate::rl_operator::texts_json();
+        #[cfg(not(windows))]
+        return String::new();
+    }
+    fn rl_operator_install(&self) {
+        #[cfg(windows)]
+        crate::rl_operator::install()
+    }
     fn rl_customer_texts(&self) -> String {
         #[cfg(windows)]
         return crate::rl_customer::texts_json();
@@ -819,6 +850,9 @@ impl sciter::EventHandler for UI {
     sciter::dispatch_script_call! {
         fn rl_customer_state();
         fn rl_customer_texts();
+        fn rl_operator_state();
+        fn rl_operator_texts();
+        fn rl_operator_install();
         fn rl_customer_start(String);
         fn rl_customer_end();
         fn rl_customer_close();

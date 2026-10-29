@@ -34,6 +34,9 @@ pub mod ui;
 /// 32ビット版 Windows のお客様用（sciter の窓で番号からつなぐ）。2026-10-29 追加。
 #[cfg(all(windows, not(any(feature = "cli", feature = "flutter"))))]
 pub mod rl_customer;
+/// 32ビット版 Windows の相談員用（sciter のビュアー＋インストール窓）。2026-10-30 追加。
+#[cfg(all(windows, not(any(feature = "cli", feature = "flutter"))))]
+pub mod rl_operator;
 mod version;
 pub use version::*;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]

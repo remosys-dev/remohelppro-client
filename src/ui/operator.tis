@@ -1,0 +1,53 @@
+// Operator window for 32-bit Windows (2026-10-30). Logic lives in src/rl_operator.rs.
+// !! ASCII ONLY in this file and operator.html (sciter reads the page as Shift_JIS; see customer.tis).
+//    All Japanese text comes from rl_operator::texts_json().
+// !! Never show the upstream main window or its links here.
+
+function self.ready() {
+    centerize(scaleIt(440), scaleIt(320));
+}
+
+var T = {};
+try { T = JSON.parse(handler.rl_operator_texts()); } catch(e) {}
+
+var st = { installed: false, os64: false, version: "" };
+var installing = false;
+
+function readState() {
+    try { st = JSON.parse(handler.rl_operator_state()); } catch(e) {}
+}
+
+class Operator: Reactor.Component {
+    function render() {
+        var body;
+        if (st.os64 && !st.installed) {
+            body = <div .card><div .warn>{T.os64}</div></div>;
+        } else if (st.installed) {
+            body = <div .card>
+                <div .ok>{T.installed_lead}</div>
+                <div .note>{T.how}</div>
+            </div>;
+        } else if (installing) {
+            body = <div .card><div .lead>{T.installing}</div></div>;
+        } else {
+            body = <div .card>
+                <div .lead>{T.install_lead}</div>
+                <button .go #install>{T.install_btn}</button>
+            </div>;
+        }
+        return <div .page>
+            <div .title>{T.title}</div>
+            {body}
+            <div .ver>{"v" + st.version}</div>
+        </div>;
+    }
+
+    event click $(#install) {
+        installing = true;
+        this.update();
+        handler.rl_operator_install();
+    }
+}
+
+readState();
+$(body).content(<Operator />);
