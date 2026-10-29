@@ -46,6 +46,31 @@ pub fn is_customer_build() -> bool {
     option_env!("RL_SCITER_CUSTOMER").map_or(false, |v| v == "1")
 }
 
+/// 窓に出す文（日本語）。
+/// 🔴 日本語は customer.tis に書かない（2026-10-29 真っ白になった）。
+///   sciter はページを Shift_JIS として読み、「。」で終わるコメント行が次の行を巻き込んで
+///   スクリプトが壊れた（ERROR:TIS bad syntax）。Rust から渡す文字は正しく出る（窓の題名と同じ）。
+pub fn texts_json() -> String {
+    json!({
+        "title": "遠隔サポート",
+        "title_connected": "遠隔サポート中",
+        "title_ended": "サポートは終了しました",
+        "prompt": "担当者からお伝えした6桁の認証コードを入力してください。",
+        "go": "接続する",
+        "safe_input": "認証コードを入れて「接続する」を押すまで、誰もお客様のパソコンに接続できません。",
+        "connecting": "接続しています…",
+        "connected": "担当者と接続しています",
+        "elapsed": "経過時間",
+        "end": "接続を終了する",
+        "safe_connected": "「接続を終了する」を押すと、すぐに誰も接続できなくなります。",
+        "ended_note": "もう誰もお客様のパソコンに接続できません。",
+        "dest": "接続先",
+        "tel": "電話番号",
+        "operator": "担当者",
+    })
+    .to_string()
+}
+
 pub fn state_json() -> String {
     serde_json::to_string(&*STATE.lock().unwrap()).unwrap_or_default()
 }

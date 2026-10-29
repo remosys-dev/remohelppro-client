@@ -1,9 +1,14 @@
-// 32ビット版のお客様用の窓（2026-10-29）。処理は src/rl_customer.rs、ここは見せるだけ。
-// ⚠ 製品名・当社名は出さない（白ラベル）。相手の確かめ方は会社名＋電話番号（Dart 版と同じ）。
+// Customer window for 32-bit Windows (2026-10-29). Logic lives in src/rl_customer.rs; this only shows state.
+// !! ASCII ONLY in this file and customer.html. sciter reads the page as Shift_JIS, and Japanese text here
+//    broke the script (blank window). All Japanese text comes from rl_customer::texts_json().
+// !! White label: never show our product or company name.
 
 function self.ready() {
     centerize(scaleIt(420), scaleIt(460));
 }
+
+var T = {};
+try { T = JSON.parse(handler.rl_customer_texts()); } catch(e) {}
 
 var st = { phase: "input", message: "" };
 
@@ -25,37 +30,37 @@ class Customer: Reactor.Component {
     function render() {
         var who = st.support_name ?
             <div .who>
-                <div>接続先: <b>{st.support_name}</b></div>
-                <div>電話番号: {st.support_tel}</div>
-                {st.operator ? <div>担当者: {st.operator}</div> : ""}
+                <div>{T.dest + ": "}<b>{st.support_name}</b></div>
+                <div>{T.tel + ": " + st.support_tel}</div>
+                {st.operator ? <div>{T.operator + ": " + st.operator}</div> : ""}
             </div> : "";
 
         if (st.phase == "connected") {
             return <div .page>
-                <div .title>遠隔サポート中</div>
+                <div .title>{T.title_connected}</div>
                 <div .card>
-                    <div .big>担当者と接続しています</div>
-                    <div .note>経過時間 {elapsed()}</div>
+                    <div .big>{T.connected}</div>
+                    <div .note>{T.elapsed + " " + elapsed()}</div>
                     {who}
-                    <button .end #end>接続を終了する</button>
+                    <button .end #end>{T.end}</button>
                 </div>
-                <div .safe>「接続を終了する」を押すと、すぐに誰も接続できなくなります。</div>
+                <div .safe>{T.safe_connected}</div>
             </div>;
         }
         if (st.phase == "ended") {
             return <div .page>
-                <div .title>サポートは終了しました</div>
+                <div .title>{T.title_ended}</div>
                 <div .card>
                     <div .note>{st.message}</div>
-                    <div .big style="font-size:13dip">もう誰もお客様のパソコンに接続できません。</div>
+                    <div .big style="font-size:13dip">{T.ended_note}</div>
                 </div>
             </div>;
         }
         if (st.phase == "working") {
             return <div .page>
-                <div .title>遠隔サポート</div>
+                <div .title>{T.title}</div>
                 <div .card>
-                    <div .big>接続しています…</div>
+                    <div .big>{T.connecting}</div>
                     <div .note>{st.message}</div>
                     {who}
                 </div>
@@ -63,14 +68,14 @@ class Customer: Reactor.Component {
         }
         // input / error
         return <div .page>
-            <div .title>遠隔サポート</div>
-            <div .sub>担当者からお伝えした6桁の認証コードを入力してください。</div>
+            <div .title>{T.title}</div>
+            <div .sub>{T.prompt}</div>
             <div .card>
                 <input|text .code #code maxlength="7" />
-                <button .go #go>接続する</button>
+                <button .go #go>{T.go}</button>
                 {st.phase == "error" ? <div .err>{st.message}</div> : ""}
             </div>
-            <div .safe>認証コードを入れて「接続する」を押すまで、誰もお客様のパソコンに接続できません。</div>
+            <div .safe>{T.safe_input}</div>
         </div>;
     }
 
@@ -97,7 +102,7 @@ class Customer: Reactor.Component {
     }
 }
 
-// ⚠ 入力中に作り直すと、打った番号が消える。状態が変わったとき・接続中（時計）だけ描き直す
+// Re-rendering while typing would wipe the code. Redraw only on state change, or every tick while connected (clock).
 var lastPhase = "";
 var lastMsg = "";
 function tick() {
@@ -110,7 +115,7 @@ function tick() {
     self.timer(500ms, tick);
 }
 
-// 閉じるとき、接続中なら終了を知らせてから閉じる（置き去りにしない）
+// On close, report the end first if connected (never leave the session open).
 function self.closing() {
     handler.rl_customer_close();
     return true;

@@ -94,6 +94,10 @@ jobs:
           # 🔴 これが無いと、番号でつなぐ窓ではなく RustDesk の元の画面が出る（rl_customer::is_customer_build）
           RL_SCITER_CUSTOMER: "1"
         run: |
+          # 🔴 窓の html/tis は英数字だけ（sciter が Shift_JIS で読み、日本語で真っ白になった 2026-10-29）
+          if LC_ALL=C grep -nP '[^\x00-\x7F]' src/ui/customer.html src/ui/customer.tis src/ui/common.tis src/ui/common.css; then
+            echo "::error title=customer-ui::customer.html/tis に日本語などの英数字以外があります。文は rl_customer::texts_json へ"; exit 1
+          fi
           python3 res/inline-sciter.py
           grep -q "_CUSTOMER" src/ui/inline.rs || { echo "RL: お客様用の窓を埋め込めませんでした"; exit 1; }
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml

@@ -741,6 +741,12 @@ impl UI {
         #[cfg(not(windows))]
         return String::new();
     }
+    fn rl_customer_texts(&self) -> String {
+        #[cfg(windows)]
+        return crate::rl_customer::texts_json();
+        #[cfg(not(windows))]
+        return String::new();
+    }
     fn rl_customer_start(&self, _code: String) {
         #[cfg(windows)]
         crate::rl_customer::start(_code)
@@ -758,6 +764,7 @@ impl UI {
 impl sciter::EventHandler for UI {
     sciter::dispatch_script_call! {
         fn rl_customer_state();
+        fn rl_customer_texts();
         fn rl_customer_start(String);
         fn rl_customer_end();
         fn rl_customer_close();
