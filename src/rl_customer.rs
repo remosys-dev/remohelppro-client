@@ -187,7 +187,7 @@ fn run(code: String) -> Result<(), String> {
     let mut my_id = String::new();
     for _ in 0..120 {
         let st = crate::ui_interface::get_connect_status();
-        let id = crate::ui_interface::get_id();
+        let id = crate::ipc::get_id(); // ⚠ ui_interface::get_id は flutter 用だけ
         if st.status_num == 1 && !id.is_empty() {
             my_id = id;
             break;
