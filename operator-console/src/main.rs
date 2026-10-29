@@ -76,7 +76,8 @@ fn main() {
 
     let mut ctx = WebContext::new(Some(data));
     let base_nav = base.to_owned();
-    let webview = WebViewBuilder::with_web_context(&mut ctx)
+    let webview = WebViewBuilder::new(&window)
+        .with_web_context(&mut ctx)
         .with_url(format!("{base}/console"))
         .with_navigation_handler(move |url: String| {
             if url.starts_with(&base_nav) || url.starts_with("about:") || url.starts_with("data:") {
@@ -86,7 +87,7 @@ fn main() {
             open_external(&url);
             false
         })
-        .build(&window);
+        .build();
     let _webview = match webview {
         Ok(w) => w,
         Err(e) => {
