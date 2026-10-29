@@ -7,9 +7,15 @@ name: Win32 Customer (32bit sciter)
 #   ⚠ 署名は別途（EV トークン保持者）。ここでは署名しない。
 on:
   workflow_dispatch:
+    inputs:
+      dev_server:
+        description: '試験用（dev.remohelppro.jp 向け）に作る'
+        type: boolean
+        default: false
   push:
     tags:
-      - 'win32-build-*'   # このタグを push すると自動ビルド(git/SSHだけで起動可)
+      - 'win32-build-*'       # このタグを push すると自動ビルド(git/SSHだけで起動可)
+      - 'win32-dev-build-*'   # 🔴 試験用（開発機向け）。本番向けの版では開発機の番号は通らない（2026-10-29 実際に踏んだ）
 
 permissions:
   contents: write
@@ -88,6 +94,12 @@ jobs:
           grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-support".to_owned());' libs/hbb_common/src/config.rs || {
             echo "RL: お客様用のアプリ名を分けられませんでした"; exit 1; }
 
+      # 🔴 試験用は接続先・鍵・管理サーバー・アプリ名を開発機向けに（flutter-build と同じ共通部品）。
+      #   ⚠ アプリ名を remohelppro-support にした後に呼ぶ（-dev は真ん中に入る → remohelppro-dev-support）
+      - name: 試験用サーバー向けに焼き込む（dev only）
+        if: ${{ startsWith(github.ref_name, 'win32-dev-build-') || inputs.dev_server }}
+        uses: ./.github/actions/dev-bake
+
       - name: Build (sciter x86, customer window)
         shell: bash
         env:
@@ -135,7 +147,8 @@ jobs:
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
           export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
-          export RL_APP_PREFIX="remohelppro-support"
+          # 試験用は dev-bake が RL_APP_BASE（remohelppro-dev-support）を渡す
+          export RL_APP_PREFIX="${RL_APP_BASE:-remohelppro-support}"
           pushd ./libs/portable
           pip3 install -r requirements.txt || { echo "::error title=packer::pip install failed"; exit 1; }
           python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe > ../../gen.log 2>&1 || {
@@ -149,7 +162,8 @@ jobs:
             if [ -f "$f" ]; then PACKER="$f"; break; fi
           done
           test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
-          mv "$PACKER" ./SignOutput/remohelppro-customer-x86-${{ env.VERSION }}.exe
+          KIND=""; [ -n "${RL_APP_BASE:-}" ] && KIND="-dev"
+          mv "$PACKER" ./SignOutput/remohelppro-customer-x86${KIND}-${{ env.VERSION }}.exe
           ls -la ./SignOutput
 
       - name: Upload customer x86 exe (unsigned)
