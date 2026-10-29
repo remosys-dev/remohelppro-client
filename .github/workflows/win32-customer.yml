@@ -1,0 +1,137 @@
+name: Win32 Customer (32bit sciter)
+
+# 2026-10-29: 32ビット版 Windows のお客様用アプリ（社長「32ビットにも対応したい。RemoHelp はどちらも入れる」）。
+#   お客様用アプリの画面は Flutter で、Flutter は 32ビット Windows に対応していない。
+#   RustDesk の古い画面（sciter）で i686 を組み立て、番号でつなぐ小さな窓（src/ui/customer.*・src/rl_customer.rs）を出す。
+#   flutter-build.yml の build-for-windows-sciter を元に、お客様用（ワンタイム）の調整だけを足したもの。
+#   ⚠ 署名は別途（EV トークン保持者）。ここでは署名しない。
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'win32-build-*'   # このタグを push すると自動ビルド(git/SSHだけで起動可)
+
+permissions:
+  contents: write
+
+env:
+  LLVM_VERSION: "15.0.6"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VERSION: "1.4.${{ github.run_number }}"
+  # ワンタイム版の有効期限（日数）。x64 のお客様用と同じ既定
+  ONETIME_VALID_DAYS: "365"
+
+jobs:
+  build-win32-customer:
+    name: i686-pc-windows-msvc (customer)
+    runs-on: windows-2022
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install LLVM and Clang
+        uses: rustdesk-org/install-llvm-action-32bit@master
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: nightly-2023-10-13-i686-pc-windows-msvc # abi_thiscall のため nightly
+          targets: i686-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: windows-2022-sciter-customer
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x86-windows-static
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet x86-windows-static \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"; echo "======"; cat "$_1"; echo "======"; echo ""
+            done
+            exit 1
+          fi
+        shell: bash
+
+      - name: Bake version and customer app name
+        shell: bash
+        run: |
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" Cargo.toml
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" libs/portable/Cargo.toml
+          grep -q "^version = \"${{ env.VERSION }}\"" Cargo.toml || { echo "RL: 版を焼き込めませんでした"; exit 1; }
+          # お客様用（ワンタイム）と同じアプリ名。設定の置き場所・サービス名がこれから決まる
+          sed -i 's/RwLock::new("remohelppro".to_owned())/RwLock::new("remohelppro-support".to_owned())/' libs/hbb_common/src/config.rs
+          grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-support".to_owned());' libs/hbb_common/src/config.rs || {
+            echo "RL: お客様用のアプリ名を分けられませんでした"; exit 1; }
+
+      - name: Build (sciter x86, customer window)
+        shell: bash
+        env:
+          # 🔴 これが無いと、番号でつなぐ窓ではなく RustDesk の元の画面が出る（rl_customer::is_customer_build）
+          RL_SCITER_CUSTOMER: "1"
+        run: |
+          python3 res/inline-sciter.py
+          grep -q "_CUSTOMER" src/ui/inline.rs || { echo "RL: お客様用の窓を埋め込めませんでした"; exit 1; }
+          sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
+          cargo build --features inline,vram,hwcodec --release --bins
+          mkdir -p ./Release
+          mv ./target/release/rustdesk.exe ./Release/remohelppro-support.exe
+          curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
+          test -s ./Release/sciter.dll || { echo "RL: sciter.dll を取れませんでした"; exit 1; }
+          # 32ビットの VC++ 実行部品を同梱（入っていない PC がある・x64 のお客様用と同じ考え）
+          cp /c/Windows/SysWOW64/vcruntime140.dll /c/Windows/SysWOW64/msvcp140.dll ./Release/ || true
+          # ワンタイム版の目印（ランナーが使い終わったら自分ごと消す）
+          echo "onetime" > ./Release/remohelppro-onetime.flag
+          ls -la ./Release
+
+      - name: Upload unsigned inner files
+        uses: actions/upload-artifact@v4
+        with:
+          name: win32-customer-inner-unsigned
+          path: Release
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
+          export RL_APP_PREFIX="remohelppro-support"
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe
+          popd
+          mkdir -p ./SignOutput
+          PACKER=$(ls ./target/release/rustdesk-portable-packer.exe ./target/*/release/rustdesk-portable-packer.exe 2>/dev/null | head -1)
+          test -n "$PACKER" || { echo "RL: 自己展開ファイルが見つかりません"; exit 1; }
+          mv "$PACKER" ./SignOutput/remohelppro-customer-x86-${{ env.VERSION }}.exe
+          ls -la ./SignOutput
+
+      - name: Upload customer x86 exe (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: win32-customer-x86-unsigned
+          path: SignOutput

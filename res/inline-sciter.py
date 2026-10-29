@@ -26,6 +26,9 @@ remote = open('src/ui/remote.html').read() \
     .replace('include "port_forward.tis";', open('src/ui/port_forward.tis').read()) \
     .replace('include "printer.tis";', open('src/ui/printer.tis').read())
 
+# 32ビット版のお客様用の窓（2026-10-29）
+customer = open('src/ui/customer.html', encoding='UTF8').read().replace('include "customer.tis";', open('src/ui/customer.tis', encoding='UTF8').read())
+
 chatbox = open('src/ui/chatbox.html').read()
 install = open('src/ui/install.html').read().replace('include "install.tis";', open('src/ui/install.tis').read())
 
@@ -49,6 +52,7 @@ with open('src/ui/inline.rs', 'wt') as fh:
     fh.write('const _CHATBOX: ' + compress(strip(chatbox)) + ';\n')
     fh.write('const _INSTALL: ' + compress(strip(install)) + ';\n')
     fh.write('const _CONNECTION_MANAGER: ' + compress(strip(cm)) + ';\n')
+    fh.write('const _CUSTOMER: ' + compress(strip(customer)) + ';\n')
     fh.write('''
 fn get(data: &[u8]) -> String {
     String::from_utf8_lossy(data).to_string()
@@ -74,6 +78,10 @@ pub fn get_install() -> String {
 #[inline]
 pub fn get_chatbox() -> String {
     replace(&_CHATBOX[..])
+}
+#[inline]
+pub fn get_customer() -> String {
+    replace(&_CUSTOMER[..])
 }
 #[inline]
 pub fn get_cm() -> String {

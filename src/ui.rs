@@ -105,7 +105,19 @@ pub fn start(args: &mut [String]) {
         crate::common::check_software_update();
         frame.event_handler(UI {});
         frame.sciter_handler(UIHostHandler {});
-        page = "index.html";
+        // 32ビット版のお客様用は、番号でつなぐだけの小さな窓（rl_customer.rs）
+        #[cfg(windows)]
+        let customer = crate::rl_customer::is_customer_build();
+        #[cfg(not(windows))]
+        let customer = false;
+        if customer {
+            frame.set_title("遠隔サポート");
+            #[cfg(windows)]
+            crate::rl_customer::auto_start();
+            page = "customer.html";
+        } else {
+            page = "index.html";
+        }
         // Start pulse audio local server.
         #[cfg(target_os = "linux")]
         std::thread::spawn(crate::ipc::start_pa);
@@ -166,6 +178,8 @@ pub fn start(args: &mut [String]) {
     {
         let html = if page == "index.html" {
             inline::get_index()
+        } else if page == "customer.html" {
+            inline::get_customer()
         } else if page == "cm.html" {
             inline::get_cm()
         } else if page == "install.html" {
@@ -719,8 +733,34 @@ impl UI {
     }
 }
 
+// 32ビット版のお客様用の窓から呼ぶ（src/ui/customer.tis）。⚠ windows 以外では中身なし
+impl UI {
+    fn rl_customer_state(&self) -> String {
+        #[cfg(windows)]
+        return crate::rl_customer::state_json();
+        #[cfg(not(windows))]
+        return String::new();
+    }
+    fn rl_customer_start(&self, _code: String) {
+        #[cfg(windows)]
+        crate::rl_customer::start(_code)
+    }
+    fn rl_customer_end(&self) {
+        #[cfg(windows)]
+        crate::rl_customer::end_by_customer()
+    }
+    fn rl_customer_close(&self) {
+        #[cfg(windows)]
+        crate::rl_customer::on_close()
+    }
+}
+
 impl sciter::EventHandler for UI {
     sciter::dispatch_script_call! {
+        fn rl_customer_state();
+        fn rl_customer_start(String);
+        fn rl_customer_end();
+        fn rl_customer_close();
         fn t(String);
         fn get_api_server();
         fn is_xfce();

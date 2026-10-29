@@ -1,0 +1,123 @@
+// 32ビット版のお客様用の窓（2026-10-29）。処理は src/rl_customer.rs、ここは見せるだけ。
+// ⚠ 製品名・当社名は出さない（白ラベル）。相手の確かめ方は会社名＋電話番号（Dart 版と同じ）。
+
+function self.ready() {
+    centerize(scaleIt(420), scaleIt(460));
+}
+
+var st = { phase: "input", message: "" };
+
+function readState() {
+    try { st = JSON.parse(handler.rl_customer_state()); } catch(e) {}
+}
+
+function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+
+function elapsed() {
+    if (!st.connected_at) return "00:00:00";
+    var d = (new Date()).valueOf() / 1000 - st.connected_at;
+    if (d < 0) d = 0;
+    d = d.toInteger();
+    return pad2(d / 3600) + ":" + pad2((d % 3600) / 60) + ":" + pad2(d % 60);
+}
+
+class Customer: Reactor.Component {
+    function render() {
+        var who = st.support_name ?
+            <div .who>
+                <div>接続先: <b>{st.support_name}</b></div>
+                <div>電話番号: {st.support_tel}</div>
+                {st.operator ? <div>担当者: {st.operator}</div> : ""}
+            </div> : "";
+
+        if (st.phase == "connected") {
+            return <div .page>
+                <div .title>遠隔サポート中</div>
+                <div .card>
+                    <div .big>担当者と接続しています</div>
+                    <div .note>経過時間 {elapsed()}</div>
+                    {who}
+                    <button .end #end>接続を終了する</button>
+                </div>
+                <div .safe>「接続を終了する」を押すと、すぐに誰も接続できなくなります。</div>
+            </div>;
+        }
+        if (st.phase == "ended") {
+            return <div .page>
+                <div .title>サポートは終了しました</div>
+                <div .card>
+                    <div .note>{st.message}</div>
+                    <div .big style="font-size:13dip">もう誰もお客様のパソコンに接続できません。</div>
+                </div>
+            </div>;
+        }
+        if (st.phase == "working") {
+            return <div .page>
+                <div .title>遠隔サポート</div>
+                <div .card>
+                    <div .big>接続しています…</div>
+                    <div .note>{st.message}</div>
+                    {who}
+                </div>
+            </div>;
+        }
+        // input / error
+        return <div .page>
+            <div .title>遠隔サポート</div>
+            <div .sub>担当者からお伝えした6桁の認証コードを入力してください。</div>
+            <div .card>
+                <input|text .code #code maxlength="7" />
+                <button .go #go>接続する</button>
+                {st.phase == "error" ? <div .err>{st.message}</div> : ""}
+            </div>
+            <div .safe>認証コードを入れて「接続する」を押すまで、誰もお客様のパソコンに接続できません。</div>
+        </div>;
+    }
+
+    event click $(#go) {
+        var el = $(#code);
+        handler.rl_customer_start(el ? el.value : "");
+        readState();
+        this.update();
+    }
+
+    event keydown $(#code) (evt) {
+        if (isEnterKey(evt)) {
+            handler.rl_customer_start($(#code).value);
+            readState();
+            this.update();
+            return true;
+        }
+    }
+
+    event click $(#end) {
+        handler.rl_customer_end();
+        readState();
+        this.update();
+    }
+}
+
+// ⚠ 入力中に作り直すと、打った番号が消える。状態が変わったとき・接続中（時計）だけ描き直す
+var lastPhase = "";
+var lastMsg = "";
+function tick() {
+    readState();
+    if (st.phase != lastPhase || st.message != lastMsg || st.phase == "connected") {
+        lastPhase = st.phase;
+        lastMsg = st.message;
+        $(body).content(<Customer />);
+    }
+    self.timer(500ms, tick);
+}
+
+// 閉じるとき、接続中なら終了を知らせてから閉じる（置き去りにしない）
+function self.closing() {
+    handler.rl_customer_close();
+    return true;
+}
+
+readState();
+lastPhase = st.phase;
+lastMsg = st.message;
+$(body).content(<Customer />);
+self.timer(500ms, tick);
