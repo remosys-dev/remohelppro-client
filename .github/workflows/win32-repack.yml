@@ -3,27 +3,16 @@ name: Win32 Repack (signed inner)
 # 2026-10-29: 32ビット版の「外側」を、署名済みの「中身」で作り直す。
 #   64ビット版と同じく、中身（展開されて動く本体）と外側（お客様が落とすファイル）の両方に署名するため。
 #   ① win32-customer.yml の inner を社長が EV 署名
-#   ② その一式を ZIP にして、下書きのリリース（tag = inputs.release_tag）に上げる
+#   ② その一式を ZIP にして、タグと同じ名前のリリースに上げる（タグ名の決まりは下の on: を参照）
 #   ③ これを動かすと、署名済みの中身を詰めた外側ができる → 外側を社長が EV 署名
 #   ⚠ 中身が署名されていなければ止める（署名し忘れの物を配らない）。
 on:
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: '署名済みの中身（ZIP）を置いた下書きリリースのタグ'
-        required: true
-      kind:
-        description: 'customer / operator'
-        type: choice
-        options: [customer, operator]
-        default: customer
-      version:
-        description: '版（例 1.4.12）。中身と同じ数字にする'
-        required: true
-      dev_server:
-        description: '試験用（開発機向け）の中身か'
-        type: boolean
-        default: false
+  push:
+    tags:
+      # 🔴 タグ名で指定する：win32-repack-<customer|operator>[-dev]-<版>（例 win32-repack-customer-1.4.12）
+      #   ⚠ 署名済みの中身（ZIP）は、同じ名前のリリースに付ける（gh release create <タグ> <zip>）。
+      #   ⚠ 手動起動（workflow_dispatch）にしないのは、既定のブランチに無いと起動できないため。
+      - 'win32-repack-*'
 
 permissions:
   contents: read
@@ -35,6 +24,17 @@ jobs:
   repack:
     runs-on: windows-2022
     steps:
+      - name: Read tag
+        shell: bash
+        run: |
+          T="${{ github.ref_name }}"; T="${T#win32-repack-}"
+          KIND="${T%%-*}"; REST="${T#*-}"
+          DEV=false; case "$REST" in dev-*) DEV=true; REST="${REST#dev-}";; esac
+          case "$KIND" in customer|operator) : ;; *) echo "::error title=tag::種類が読めません: ${{ github.ref_name }}"; exit 1;; esac
+          echo "$REST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error title=tag::版が読めません: $REST"; exit 1; }
+          { echo "R_KIND=$KIND"; echo "R_DEV=$DEV"; echo "R_VER=$REST"; } >> "$GITHUB_ENV"
+          echo "種類=$KIND 試験用=$DEV 版=$REST"
+
       - name: Checkout source code
         uses: actions/checkout@v4
 
@@ -50,7 +50,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p signed Release
-          gh release download "${{ inputs.release_tag }}" -R "${{ github.repository }}" -p '*.zip' -D signed
+          # ⚠ リリースの作成直後は ZIP の上げ終わりを待つ（最大3分）
+          for i in $(seq 1 18); do
+            gh release download "${{ github.ref_name }}" -R "${{ github.repository }}" -p '*.zip' -D signed && break
+            sleep 10
+          done
           ls -la signed
           python -c "import zipfile,glob;zipfile.ZipFile(glob.glob('signed/*.zip')[0]).extractall('Release')"
           # ZIP の中にフォルダが1段あれば平らにする
@@ -71,10 +75,10 @@ jobs:
       - name: Build self-extracted executable
         shell: bash
         run: |
-          KIND="${{ inputs.kind }}"
-          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ inputs.version }}\"/" libs/portable/Cargo.toml
+          KIND="${{ env.R_KIND }}"
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.R_VER }}\"/" libs/portable/Cargo.toml
           sed -i '/dpiAware/d' res/manifest.xml
-          if [ "${{ inputs.dev_server }}" = "true" ]; then
+          if [ "${{ env.R_DEV }}" = "true" ]; then
             [ "$KIND" = "operator" ] && APPBASE=remohelppro-dev || APPBASE=remohelppro-dev-support
             DEVK="-dev"
           else
@@ -98,11 +102,11 @@ jobs:
           done
           test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
           mkdir -p SignOutput
-          mv "$PACKER" ./SignOutput/remohelppro-$KIND-x86${DEVK}-${{ inputs.version }}.exe
+          mv "$PACKER" ./SignOutput/remohelppro-$KIND-x86${DEVK}-${{ env.R_VER }}.exe
           ls -la SignOutput
 
       - name: Upload (outer unsigned, inner signed)
         uses: actions/upload-artifact@v4
         with:
-          name: win32-${{ inputs.kind }}-x86-inner-signed
+          name: win32-${{ env.R_KIND }}-x86-inner-signed
           path: SignOutput
