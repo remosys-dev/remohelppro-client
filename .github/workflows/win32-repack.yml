@@ -1,0 +1,108 @@
+name: Win32 Repack (signed inner)
+
+# 2026-10-29: 32ビット版の「外側」を、署名済みの「中身」で作り直す。
+#   64ビット版と同じく、中身（展開されて動く本体）と外側（お客様が落とすファイル）の両方に署名するため。
+#   ① win32-customer.yml の inner を社長が EV 署名
+#   ② その一式を ZIP にして、下書きのリリース（tag = inputs.release_tag）に上げる
+#   ③ これを動かすと、署名済みの中身を詰めた外側ができる → 外側を社長が EV 署名
+#   ⚠ 中身が署名されていなければ止める（署名し忘れの物を配らない）。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '署名済みの中身（ZIP）を置いた下書きリリースのタグ'
+        required: true
+      kind:
+        description: 'customer / operator'
+        type: choice
+        options: [customer, operator]
+        default: customer
+      version:
+        description: '版（例 1.4.12）。中身と同じ数字にする'
+        required: true
+      dev_server:
+        description: '試験用（開発機向け）の中身か'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  ONETIME_VALID_DAYS: "365"
+
+jobs:
+  repack:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: nightly-2023-10-13-i686-pc-windows-msvc
+          targets: i686-pc-windows-msvc
+
+      - name: Get signed inner files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p signed Release
+          gh release download "${{ inputs.release_tag }}" -R "${{ github.repository }}" -p '*.zip' -D signed
+          ls -la signed
+          python -c "import zipfile,glob;zipfile.ZipFile(glob.glob('signed/*.zip')[0]).extractall('Release')"
+          # ZIP の中にフォルダが1段あれば平らにする
+          if [ ! -f Release/sciter.dll ]; then d=$(dirname "$(find Release -name sciter.dll | head -1)"); mv "$d"/* Release/; fi
+          ls -la Release
+
+      - name: Check inner signatures
+        shell: pwsh
+        run: |
+          $ng = @()
+          Get-ChildItem Release -Filter *.exe | ForEach-Object {
+            $s = Get-AuthenticodeSignature $_.FullName
+            Write-Host ("{0,-32} {1}  {2}" -f $_.Name, $s.Status, $s.SignerCertificate.Subject)
+            if ($s.Status -ne 'Valid' -or -not $s.TimeStamperCertificate) { $ng += $_.Name }
+          }
+          if ($ng.Count -gt 0) { Write-Host "::error title=sign::中身に署名（時刻印つき）がありません: $($ng -join ', ')"; exit 1 }
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          KIND="${{ inputs.kind }}"
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ inputs.version }}\"/" libs/portable/Cargo.toml
+          sed -i '/dpiAware/d' res/manifest.xml
+          if [ "${{ inputs.dev_server }}" = "true" ]; then
+            [ "$KIND" = "operator" ] && APPBASE=remohelppro-dev || APPBASE=remohelppro-dev-support
+            DEVK="-dev"
+          else
+            [ "$KIND" = "operator" ] && APPBASE=remohelppro || APPBASE=remohelppro-support
+            DEVK=""
+          fi
+          test -f "Release/$APPBASE.exe" || { echo "::error title=packer::Release/$APPBASE.exe がありません（種類・試験用の指定を確認）"; exit 1; }
+          if [ "$KIND" = "customer" ]; then
+            test -f Release/remohelppro-onetime.flag || { echo "::error title=packer::お客様用なのにワンタイムの目印がありません"; exit 1; }
+            export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
+          fi
+          export RL_APP_PREFIX="$APPBASE"
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/$APPBASE.exe > ../../gen.log 2>&1 || {
+            echo "::error title=packer::generate.py failed: $(tail -8 ../../gen.log | paste -sd '|' | sed 's/%/%25/g')"; exit 1; }
+          popd
+          PACKER=""
+          for f in ./target/release/rustdesk-portable-packer.exe ./libs/portable/target/release/rustdesk-portable-packer.exe; do
+            if [ -f "$f" ]; then PACKER="$f"; break; fi
+          done
+          test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
+          mkdir -p SignOutput
+          mv "$PACKER" ./SignOutput/remohelppro-$KIND-x86${DEVK}-${{ inputs.version }}.exe
+          ls -la SignOutput
+
+      - name: Upload (outer unsigned, inner signed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: win32-${{ inputs.kind }}-x86-inner-signed
+          path: SignOutput
