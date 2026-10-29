@@ -105,10 +105,9 @@ jobs:
           if [ "$rc" != "0" ]; then
             # ⚠ ここは pipefail を外す（head で途中を切ると grep が失敗扱いになり、注記を出す前に止まる）
             set +e +o pipefail
-            grep -E -A8 "^error|panicked" build.log | head -150 > err.txt
-            [ -s err.txt ] || tail -80 build.log > err.txt
-            msg=$(sed 's/%/%25/g' err.txt | awk '{printf "%s%%0A", $0}')
-            echo "::error title=cargo build failed::${msg}"
+            # ⚠ 注記は1件が短く切られる。エラー1つずつ、場所の行と一緒に出す（最大10件）
+            sed 's/\x1b\[[0-9;]*m//g' build.log > plain.log
+            python3 .github/rl-cargo-errors.py plain.log
             exit 1
           fi
           mkdir -p ./Release
