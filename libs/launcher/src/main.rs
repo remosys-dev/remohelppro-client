@@ -49,6 +49,8 @@ const MIN_SIZE: u64 = 5_000_000;
 ///   `remohelppro.exe` だった。＝**本体が見つからず、相談員が
 ///   「操作アプリで開く」を押しても起動しなかった。**
 const APP_EXE_INSTALLED: &str = "remohelppro.exe";
+/// 試験用（dev_server でビルド）を入れた場合の本体名。
+const APP_EXE_INSTALLED_DEV: &str = "remohelppro-dev.exe";
 
 /// このフォルダの本体はどちらの形か。
 ///
@@ -94,7 +96,15 @@ fn find_app(dir: &Path) -> AppKind {
             .map(|m| m.is_file() && m.len() >= min)
             .unwrap_or(false)
     }
-    let installed = dir.join(APP_EXE_INSTALLED);
+    // 🔴 試験用（アプリ名 remohelppro-dev）は本体が remohelppro-dev.exe（2026-10-29 実機で判明）。
+    //   ⚠ remohelppro.exe しか探さず「相談員プログラムが見つかりません」で止まっていた。
+    //   ★このランチャーと同じフォルダにある方を使う（本番のフォルダに -dev は無い）。
+    let dev_installed = dir.join(APP_EXE_INSTALLED_DEV);
+    let installed = if !dir.join(APP_EXE_INSTALLED).exists() && dev_installed.exists() {
+        dev_installed
+    } else {
+        dir.join(APP_EXE_INSTALLED)
+    };
     if big_enough(&installed, 100_000) && big_enough(&dir.join("librustdesk.dll"), 5_000_000) {
         return AppKind::Installed(installed);
     }
