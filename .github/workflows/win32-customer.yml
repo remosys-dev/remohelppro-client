@@ -1,5 +1,8 @@
 name: Win32 Customer (32bit sciter)
 
+# 🔴 2026-10-29 追記：相談員の操作アプリ（ビュアー）の 32ビット版も同じ作りで出す（社長「既存のも32ビット対応はする」）。
+#   タグ win32-op-build-* / win32-op-dev-build-*、または手動の kind=operator で相談員用になる。
+
 # 2026-10-29: 32ビット版 Windows のお客様用アプリ（社長「32ビットにも対応したい。RemoHelp はどちらも入れる」）。
 #   お客様用アプリの画面は Flutter で、Flutter は 32ビット Windows に対応していない。
 #   RustDesk の古い画面（sciter）で i686 を組み立て、番号でつなぐ小さな窓（src/ui/customer.*・src/rl_customer.rs）を出す。
@@ -12,10 +15,17 @@ on:
         description: '試験用（dev.remohelppro.jp 向け）に作る'
         type: boolean
         default: false
+      kind:
+        description: 'customer（お客様用）/ operator（相談員の操作アプリ）'
+        type: choice
+        options: [customer, operator]
+        default: customer
   push:
     tags:
       - 'win32-build-*'       # このタグを push すると自動ビルド(git/SSHだけで起動可)
       - 'win32-dev-build-*'   # 🔴 試験用（開発機向け）。本番向けの版では開発機の番号は通らない（2026-10-29 実際に踏んだ）
+      - 'win32-op-build-*'      # 相談員の操作アプリ（本番向け）
+      - 'win32-op-dev-build-*'  # 相談員の操作アプリ（試験用）
 
 permissions:
   contents: write
@@ -30,8 +40,11 @@ env:
 
 jobs:
   build-win32-customer:
-    name: i686-pc-windows-msvc (customer)
+    name: i686-pc-windows-msvc (${{ (startsWith(github.ref_name, 'win32-op-') || inputs.kind == 'operator') && 'operator' || 'customer' }})
     runs-on: windows-2022
+    env:
+      # customer / operator。⚠ 以降の段はすべてこれで分ける
+      RL_KIND: ${{ (startsWith(github.ref_name, 'win32-op-') || inputs.kind == 'operator') && 'operator' || 'customer' }}
     steps:
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v6
@@ -89,6 +102,8 @@ jobs:
           sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" Cargo.toml
           sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.VERSION }}\"/" libs/portable/Cargo.toml
           grep -q "^version = \"${{ env.VERSION }}\"" Cargo.toml || { echo "RL: 版を焼き込めませんでした"; exit 1; }
+          # 相談員用は本体と同じアプリ名（remohelppro）のまま。⚠ スキーム remohelppro:// もこれで決まる
+          if [ "$RL_KIND" = "operator" ]; then echo "RL: 相談員用（アプリ名 remohelppro のまま）"; exit 0; fi
           # お客様用（ワンタイム）と同じアプリ名。設定の置き場所・サービス名がこれから決まる
           sed -i 's/RwLock::new("remohelppro".to_owned())/RwLock::new("remohelppro-support".to_owned())/' libs/hbb_common/src/config.rs
           grep -q 'APP_NAME: RwLock<String> = RwLock::new("remohelppro-support".to_owned());' libs/hbb_common/src/config.rs || {
@@ -97,15 +112,18 @@ jobs:
       # 🔴 試験用は接続先・鍵・管理サーバー・アプリ名を開発機向けに（flutter-build と同じ共通部品）。
       #   ⚠ アプリ名を remohelppro-support にした後に呼ぶ（-dev は真ん中に入る → remohelppro-dev-support）
       - name: 試験用サーバー向けに焼き込む（dev only）
-        if: ${{ startsWith(github.ref_name, 'win32-dev-build-') || inputs.dev_server }}
+        if: ${{ contains(github.ref_name, 'dev-build-') || inputs.dev_server }}
         uses: ./.github/actions/dev-bake
 
       - name: Build (sciter x86, customer window)
         shell: bash
-        env:
-          # 🔴 これが無いと、番号でつなぐ窓ではなく RustDesk の元の画面が出る（rl_customer::is_customer_build）
-          RL_SCITER_CUSTOMER: "1"
         run: |
+          # 🔴 お客様用はこれが無いと、番号でつなぐ窓ではなく元の画面が出る（rl_customer::is_customer_build）
+          #   ⚠ 相談員用では付けない（元の画面＋ remohelppro:// で開くビュアー）
+          if [ "$RL_KIND" = "customer" ]; then export RL_SCITER_CUSTOMER=1; fi
+          APPBASE="${RL_APP_BASE:-}"
+          if [ -z "$APPBASE" ]; then [ "$RL_KIND" = "operator" ] && APPBASE=remohelppro || APPBASE=remohelppro-support; fi
+          echo "RL_APPBASE_FINAL=$APPBASE" >> "$GITHUB_ENV"
           # 🔴 窓の html/tis は英数字だけ（sciter が Shift_JIS で読み、日本語で真っ白になった 2026-10-29）
           if LC_ALL=C grep -nP '[^\x00-\x7F]' src/ui/customer.html src/ui/customer.tis src/ui/common.tis src/ui/common.css; then
             echo "::error title=customer-ui::customer.html/tis に日本語などの英数字以外があります。文は rl_customer::texts_json へ"; exit 1
@@ -127,31 +145,33 @@ jobs:
             exit 1
           fi
           mkdir -p ./Release
-          mv ./target/release/rustdesk.exe ./Release/remohelppro-support.exe
+          mv ./target/release/rustdesk.exe ./Release/$APPBASE.exe
           curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
           test -s ./Release/sciter.dll || { echo "RL: sciter.dll を取れませんでした"; exit 1; }
           # 32ビットの VC++ 実行部品を同梱（入っていない PC がある・x64 のお客様用と同じ考え）
           cp /c/Windows/SysWOW64/vcruntime140.dll /c/Windows/SysWOW64/msvcp140.dll ./Release/ || true
-          # ワンタイム版の目印（ランナーが使い終わったら自分ごと消す）
-          echo "onetime" > ./Release/remohelppro-onetime.flag
+          # ワンタイム版の目印（ランナーが使い終わったら自分ごと消す）。⚠ 相談員用には付けない（消えては困る）
+          if [ "$RL_KIND" = "customer" ]; then echo "onetime" > ./Release/remohelppro-onetime.flag; fi
           ls -la ./Release
 
       - name: Upload unsigned inner files
         uses: actions/upload-artifact@v4
         with:
-          name: win32-customer-inner-unsigned
+          name: win32-${{ env.RL_KIND }}-inner-unsigned
           path: Release
 
       - name: Build self-extracted executable
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
-          export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
-          # 試験用は dev-bake が RL_APP_BASE（remohelppro-dev-support）を渡す
-          export RL_APP_PREFIX="${RL_APP_BASE:-remohelppro-support}"
+          if [ "$RL_KIND" = "customer" ]; then
+            export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
+          fi
+          # 試験用は dev-bake が RL_APP_BASE（remohelppro-dev-support / remohelppro-dev）を渡す
+          export RL_APP_PREFIX="$RL_APPBASE_FINAL"
           pushd ./libs/portable
           pip3 install -r requirements.txt || { echo "::error title=packer::pip install failed"; exit 1; }
-          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe > ../../gen.log 2>&1 || {
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/$RL_APPBASE_FINAL.exe > ../../gen.log 2>&1 || {
             echo "::error title=packer::generate.py failed: $(tail -8 ../../gen.log | paste -sd '|' | sed 's/%/%25/g')"; exit 1; }
           popd
           echo "::notice title=packer::$(find . -name 'rustdesk-portable-packer.exe' -not -path './.git/*' | paste -sd ' ')"
@@ -163,11 +183,11 @@ jobs:
           done
           test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
           KIND=""; [ -n "${RL_APP_BASE:-}" ] && KIND="-dev"
-          mv "$PACKER" ./SignOutput/remohelppro-customer-x86${KIND}-${{ env.VERSION }}.exe
+          mv "$PACKER" ./SignOutput/remohelppro-$RL_KIND-x86${KIND}-${{ env.VERSION }}.exe
           ls -la ./SignOutput
 
       - name: Upload customer x86 exe (unsigned)
         uses: actions/upload-artifact@v4
         with:
-          name: win32-customer-x86-unsigned
+          name: win32-${{ env.RL_KIND }}-x86-unsigned
           path: SignOutput

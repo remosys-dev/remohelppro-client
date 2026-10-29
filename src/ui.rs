@@ -36,7 +36,56 @@ lazy_static::lazy_static! {
 
 struct UIHostHandler;
 
+/// 32ビット版の操作アプリ（sciter）で `remohelppro://<番号>?password=..` を受ける（2026-10-29）。
+/// ⚠ これまで URL の形は Flutter の窓だけが受けていた。sciter では「Wrong command」で黙って終わる。
+///   相談員コンソールが送る形（launch-operator-remote.ts）を `--connect` / `--file-transfer` に直す。
+fn rl_uri_to_args(args: &[String]) -> Option<Vec<String>> {
+    let rest = args.first()?.strip_prefix(&crate::get_uri_prefix())?;
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let path = path.trim_end_matches('/');
+    let (cmd, id) = match path.strip_prefix("file-transfer/") {
+        Some(id) => ("--file-transfer", id),
+        None => ("--connect", path),
+    };
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let pw = query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("password="))
+        .map(rl_percent_decode)
+        .unwrap_or_default();
+    Some(vec![cmd.to_owned(), id.to_owned(), pw])
+}
+
+fn rl_percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        // ⚠ '+' はそのまま（encodeURIComponent は空白を %20、'+' を %2B にする）
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub fn start(args: &mut [String]) {
+    let mut rl_owned: Vec<String>;
+    let args: &mut [String] = match rl_uri_to_args(args) {
+        Some(v) => {
+            rl_owned = v;
+            &mut rl_owned[..]
+        }
+        None => args,
+    };
     #[cfg(target_os = "macos")]
     crate::platform::delegate::show_dock();
     #[cfg(all(target_os = "linux", feature = "inline"))]
