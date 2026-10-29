@@ -79,6 +79,16 @@ fn main() {
     let webview = WebViewBuilder::new(&window)
         .with_web_context(&mut ctx)
         .with_url(format!("{base}/console"))
+        // 🔴 ビュアーの起動はページから直接受け取る（2026-10-30 実機で、remohelppro:// へのページ移動が
+        //   Windows まで届かず、ビュアーが起動しなかった）。ページは window.ipc.postMessage("open:<URL>") を送る。
+        //   ⚠ 受け付けるのは当社の操作アプリのスキームだけ（他の物を開かせない）。
+        .with_ipc_handler(|req: wry::http::Request<String>| {
+            if let Some(u) = req.body().strip_prefix("open:") {
+                if u.starts_with("remohelppro://") || u.starts_with("remohelppro-dev://") {
+                    open_external(u);
+                }
+            }
+        })
         .with_navigation_handler(move |url: String| {
             if url.starts_with(&base_nav) || url.starts_with("about:") || url.starts_with("data:") {
                 return true;
