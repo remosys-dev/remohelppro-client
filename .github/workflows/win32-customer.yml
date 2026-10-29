@@ -97,7 +97,16 @@ jobs:
           python3 res/inline-sciter.py
           grep -q "_CUSTOMER" src/ui/inline.rs || { echo "RL: お客様用の窓を埋め込めませんでした"; exit 1; }
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
-          cargo build --features inline,vram,hwcodec --release --bins
+          # ⚠ 失敗したら、エラーの行を注記にも出す（記録はログインしないと読めないが、注記は API で読める）
+          set +e
+          cargo build --features inline,vram,hwcodec --release --bins 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" != "0" ]; then
+            msg=$(grep -E -A6 "^error|panicked|^warning: unused" build.log | grep -v "^warning: unused" | head -120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=cargo build failed::${msg}"
+            exit 1
+          fi
           mkdir -p ./Release
           mv ./target/release/rustdesk.exe ./Release/remohelppro-support.exe
           curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
