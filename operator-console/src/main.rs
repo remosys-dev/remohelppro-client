@@ -15,7 +15,7 @@
 use tao::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
+    event_loop::{ControlFlow, EventLoopBuilder},
     window::WindowBuilder,
 };
 use wry::{WebContext, WebViewBuilder};
@@ -24,6 +24,8 @@ mod update;
 
 /// 入れ替えの手伝いから本体へ知らせる
 enum UserEv {
+    /// 新しい版の確認が終わった（新しい版があればその版）
+    Checked(Option<String>),
     UpdateDone(Result<std::path::PathBuf, String>),
 }
 
@@ -47,46 +49,6 @@ fn relaunch(exe: &std::path::Path, no_update: bool) {
     }
     let _ = c.spawn();
 }
-
-/// 新しい版を受け取って入れ替え、起動し直す（見本の「5 起動のとき」）。
-/// ⚠ 失敗したら今の版のまま開き直す（--no-update を付けて、もう一度は確かめない）
-fn run_update(event_loop: EventLoop<UserEv>, base: &str, dev: bool, to: String) {
-    let window = WindowBuilder::new()
-        .with_title(title(dev))
-        .with_window_icon(app_icon())
-        .with_inner_size(LogicalSize::new(420.0, 200.0))
-        .with_resizable(false)
-        .build(&event_loop);
-    let webview = window
-        .as_ref()
-        .ok()
-        .and_then(|w| WebViewBuilder::new(w).with_html(update::splash_html(env!("CARGO_PKG_VERSION"), &to)).build().ok());
-    let proxy = event_loop.create_proxy();
-    let b = base.to_owned();
-    std::thread::spawn(move || {
-        let r = update::download_and_swap(&b, !dev);
-        let _ = proxy.send_event(UserEv::UpdateDone(r));
-    });
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        let _keep = (&window, &webview);
-        if let Event::UserEvent(UserEv::UpdateDone(r)) = event {
-            match r {
-                Ok(exe) => relaunch(&exe, false),
-                Err(_) => {
-                    if let Ok(me) = std::env::current_exe() {
-                        relaunch(&me, true);
-                    }
-                }
-            }
-            *control_flow = ControlFlow::Exit;
-        }
-        // ⚠ 入れ替えの途中で閉じるボタンは効かせない（半端な状態にしない）
-    });
-}
-
-const PROD: &str = "https://svr.remohelppro.jp";
-const DEV: &str = "https://dev.remohelppro.jp";
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -122,18 +84,13 @@ fn main() {
     let data = std::env::var("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir())
-        .join(if dev { "RemohelpproConsoleDev" } else { "RemohelpproConsole" })
-        .join("webview");
+        .join(if dev { "RemohelpproConsoleDev" } else { "RemohelpproConsole" });
 
     update::cleanup_old();
+    log(&data, &format!("start {} dev={dev}", env!("CARGO_PKG_VERSION")));
     let event_loop = EventLoopBuilder::<UserEv>::with_user_event().build();
-    // 🔴 起動のたびに、まず新しい版を確かめる（3秒で諦めて今の版で開く）
-    if !std::env::args().any(|a| a == "--no-update") {
-        if let Some(to) = update::newer_version(base) {
-            run_update(event_loop, base, dev, to);
-            return;
-        }
-    }
+    // 🔴 窓はすぐ出す（2026-10-30 社長「起動しない」＝新しい版の確認の間、何も出ていなかった）。
+    //   まず「起動しています…」を出し、確認は裏で行う。新しい版が無ければコンソールへ進む
     let window = match WindowBuilder::new()
         .with_title(title(dev))
         .with_window_icon(app_icon())
@@ -145,16 +102,18 @@ fn main() {
     {
         Ok(w) => w,
         Err(e) => {
-            message(&format!("窓を開けませんでした。\n{e}"));
+            log(&data, &format!("window error {e}"));
+            message(&format!("窓を開けませんでした。
+{e}"));
             return;
         }
     };
 
-    let mut ctx = WebContext::new(Some(data));
+    let mut ctx = WebContext::new(Some(data.join("webview")));
     let base_nav = base.to_owned();
     let webview = WebViewBuilder::new(&window)
         .with_web_context(&mut ctx)
-        .with_url(format!("{base}/console"))
+        .with_html(update::splash_html(None))
         // ページに相談員プログラムの版を知らせる（ロゴの右に「相談員 1.0.x」と出す・確定見本）
         .with_initialization_script(&format!(
             "window.rlOperatorVersion = {:?};",
@@ -179,23 +138,90 @@ fn main() {
             false
         })
         .build();
-    let _webview = match webview {
+    let webview = match webview {
         Ok(w) => w,
         Err(e) => {
+            log(&data, &format!("webview error {e}"));
             // ⚠ 古い Windows 10 で WebView2 が入っていないとここに来る
             message(&format!(
-                "画面を表示する部品（Microsoft Edge WebView2）が見つかりませんでした。\n\
-                 Microsoft のサイトから「WebView2 ランタイム」を入れてから、もう一度開いてください。\n\n{e}"
+                "画面を表示する部品（Microsoft Edge WebView2）が見つかりませんでした。
+                 Microsoft のサイトから「WebView2 ランタイム」を入れてから、もう一度開いてください。
+
+{e}"
             ));
             open_external("https://developer.microsoft.com/microsoft-edge/webview2/");
             return;
         }
     };
+    log(&data, "window shown");
 
+    // 新しい版の確認（裏で・3秒で諦める）
+    let proxy = event_loop.create_proxy();
+    let b = base.to_owned();
+    let skip = std::env::args().any(|a| a == "--no-update");
+    std::thread::spawn(move || {
+        let v = if skip { None } else { update::newer_version(&b) };
+        let _ = proxy.send_event(UserEv::Checked(v));
+    });
+
+    let console_url = format!("{base}/console");
+    let base_owned = base.to_owned();
+    let proxy2 = event_loop.create_proxy();
+    let mut updating = false;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        if let Event::WindowEvent { event: WindowEvent::CloseRequested, .. } = event {
-            *control_flow = ControlFlow::Exit;
+        let _keep = &window;
+        match event {
+            Event::UserEvent(UserEv::Checked(None)) => {
+                log(&data, "no update -> console");
+                let _ = webview.load_url(&console_url);
+            }
+            Event::UserEvent(UserEv::Checked(Some(to))) => {
+                log(&data, &format!("update -> {to}"));
+                updating = true;
+                let _ = webview.load_html(&update::splash_html(Some((env!("CARGO_PKG_VERSION"), &to))));
+                let b = base_owned.clone();
+                let p = proxy2.clone();
+                std::thread::spawn(move || {
+                    let r = update::download_and_swap(&b, !dev);
+                    let _ = p.send_event(UserEv::UpdateDone(r));
+                });
+            }
+            Event::UserEvent(UserEv::UpdateDone(r)) => {
+                log(&data, &format!("update done {:?}", r.as_ref().map(|_| ())));
+                match r {
+                    Ok(exe) => relaunch(&exe, false),
+                    Err(_) => {
+                        if let Ok(me) = std::env::current_exe() {
+                            relaunch(&me, true);
+                        }
+                    }
+                }
+                *control_flow = ControlFlow::Exit;
+            }
+            // ⚠ 入れ替えの途中で閉じるボタンは効かせない（半端な状態にしない）
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } if !updating => {
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
         }
     });
+}
+
+/// 起動の記録（どこで止まったか後から分かるように）。⚠ 個人の情報は書かない
+fn log(dir: &std::path::Path, msg: &str) {
+    use std::io::Write;
+    let _ = std::fs::create_dir_all(dir);
+    let p = dir.join("console.log");
+    // 大きくなりすぎたら作り直す
+    if std::fs::metadata(&p).map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+        let _ = std::fs::remove_file(&p);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "{t} {msg}");
+    }
 }

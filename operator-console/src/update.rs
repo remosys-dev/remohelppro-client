@@ -118,8 +118,13 @@ fn signed(path: &Path) -> bool {
     }
 }
 
-/// 入れ替えの画面（見本の「5 起動のとき」）。⚠ 製品名はここだけ・ビット数は出さない
-pub fn splash_html(from: &str, to: &str) -> String {
+/// 起動の画面（見本の「5 起動のとき」）。None＝起動しています／Some((今, 新))＝入れ替えています。
+/// ⚠ ビット数は出さない
+pub fn splash_html(update: Option<(&str, &str)>) -> String {
+    let msg = match update {
+        Some((from, to)) => format!("新しい版に入れ替えています（{from} → {to}）…"),
+        None => "起動しています…".to_owned(),
+    };
     format!(
         r#"<!doctype html><html><head><meta charset="utf-8"><style>
 body{{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
@@ -132,6 +137,6 @@ font-family:"Yu Gothic UI","Meiryo",sans-serif;background:#fff;color:#1f2937;use
 @keyframes m{{from{{margin-left:0}}to{{margin-left:60%}}}}
 .s{{font-size:12px;color:#4b5563}}</style></head><body>
 <div class="row"><div class="lg">R</div><div><div class="t1">REMOHELP PRO</div><div class="t2">相談員プログラム</div></div></div>
-<div class="pg"><i></i></div><div class="s">新しい版に入れ替えています（{from} → {to}）…</div></body></html>"#
+<div class="pg"><i></i></div><div class="s">{msg}</div></body></html>"#
     )
 }
