@@ -33,8 +33,8 @@ fn build_manifest() {
         // .res still carrying "RustDesk" strings (only the icon, res/icon.ico, was
         // up to date). Setting the strings here + rerun-if-changed=Cargo.toml below
         // guarantees the binary metadata is rebranded.
-        // OriginalFilename / InternalName stay "rustdesk(.exe)" on purpose: agent.py
-        // and installer.iss key off that exe name (remote/hiding would break otherwise).
+        // OriginalFilename: 2026-10-30 changed from "rustdesk.exe" (visible in file Properties > Details).
+        // Nothing reads it at runtime (agent.py / installer.iss mentioned here before are not in this repo).
         println!("cargo:rerun-if-changed=Cargo.toml");
         let mut res = winres::WindowsResource::new();
         res.set_icon("res/icon.ico")
@@ -42,7 +42,7 @@ fn build_manifest() {
             .set("FileDescription", "REMOHELP PRO Remote Desktop")
             .set("CompanyName", "株式会社リモシス")
             .set("LegalCopyright", "Copyright © 2026 Remosys Inc. All rights reserved.")
-            .set("OriginalFilename", "rustdesk.exe")
+            .set("OriginalFilename", "remohelppro.exe")
             .set_language(winapi::um::winnt::MAKELANGID(
                 winapi::um::winnt::LANG_ENGLISH,
                 winapi::um::winnt::SUBLANG_ENGLISH_US,
