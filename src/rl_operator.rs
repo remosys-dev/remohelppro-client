@@ -19,6 +19,13 @@ pub fn is_operator_build() -> bool {
     option_env!("RL_SCITER_OPERATOR").map_or(false, |v| v == "1")
 }
 
+/// 32ビット版の常駐用として組み立てたか（ワークフローが RL_SCITER_RESIDENT を焼き込む・2026-10-30）。
+/// 窓は相談員用と同じ operator.html を使い、文だけ替える。
+/// ⚠ インストールは自己展開ランナーが自動で行う（常駐は RL_ALWAYS_INSTALL）。窓にはボタンを出さない。
+pub fn is_resident_build() -> bool {
+    option_env!("RL_SCITER_RESIDENT").map_or(false, |v| v == "1")
+}
+
 /// 64ビット版の Windows の上で動いているか（32ビットのプログラムが WOW64 で動いている）
 pub fn is_64bit_windows() -> bool {
     #[cfg(target_arch = "x86")]
@@ -37,6 +44,18 @@ pub fn is_64bit_windows() -> bool {
 
 /// 窓に出す文（日本語）。⚠ 日本語は operator.tis に書かない（sciter が Shift_JIS で読む・customer と同じ）
 pub fn texts_json() -> String {
+    if is_resident_build() {
+        return json!({
+            "title": "常駐プログラム（32ビット版）",
+            "install_lead": "インストール用のファイルから入れてください。",
+            "installing": "",
+            "installed_lead": "常駐プログラムは動いています。",
+            "how": "この PC は、担当者の管理画面から遠隔でサポートできる状態です。この窓は閉じてかまいません。",
+            "os64": "この PC は64ビット版の Windows です。64ビット版の常駐プログラムをお使いください（この32ビット版はインストールしません）。",
+            "close": "閉じる",
+        })
+        .to_string();
+    }
     json!({
         "title": "REMOHELP PRO 相談員（32ビット版）",
         "install_lead": "この PC に、遠隔操作の画面を開くためのプログラムをインストールします。",
@@ -55,13 +74,15 @@ pub fn state_json() -> String {
         "installed": crate::platform::is_installed(),
         "os64": is_64bit_windows(),
         "version": crate::VERSION,
+        // 常駐用はランナーが入れるので、窓からは入れない
+        "can_install": !is_resident_build(),
     })
     .to_string()
 }
 
 /// インストール（管理者の確認が出る）。⚠ 64ビットの Windows では何もしない
 pub fn install() {
-    if is_64bit_windows() {
+    if is_64bit_windows() || is_resident_build() {
         return;
     }
     crate::ui_interface::install_me(

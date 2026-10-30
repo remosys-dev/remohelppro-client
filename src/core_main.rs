@@ -616,6 +616,21 @@ pub fn core_main() -> Option<Vec<String>> {
                 if config::is_disable_installation() {
                     return None;
                 }
+                // 🔴 32ビット版の常駐用は 64ビットの Windows に入れない（2026-10-30）。
+                //   アプリ名が64ビット版の常駐と同じ（remohelppro-agent）なので、入れると上に重なって壊す。
+                //   ⚠ 常駐はランナーが名前に関係なく必ずここへ来るので、ここで止める。
+                #[cfg(windows)]
+                if crate::rl_operator::is_resident_build() && crate::rl_operator::is_64bit_windows() {
+                    log::warn!("RL: 32ビット版の常駐は64ビットの Windows にはインストールしません");
+                    Toast::new(Toast::POWERSHELL_APP_ID)
+                        .title("遠隔サポート")
+                        .text1("この PC は64ビット版の Windows です。64ビット版をお使いください。")
+                        .sound(Some(Sound::Default))
+                        .duration(Duration::Short)
+                        .show()
+                        .ok();
+                    return None;
+                }
                 #[cfg(not(windows))]
                 let options = "desktopicon startmenu";
                 #[cfg(windows)]

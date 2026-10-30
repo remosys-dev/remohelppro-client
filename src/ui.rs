@@ -36,10 +36,11 @@ lazy_static::lazy_static! {
 
 struct UIHostHandler;
 
-/// 32ビット版の相談員用として組み立てたか（rl_operator.rs）
+/// 32ビット版の相談員用・常駐用として組み立てたか（rl_operator.rs）。
+/// どちらも元の画面を出さず、operator.html（案内だけの窓）を出す。
 fn rl_operator_build() -> bool {
     #[cfg(windows)]
-    return crate::rl_operator::is_operator_build();
+    return crate::rl_operator::is_operator_build() || crate::rl_operator::is_resident_build();
     #[cfg(not(windows))]
     return false;
 }
@@ -144,7 +145,8 @@ pub fn start(args: &mut [String]) {
     frame.set_title(&crate::get_app_name());
     // 🔴 お客様用は、接続中に出る窓（--cm）も含めて題名に製品名（remohelppro-support）を出さない（白ラベル）
     #[cfg(windows)]
-    if crate::rl_customer::is_customer_build() {
+    if crate::rl_customer::is_customer_build() || crate::rl_operator::is_resident_build() {
+        // 常駐用（2026-10-30）も他社のお客様の PC に入るので同じ
         frame.set_title("遠隔サポート");
     }
     #[cfg(target_os = "macos")]
@@ -179,7 +181,12 @@ pub fn start(args: &mut [String]) {
             page = "customer.html";
         } else if rl_operator_build() {
             // 32ビット版の相談員用：元の画面ではなく、インストールと案内だけの窓（rl_operator.rs）
-            frame.set_title("REMOHELP PRO");
+            // ⚠ 常駐用は製品名を出さない（他社のお客様の PC・白ラベル）
+            #[cfg(windows)]
+            let resident = crate::rl_operator::is_resident_build();
+            #[cfg(not(windows))]
+            let resident = false;
+            frame.set_title(if resident { "遠隔サポート" } else { "REMOHELP PRO" });
             page = "operator.html";
         } else {
             page = "index.html";

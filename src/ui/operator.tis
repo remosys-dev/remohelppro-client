@@ -10,7 +10,7 @@ function self.ready() {
 var T = {};
 try { T = JSON.parse(handler.rl_operator_texts()); } catch(e) {}
 
-var st = { installed: false, os64: false, version: "" };
+var st = { installed: false, os64: false, version: "", can_install: true };
 var installing = false;
 
 function readState() {
@@ -27,6 +27,9 @@ class Operator: Reactor.Component {
                 <div .ok>{T.installed_lead}</div>
                 <div .note>{T.how}</div>
             </div>;
+        } else if (!st.can_install) {
+            // resident build: the self-extracting runner installs it, no button here
+            body = <div .card><div .lead>{T.install_lead}</div></div>;
         } else if (installing) {
             body = <div .card><div .lead>{T.installing}</div></div>;
         } else {
