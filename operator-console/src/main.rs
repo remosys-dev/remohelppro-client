@@ -20,6 +20,7 @@ use tao::{
 };
 use wry::{WebContext, WebViewBuilder};
 
+mod settings;
 mod update;
 
 /// 入れ替えの手伝いから本体へ知らせる
@@ -29,6 +30,10 @@ enum UserEv {
     UpdateDone(Result<std::path::PathBuf, String>),
     /// コンソールの「終了」（右下）
     Quit,
+    /// つながったらタスクバーを点滅（⚙「音と点滅」）
+    Flash,
+    /// ⚙ のプロキシを保存したので開き直す
+    Relaunch,
 }
 
 /// 窓の題名（2026-10-30 確定見本「REMOHELP PRO 相談員」）
@@ -93,6 +98,12 @@ fn main() {
 
     update::cleanup_old();
     log(&data, &format!("start {} dev={dev}", env!("CARGO_PKG_VERSION")));
+    // ⚙ のプロキシ（settings.rs）。⚠ WebView2 を作る前に渡す
+    let proxy = settings::load_proxy(&data);
+    if let Some(a) = proxy.webview_args() {
+        std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", a);
+    }
+    let proxy_url = proxy.url();
     let event_loop = EventLoopBuilder::<UserEv>::with_user_event().build();
     // 🔴 窓はすぐ出す（2026-10-30 社長「起動しない」＝新しい版の確認の間、何も出ていなかった）。
     //   まず「起動しています…」を出し、確認は裏で行う。新しい版が無ければコンソールへ進む
@@ -115,6 +126,7 @@ fn main() {
     };
 
     let quit_proxy = event_loop.create_proxy();
+    let data_ipc = data.clone();
     let mut ctx = WebContext::new(Some(data.join("webview")));
     let base_nav = base.to_owned();
     let webview = WebViewBuilder::new(&window)
@@ -122,16 +134,33 @@ fn main() {
         .with_html(update::splash_html(None))
         // ページに相談員プログラムの版を知らせる（ロゴの右に「相談員 1.0.x」と出す・確定見本）
         .with_initialization_script(&format!(
-            "window.rlOperatorVersion = {:?};",
-            env!("CARGO_PKG_VERSION")
+            "window.rlOperatorVersion = {:?};{}",
+            env!("CARGO_PKG_VERSION"),
+            settings::page_settings_js(&data, dev)
         ))
         // 🔴 ビュアーの起動はページから直接受け取る（2026-10-30 実機で、remohelppro:// へのページ移動が
         //   Windows まで届かず、ビュアーが起動しなかった）。ページは window.ipc.postMessage("open:<URL>") を送る。
         //   ⚠ 受け付けるのは当社の操作アプリのスキームだけ（他の物を開かせない）。
         .with_ipc_handler(move |req: wry::http::Request<String>| {
             // コンソール右下の「終了」＝相談員プログラムを終わる（10/30 社長・RemoHelp と同じ）
-            if req.body() == "quit" {
+            let body = req.body();
+            if body == "quit" {
                 let _ = quit_proxy.send_event(UserEv::Quit);
+                return;
+            }
+            if body == "flash" {
+                let _ = quit_proxy.send_event(UserEv::Flash);
+                return;
+            }
+            // ⚙ 設定（settings.rs）
+            if let Some(v) = body.strip_prefix("set:autostart:") {
+                settings::set_autostart(dev, v == "1");
+                return;
+            }
+            if let Some(j) = body.strip_prefix("set:proxy:") {
+                if settings::save_proxy(&data_ipc, j) {
+                    let _ = quit_proxy.send_event(UserEv::Relaunch);
+                }
                 return;
             }
             if let Some(u) = req.body().strip_prefix("open:") {
@@ -170,8 +199,9 @@ fn main() {
     let proxy = event_loop.create_proxy();
     let b = base.to_owned();
     let skip = std::env::args().any(|a| a == "--no-update");
+    let purl = proxy_url.clone();
     std::thread::spawn(move || {
-        let v = if skip { None } else { update::newer_version(&b) };
+        let v = if skip { None } else { update::newer_version(&b, purl.as_deref()) };
         let _ = proxy.send_event(UserEv::Checked(v));
     });
 
@@ -193,8 +223,9 @@ fn main() {
                 let _ = webview.load_html(&update::splash_html(Some((env!("CARGO_PKG_VERSION"), &to))));
                 let b = base_owned.clone();
                 let p = proxy2.clone();
+                let pu = proxy_url.clone();
                 std::thread::spawn(move || {
-                    let r = update::download_and_swap(&b, !dev);
+                    let r = update::download_and_swap(&b, !dev, pu.as_deref());
                     let _ = p.send_event(UserEv::UpdateDone(r));
                 });
             }
@@ -211,6 +242,24 @@ fn main() {
                 *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(UserEv::Quit) if !updating => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(UserEv::Flash) => {
+                use tao::platform::windows::WindowExtWindows;
+                use windows_sys::Win32::UI::WindowsAndMessaging::{FlashWindowEx, FLASHWINFO, FLASHW_ALL, FLASHW_TIMERNOFG};
+                let fi = FLASHWINFO {
+                    cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+                    hwnd: window.hwnd() as _,
+                    dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+                    uCount: 0,
+                    dwTimeout: 0,
+                };
+                unsafe { FlashWindowEx(&fi) };
+            }
+            Event::UserEvent(UserEv::Relaunch) if !updating => {
+                if let Ok(me) = std::env::current_exe() {
+                    relaunch(&me, false);
+                }
                 *control_flow = ControlFlow::Exit;
             }
             // ⚠ 入れ替えの途中で閉じるボタンは効かせない（半端な状態にしない）

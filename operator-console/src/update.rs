@@ -13,15 +13,17 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-fn agent() -> Option<ureq::Agent> {
+/// ⚠ ⚙ でプロキシを「指定する」にしたときは、それを通す（settings.rs）
+fn agent(proxy: Option<&str>) -> Option<ureq::Agent> {
     let tls = native_tls::TlsConnector::new().ok()?;
-    Some(
-        ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(3))
-            .timeout(Duration::from_secs(120))
-            .tls_connector(std::sync::Arc::new(tls))
-            .build(),
-    )
+    let mut b = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(3))
+        .timeout(Duration::from_secs(120))
+        .tls_connector(std::sync::Arc::new(tls));
+    if let Some(p) = proxy.and_then(|u| ureq::Proxy::new(u).ok()) {
+        b = b.proxy(p);
+    }
+    Some(b.build())
 }
 
 fn parse(v: &str) -> Vec<u32> {
@@ -29,8 +31,8 @@ fn parse(v: &str) -> Vec<u32> {
 }
 
 /// サーバーの版が自分より新しければ、その版を返す
-pub fn newer_version(base: &str) -> Option<String> {
-    let a = agent()?;
+pub fn newer_version(base: &str, proxy: Option<&str>) -> Option<String> {
+    let a = agent(proxy)?;
     let body = a
         .get(&format!("{base}/api/operator-console"))
         .timeout(Duration::from_secs(3))
@@ -59,11 +61,11 @@ pub fn cleanup_old() {
 }
 
 /// 受け取って入れ替える。成功したら新しい実行ファイルの場所を返す
-pub fn download_and_swap(base: &str, verify_signature: bool) -> Result<PathBuf, String> {
+pub fn download_and_swap(base: &str, verify_signature: bool, proxy: Option<&str>) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let new = exe.with_extension("new");
     let old = exe.with_extension("old");
-    let a = agent().ok_or("tls")?;
+    let a = agent(proxy).ok_or("tls")?;
     let resp = a
         .get(&format!("{base}/api/operator-console?file=1"))
         .call()
