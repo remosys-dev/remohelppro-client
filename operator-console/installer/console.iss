@@ -95,6 +95,7 @@ Filename: "{app}\{#ExeName}"; Description: "{#AppName}を起動する"; Flags: n
 [UninstallDelete]
 Type: files; Name: "{app}\*.old"
 Type: files; Name: "{app}\*.new"
+Type: filesandordirs; Name: "{app}\*.WebView2"
 
 [Code]
 { 遠隔操作の部品が入っているか。操作アプリは入ると独自のスキーム（remohelppro://）を登録する }

@@ -96,6 +96,11 @@ fn main() {
         .unwrap_or_else(|_| std::env::temp_dir())
         .join(if dev { "RemohelpproConsoleDev" } else { "RemohelpproConsole" });
 
+    // 🔴 もう開いていたら、2つ目は開かずに今の窓を前に出す（10/30 社長「起動しない」＝後ろに隠れていた）。
+    //   ⚠ 入れ替えの直後（--no-update 付き・前の自分は終わっている）も同じ名前なので問題ない
+    if bring_existing_to_front(dev) {
+        return;
+    }
     update::cleanup_old();
     log(&data, &format!("start {} dev={dev}", env!("CARGO_PKG_VERSION")));
     // ⚙ のプロキシ（settings.rs）。⚠ WebView2 を作る前に渡す
@@ -193,6 +198,8 @@ fn main() {
             return;
         }
     };
+    // 起動したら必ずいちばん前に出す（他の窓の後ろに出ると「起動しない」に見える）
+    window.set_focus();
     log(&data, "window shown");
 
     // 新しい版の確認（裏で・3秒で諦める）
@@ -269,6 +276,33 @@ fn main() {
             _ => {}
         }
     });
+}
+
+/// すでに動いている相談員プログラムがあれば、その窓を前に出して true。
+/// ⚠ 名前付きの印（ミューテックス）で見分ける。印はこの処理が終わるまで持ち続ける（プロセスが終われば消える）
+/// 共有識別子OK: 印の名前（RemohelpproConsole / RemohelpproConsoleDev）と窓の題名（REMOHELP PRO 相談員）は
+///   この相談員プログラムだけが使う名前。RustDesk 系の製品が共通で使う窓の種類・パイプ・プロセス名は見ていない。
+fn bring_existing_to_front(dev: bool) -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    let name = wide(if dev { "Local\\RemohelpproConsoleDev" } else { "Local\\RemohelpproConsole" });
+    let h = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+    if h.is_null() || unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+        // ⚠ ハンドルは閉じない（閉じると印が消え、次の起動が自分に気づけない）
+        return false;
+    }
+    let t = wide(title(dev));
+    let w = unsafe { FindWindowW(std::ptr::null(), t.as_ptr()) };
+    if !w.is_null() {
+        unsafe {
+            if IsIconic(w) != 0 {
+                ShowWindow(w, SW_RESTORE);
+            }
+            SetForegroundWindow(w);
+        }
+    }
+    true
 }
 
 /// 起動の記録（どこで止まったか後から分かるように）。⚠ 個人の情報は書かない
