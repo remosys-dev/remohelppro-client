@@ -27,6 +27,8 @@ enum UserEv {
     /// 新しい版の確認が終わった（新しい版があればその版）
     Checked(Option<String>),
     UpdateDone(Result<std::path::PathBuf, String>),
+    /// コンソールの「終了」（右下）
+    Quit,
 }
 
 /// 窓の題名（2026-10-30 確定見本「REMOHELP PRO 相談員」）
@@ -49,6 +51,9 @@ fn relaunch(exe: &std::path::Path, no_update: bool) {
     }
     let _ = c.spawn();
 }
+
+const PROD: &str = "https://svr.remohelppro.jp";
+const DEV: &str = "https://dev.remohelppro.jp";
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -109,6 +114,7 @@ fn main() {
         }
     };
 
+    let quit_proxy = event_loop.create_proxy();
     let mut ctx = WebContext::new(Some(data.join("webview")));
     let base_nav = base.to_owned();
     let webview = WebViewBuilder::new(&window)
@@ -122,7 +128,12 @@ fn main() {
         // 🔴 ビュアーの起動はページから直接受け取る（2026-10-30 実機で、remohelppro:// へのページ移動が
         //   Windows まで届かず、ビュアーが起動しなかった）。ページは window.ipc.postMessage("open:<URL>") を送る。
         //   ⚠ 受け付けるのは当社の操作アプリのスキームだけ（他の物を開かせない）。
-        .with_ipc_handler(|req: wry::http::Request<String>| {
+        .with_ipc_handler(move |req: wry::http::Request<String>| {
+            // コンソール右下の「終了」＝相談員プログラムを終わる（10/30 社長・RemoHelp と同じ）
+            if req.body() == "quit" {
+                let _ = quit_proxy.send_event(UserEv::Quit);
+                return;
+            }
             if let Some(u) = req.body().strip_prefix("open:") {
                 if u.starts_with("remohelppro://") || u.starts_with("remohelppro-dev://") {
                     open_external(u);
@@ -197,6 +208,9 @@ fn main() {
                         }
                     }
                 }
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(UserEv::Quit) if !updating => {
                 *control_flow = ControlFlow::Exit;
             }
             // ⚠ 入れ替えの途中で閉じるボタンは効かせない（半端な状態にしない）
