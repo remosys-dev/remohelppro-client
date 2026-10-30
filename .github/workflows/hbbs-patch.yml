@@ -1,0 +1,60 @@
+name: hbbs patch (same public IP -> normal route)
+
+# 2026-10-30: 同じ Wi-Fi（外から見て同じ住所）の Android・PC に遠隔操作でつながらない件（社長の案A）。
+#   受付（hbbs）は、相手と同じ住所から頼まれると「建物の中で直接つなぐ」手順（FetchLocalAddr）に切り替える。
+#   この手順で相手から返事が来ず、相談員のビューアが「Please try later」で切れていた（10/30 20:58〜21:03 実機）。
+#   Wi-Fi を切って住所が別になると、ふつうの手順（PunchHole）でつながった。
+#   ★受付が「同じ住所」でもふつうの手順を使うように、1か所だけ変えた hbbs を作る。
+#     お客様のアプリ（配布済み）は作り直さずに直る。
+#   ⚠ 元は公開されている rustdesk-server（AGPL）。本番と同じ 1.1.16 から作る。
+#   ⚠ 本番と同じく、1つで動く静的な実行ファイル（musl）にする。
+on:
+  push:
+    tags:
+      - 'hbbs-build-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout rustdesk-server 1.1.16
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk-server
+          ref: 1.1.16
+          submodules: recursive
+
+      - name: Show the place we change (before)
+        run: grep -n -B3 -A12 "same_intranet" src/rendezvous_server.rs | head -60
+
+      - name: Patch (same_intranet is always false)
+        run: |
+          perl -0pi -e 's/let\s+same_intranet\s*(?::\s*bool\s*)?=\s*.*?;\n/let same_intranet: bool = false; \/\/ REMOHELP PRO 2026-10-30: same public IP uses the normal route\n/s' src/rendezvous_server.rs
+          echo "--- after ---"
+          grep -n -B3 -A6 "same_intranet" src/rendezvous_server.rs | head -40
+          grep -q "let same_intranet: bool = false; // REMOHELP PRO" src/rendezvous_server.rs || { echo "::error title=patch::変える場所が見つかりませんでした"; exit 1; }
+
+      - name: Install Rust (musl)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Build
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+          cargo build --release --target x86_64-unknown-linux-musl --bin hbbs 2>&1 | tail -30
+          mkdir -p out
+          cp target/x86_64-unknown-linux-musl/release/hbbs out/hbbs
+          strip out/hbbs || true
+          file out/hbbs
+          ./out/hbbs --version
+          sha256sum out/hbbs | tee out/hbbs.sha256
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: hbbs-1.1.16-same-ip-normal
+          path: out
