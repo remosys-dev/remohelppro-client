@@ -1,0 +1,103 @@
+name: Operator Console Pack (signed exe -> setup)
+
+# 2026-10-30: 本番用の相談員プログラムのセットアップを、署名済みの本体から作る。
+#   ① operator-console.yml の本体（remohelppro-console-<版>.exe）を社長が EV 署名
+#   ② 署名した本体を、タグと同じ名前の**下書き**リリースに付ける（公開しない）
+#   ③ タグ console-pack-<版> を push → 署名を確かめてセットアップを作る → セットアップを社長が EV 署名
+#   ⚠ 本体が署名されていなければ止める（署名し忘れの物を配らない）。
+#   ⚠ 起動のときの自動更新は、この署名済みの本体をそのまま配る（/api/operator-console・update.rs）。
+on:
+  push:
+    tags:
+      - 'console-pack-*'
+
+permissions:
+  contents: write   # 下書きのリリースを読むため
+
+jobs:
+  pack:
+    runs-on: windows-2022
+    steps:
+      - name: Read tag
+        shell: bash
+        run: |
+          V="${{ github.ref_name }}"; V="${V#console-pack-}"
+          echo "$V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error title=tag::版が読めません: $V"; exit 1; }
+          echo "R_VER=$V" >> "$GITHUB_ENV"
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Get signed console exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ConsoleOut
+          REPO="${{ github.repository }}"; T="${{ github.ref_name }}"
+          RID=""; AID=""
+          for i in $(seq 1 18); do
+            RID=$(gh api "repos/$REPO/releases?per_page=50" -q ".[] | select(.name==\"$T\") | .id" | head -1)
+            if [ -n "$RID" ]; then
+              AID=$(gh api "repos/$REPO/releases/$RID/assets" -q '.[] | select(.name|endswith(".exe")) | .id' | head -1)
+              [ -n "$AID" ] && break
+            fi
+            sleep 10
+          done
+          test -n "$RID" -a -n "$AID" || { echo "::error title=exe::下書きのリリース「$T」か、その exe が見つかりません"; exit 1; }
+          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$AID" > "ConsoleOut/remohelppro-console-${R_VER}.exe"
+          ls -la ConsoleOut
+
+      - name: Check signature and version
+        shell: pwsh
+        run: |
+          $f = "ConsoleOut\remohelppro-console-$env:R_VER.exe"
+          $s = Get-AuthenticodeSignature $f
+          Write-Host "$($s.Status) $($s.SignerCertificate.Subject)"
+          if ($s.Status -ne 'Valid' -or -not $s.TimeStamperCertificate) { Write-Host "::error title=sign::本体に署名（時刻印つき）がありません"; exit 1 }
+          $v = (Get-Item $f).VersionInfo.FileVersion
+          if (-not $v.StartsWith($env:R_VER)) { Write-Host "::error title=version::本体の版（$v）がタグ（$env:R_VER）と違います"; exit 1 }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Wizard images
+        shell: pwsh
+        working-directory: operator-console/installer
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          function Band($w, $h, $path, $big) {
+            $b = New-Object System.Drawing.Bitmap $w, $h
+            $g = [System.Drawing.Graphics]::FromImage($b)
+            $g.TextRenderingHint = 'AntiAliasGridFit'
+            $r = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+            $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush $r, ([System.Drawing.Color]::FromArgb(21,101,192)), ([System.Drawing.Color]::FromArgb(13,71,161)), 90
+            $g.FillRectangle($br, $r)
+            $white = [System.Drawing.Brushes]::White
+            if ($big) {
+              $g.DrawString('REMOHELP PRO', (New-Object System.Drawing.Font 'Yu Gothic UI', 15, ([System.Drawing.FontStyle]::Bold)), $white, 12, 24)
+              $g.DrawString('相談員プログラム', (New-Object System.Drawing.Font 'Yu Gothic UI', 11), $white, 13, 56)
+            } else {
+              $g.DrawString('R', (New-Object System.Drawing.Font 'Segoe UI', 26, ([System.Drawing.FontStyle]::Bold)), $white, 8, 2)
+            }
+            $b.Save((Join-Path (Get-Location) $path), [System.Drawing.Imaging.ImageFormat]::Bmp)
+          }
+          Band 164 314 'wizard.bmp' $true
+          Band 55 55 'wizard-small.bmp' $false
+
+      - name: Build setup (prod)
+        shell: pwsh
+        working-directory: operator-console/installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $exe = (Resolve-Path "..\..\ConsoleOut\remohelppro-console-$env:R_VER.exe").Path
+          & $iscc "/DAppVersion=$env:R_VER" "/DSrcExe=$exe" console.iss
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error title=iscc::セットアップを作れませんでした"; exit 1 }
+          Get-ChildItem ..\..\ConsoleOut
+
+      - name: Upload setup (exe signed, setup unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: operator-console-setup-prod
+          path: ConsoleOut/remohelppro-console-setup-*.exe
