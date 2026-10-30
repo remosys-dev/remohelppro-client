@@ -63,8 +63,10 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = match WindowBuilder::new()
         .with_title(if dev { "REMOHELP PRO（開発機）" } else { "REMOHELP PRO" })
-        .with_inner_size(LogicalSize::new(900.0, 560.0))
-        .with_min_inner_size(LogicalSize::new(640.0, 400.0))
+        // 🔴 今の RemoHelp と同じ外寸 1000×545（2026-10-30 社長の確定見本）。題名の帯の分を引いた中身の大きさ。
+        //   ⚠ この大きさで札 12枚が 4列×3段で全部見える。小さくすると札が隠れるので、最小もページの最小に合わせる
+        .with_inner_size(LogicalSize::new(1000.0, 514.0))
+        .with_min_inner_size(LogicalSize::new(800.0, 500.0))
         .build(&event_loop)
     {
         Ok(w) => w,
@@ -79,6 +81,11 @@ fn main() {
     let webview = WebViewBuilder::new(&window)
         .with_web_context(&mut ctx)
         .with_url(format!("{base}/console"))
+        // ページに相談員プログラムの版を知らせる（ロゴの右に「相談員 1.0.x」と出す・確定見本）
+        .with_initialization_script(&format!(
+            "window.rlOperatorVersion = {:?};",
+            env!("CARGO_PKG_VERSION")
+        ))
         // 🔴 ビュアーの起動はページから直接受け取る（2026-10-30 実機で、remohelppro:// へのページ移動が
         //   Windows まで届かず、ビュアーが起動しなかった）。ページは window.ipc.postMessage("open:<URL>") を送る。
         //   ⚠ 受け付けるのは当社の操作アプリのスキームだけ（他の物を開かせない）。
