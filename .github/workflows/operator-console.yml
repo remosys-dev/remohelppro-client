@@ -60,3 +60,52 @@ jobs:
         with:
           name: operator-console-x86-unsigned
           path: ConsoleOut
+
+      # 🔴 セットアップ（2026-10-30 社長の確定見本「1 インストール」の5画面）。Inno Setup で作る
+      #   本番用（svr）と試験用（dev・別製品として入る）の2つ。⚠ ここでは署名しない
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Wizard images (blue band with the product name)
+        shell: pwsh
+        working-directory: operator-console/installer
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          function Band($w, $h, $path, $big) {
+            $b = New-Object System.Drawing.Bitmap $w, $h
+            $g = [System.Drawing.Graphics]::FromImage($b)
+            $g.TextRenderingHint = 'AntiAliasGridFit'
+            $r = New-Object System.Drawing.Rectangle 0, 0, $w, $h
+            $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush $r, ([System.Drawing.Color]::FromArgb(21,101,192)), ([System.Drawing.Color]::FromArgb(13,71,161)), 90
+            $g.FillRectangle($br, $r)
+            $white = [System.Drawing.Brushes]::White
+            if ($big) {
+              $g.DrawString('REMOHELP PRO', (New-Object System.Drawing.Font 'Yu Gothic UI', 15, ([System.Drawing.FontStyle]::Bold)), $white, 12, 24)
+              $g.DrawString('相談員プログラム', (New-Object System.Drawing.Font 'Yu Gothic UI', 11), $white, 13, 56)
+            } else {
+              $g.DrawString('R', (New-Object System.Drawing.Font 'Segoe UI', 26, ([System.Drawing.FontStyle]::Bold)), $white, 8, 2)
+            }
+            $b.Save((Join-Path (Get-Location) $path), [System.Drawing.Imaging.ImageFormat]::Bmp)
+          }
+          Band 164 314 'wizard.bmp' $true
+          Band 55 55 'wizard-small.bmp' $false
+          Get-ChildItem *.bmp
+
+      - name: Build setup (prod / dev)
+        shell: pwsh
+        working-directory: operator-console/installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $exe = (Resolve-Path "..\..\ConsoleOut\remohelppro-console-${{ env.VERSION }}.exe").Path
+          & $iscc "/DAppVersion=${{ env.VERSION }}" "/DSrcExe=$exe" console.iss
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error title=iscc::本番用のセットアップを作れませんでした"; exit 1 }
+          & $iscc "/DAppVersion=${{ env.VERSION }}" "/DSrcExe=$exe" "/DDev=1" console.iss
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error title=iscc::試験用のセットアップを作れませんでした"; exit 1 }
+          Get-ChildItem ..\..\ConsoleOut
+
+      - name: Upload setups (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: operator-console-setup-unsigned
+          path: ConsoleOut/*-setup-*.exe

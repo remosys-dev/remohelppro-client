@@ -10,7 +10,10 @@ description = "REMOHELP PRO operator console"
 [dependencies]
 tao = "0.30"
 wry = "0.45"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Security_WinTrust", "Win32_Security_Cryptography"] }
+# 起動のときの自動更新（2026-10-30）。TLS は Windows の物（schannel）を使う＝32ビットでも組み立てやすい
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
 
 [build-dependencies]
 winres = "0.1"
