@@ -644,6 +644,24 @@ class ServerModel with ChangeNotifier {
 
   /// Stop the screen sharing service.
   Future<void> stopService() async {
+    // 🔴 Android のお客様アプリは、止めるときにサーバーへ終了を伝える（2026-10-31 社長の実機）。
+    //   ⚠ スマホで終了しても、相談員の札が「操作中」のまま残っていた。
+    //     PC 版は「接続が空で30秒」の所で伝えるが、Android はその道を通らず、
+    //     ここ（接続が切れた／キャストを止めた／停止）で止まるだけだった。
+    //   ⚠ 待たない（伝えるのは5秒で打ち切る作り）。止める処理を遅らせない。
+    //   ⚠ 二重に伝わってもサーバーは already_ended と返すだけ。
+    if (isAndroid &&
+        !const bool.fromEnvironment('REMOHELPPRO_OPERATOR') &&
+        _isStart) {
+      final notify = rlNotifySupportEnded;
+      if (notify != null) {
+        notify().catchError((Object e) {
+          rlTrace('notify_end_failed', {'e': e.toString()});
+        });
+      } else {
+        rlTrace('notify_end_missing');
+      }
+    }
     _isStart = false;
     closeAll();
     await parent.target?.invokeMethod("stop_service");
