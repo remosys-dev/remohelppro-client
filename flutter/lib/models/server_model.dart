@@ -351,7 +351,11 @@ class ServerModel with ChangeNotifier {
           !const bool.fromEnvironment('REMOHELPPRO_OPERATOR') &&
           _isStart &&
           _hasEverConnected) {
-        if (_clients.isEmpty) {
+        // 🔴 「空」ではなく「生きている接続が無い」で見る（2026-10-31 社長の実機）。
+        //   ⚠ 切れた接続は一覧に「切断済み」の印つきで残ることがある（onClientRemove の close=false）。
+        //     isEmpty で見ていたため、スマホで切っても止まらず、サーバーへ終了も伝わらず、
+        //     相談員の札が「操作中」のまま残っていた。
+        if (!_clients.any((c) => !c.disconnected)) {
           // 500ms×4 ≒ 2秒 連続で誰も繋がっていなければ停止（瞬断での誤発火を防ぐ）
           if (++_remohelpproZeroClients >= 4) {
             _remohelpproZeroClients = 0;
