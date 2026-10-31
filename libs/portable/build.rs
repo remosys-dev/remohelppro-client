@@ -26,7 +26,7 @@ fn main() {
             .set("FileDescription", "REMOHELP PRO Remote Desktop")
             .set("CompanyName", "株式会社リモシス")
             .set("LegalCopyright", "Copyright © 2026 Remosys Inc. All rights reserved.")
-            .set("OriginalFilename", "rustdesk.exe")
+            .set("OriginalFilename", "remohelppro.exe")
             .set_language(winapi::um::winnt::MAKELANGID(
                 winapi::um::winnt::LANG_ENGLISH,
                 winapi::um::winnt::SUBLANG_ENGLISH_US,
