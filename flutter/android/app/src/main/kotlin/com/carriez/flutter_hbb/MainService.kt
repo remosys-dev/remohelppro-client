@@ -337,6 +337,14 @@ class MainService : Service() {
                 getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
             intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
+                // 🔴 REMOHELP PRO 2026-11-01: 取り込みの途中で許可をもらい直したときは、
+                //   新しい許可で取り込みを**始め直す**（仮想スマホで確認：始め直さないと
+                //   つながったまま「映像を待機しています」で止まる）。
+                //   ⚠ 古い仮想画面は古い許可に結び付いているので、必ず捨てる（使い回すと映らない）。
+                val restartCapture = _isStart
+                if (restartCapture) stopCapture()
+                virtualDisplay?.release()
+                virtualDisplay = null
                 mediaProjection =
                     mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
                 // 🔴 REMOHELP PRO 2026-11-01: Android 14 以降は、画面を取り込む前に
@@ -352,8 +360,31 @@ class MainService : Service() {
                 } catch (e: Exception) {
                     Log.w(logTag, "registerCallback failed: $e")
                 }
+                // 🔴 REMOHELP PRO 2026-11-01: Android 14 以降は、許可をもらってから約5分以内に
+                //   仮想画面を作らないと許可が無効になり、しかも許可は1回しか使えない
+                //   （記録：「Reusing token: Throw exception due to invalid projection」）。
+                //   ★許可をもらったその場で仮想画面を作って押さえておく。映すときは
+                //     createOrSetVirtualDisplay がこれに映し先をはめるだけ（reuseVirtualDisplay）。
+                //   ⚠ これで、担当者がつなぐのが遅くても、つなぎ直しても、お客様に2度聞かない。
+                if (reuseVirtualDisplay && virtualDisplay == null) {
+                    try {
+                        virtualDisplay = mediaProjection?.createVirtualDisplay(
+                            "RustDeskVD",
+                            SCREEN_INFO.width, SCREEN_INFO.height, SCREEN_INFO.dpi,
+                            VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                            null, null, null
+                        )
+                        Log.d(logTag, "virtual display created at grant time")
+                    } catch (e: Exception) {
+                        Log.w(logTag, "create virtual display at grant time failed: $e")
+                    }
+                }
                 checkMediaPermission()
                 _isReady = true
+                if (restartCapture) {
+                    Log.d(logTag, "restart capture with the new media projection")
+                    startCapture()
+                }
             } ?: let {
                 Log.d(logTag, "getParcelableExtra intent null, invoke requestMediaProjection")
                 requestMediaProjection()
