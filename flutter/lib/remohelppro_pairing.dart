@@ -2292,21 +2292,26 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Icon(Icons.lock_outline, size: 20, color: _accent),
-                  SizedBox(width: 11),
+                // ⚠ Android では「パソコン」と出さない（2026-11-01 社長の試験で気づいた）。
+                //   また Android のアプリは消えないので、「自動で消えました」も出さない。
+                children: [
+                  const Icon(Icons.lock_outline, size: 20, color: _accent),
+                  const SizedBox(width: 11),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('もう誰もあなたのパソコンに入れません',
-                            style: TextStyle(
+                        Text('もう誰もあなたの${Platform.isAndroid ? 'スマホ' : 'パソコン'}に入れません',
+                            style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: _accentDeep)),
-                        SizedBox(height: 3),
-                        Text('このアプリと接続用ファイルは自動で消えました。',
-                            style: TextStyle(
+                        const SizedBox(height: 3),
+                        Text(
+                            Platform.isAndroid
+                                ? 'このアプリは閉じて大丈夫です。'
+                                : 'このアプリと接続用ファイルは自動で消えました。',
+                            style: const TextStyle(
                                 fontSize: 12.5, color: Color(0xFF3A4D78))),
                       ],
                     ),
@@ -2388,7 +2393,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                             color: _danger)),
                     const SizedBox(height: 3),
                     Text(
-                      '担当者がこのパソコンの画面を見ています。'
+                      '担当者がこの${Platform.isAndroid ? 'スマホ' : 'パソコン'}の画面を見ています。'
                       '\nやめるときは下の「終了する」を押してください。',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -2411,7 +2416,12 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
                   _infoRow(Icons.vpn_key_outlined, '接続コード',
                       _enteredCode.isEmpty ? '—' : _enteredCode,
                       top: true),
-                  _infoRow(Icons.desktop_windows_outlined, 'このPC', _hostName),
+                  _infoRow(
+                      Platform.isAndroid
+                          ? Icons.smartphone_outlined
+                          : Icons.desktop_windows_outlined,
+                      Platform.isAndroid ? 'このスマホ' : 'このPC',
+                      _hostName),
                   _infoRow(Icons.schedule, '接続時間', _elapsed()),
                 ],
               ),
