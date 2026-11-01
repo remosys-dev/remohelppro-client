@@ -223,6 +223,21 @@ class _ServerPageState extends State<ServerPage> {
                         //     開けないので、ここが唯一の道になる。
                         const RlTransferCard(),
                         const PermissionChecker(),
+                        // 版を小さく出す（2026-11-01 社長「アプリにバージョン表示が必要」）。
+                        //   ⚠ 古い版が残っていても、お客様と電話で確かめられるように。
+                        FutureBuilder<String>(
+                          future: bind.mainGetVersion(),
+                          builder: (context, snap) => Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Text(
+                              snap.hasData && snap.data!.trim().isNotEmpty
+                                  ? '版 ${snap.data!.trim()}'
+                                  : '',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF8A94A6)),
+                            ),
+                          ),
+                        ),
                         SizedBox.fromSize(size: const Size(0, 15.0)),
                       ],
                     ),

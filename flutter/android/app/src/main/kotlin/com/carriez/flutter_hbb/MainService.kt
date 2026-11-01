@@ -339,6 +339,19 @@ class MainService : Service() {
             intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
                 mediaProjection =
                     mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
+                // 🔴 REMOHELP PRO 2026-11-01: Android 14 以降は、画面を取り込む前に
+                //   「取り込みが止められたときの受け口」を登録しないと、createVirtualDisplay で
+                //   IllegalStateException になり**アプリが落ちる**（担当者がつないだ瞬間・実機と仮想スマホで確認）。
+                //   ⚠ 受け口は記録を残すだけ。止める処理はこれまでどおり（on_media_projection_canceled 等）。
+                try {
+                    mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                        override fun onStop() {
+                            Log.d(logTag, "MediaProjection onStop")
+                        }
+                    }, Handler(Looper.getMainLooper()))
+                } catch (e: Exception) {
+                    Log.w(logTag, "registerCallback failed: $e")
+                }
                 checkMediaPermission()
                 _isReady = true
             } ?: let {
@@ -545,6 +558,12 @@ class MainService : Service() {
                     s, null, null
                 )
             }
+        } catch (e: IllegalStateException) {
+            // 🔴 REMOHELP PRO 2026-11-01: Android 14 以降で同じ許可を2度使ったときなどに出る。
+            //   ⚠ 投げっぱなしにするとアプリごと落ちる。もう一度お客様に許可を求める。
+            Log.w(logTag, "createOrSetVirtualDisplay: got IllegalStateException ($e), re-requesting confirmation")
+            virtualDisplay = null
+            requestMediaProjection()
         } catch (e: SecurityException) {
             Log.w(logTag, "createOrSetVirtualDisplay: got SecurityException, re-requesting confirmation");
             // This initiates a prompt dialog for the user to confirm screen projection.
@@ -642,7 +661,17 @@ class MainService : Service() {
             .setColor(ContextCompat.getColor(this, R.color.primary))
             .setWhen(System.currentTimeMillis())
             .build()
-        startForeground(DEFAULT_NOTIFY_ID, notification)
+        // 🔴 REMOHELP PRO 2026-11-01: Android 14 以降は、画面取り込みの許可をもらう前に
+        //   種別 mediaProjection の前景サービスを始めると SecurityException で**アプリが落ちる**
+        //   （仮想スマホで確認：起動直後に「Unable to create service」）。
+        //   ⚠ 落とさずに待つ。許可をもらうと onStartCommand が呼ばれ直し、ここをもう一度通る。
+        try {
+            startForeground(DEFAULT_NOTIFY_ID, notification)
+        } catch (e: SecurityException) {
+            Log.w(logTag, "startForeground: not allowed yet (waiting for media projection): $e")
+        } catch (e: IllegalStateException) {
+            Log.w(logTag, "startForeground: not allowed now: $e")
+        }
     }
 
     private fun loginRequestNotification(
