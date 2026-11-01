@@ -6,6 +6,7 @@ import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:get/get.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../../common.dart';
@@ -226,7 +227,9 @@ class _ServerPageState extends State<ServerPage> {
                         // 版を小さく出す（2026-11-01 社長「アプリにバージョン表示が必要」）。
                         //   ⚠ 古い版が残っていても、お客様と電話で確かめられるように。
                         FutureBuilder<String>(
-                          future: bind.mainGetVersion(),
+                          // 🔴 アプリの版（例 1.4.22）を出す（2026-11-01）。
+                          //   bind.mainGetVersion() は中の通信部分の版で、いつも 1.4.6 だった。
+                          future: PackageInfo.fromPlatform().then((i) => i.version),
                           builder: (context, snap) => Padding(
                             padding: const EdgeInsets.only(top: 10),
                             child: Text(
