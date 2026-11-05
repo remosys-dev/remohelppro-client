@@ -1,0 +1,67 @@
+name: hbbs build (TCP/443 register + same IP normal route)
+
+# 2026-11-06: UDP を黙って捨てる会社のネットワークで、お客様がつながらない件。
+#   お客様のアプリは 443（WebSocket）へ切り替えるが、無料版の受付（hbbs 1.1.16）は
+#   443/TCP での登録（RegisterPk）に NOT_SUPPORT を返して切っていた（11/06 仮想パソコンで確認）。
+#   ★443/TCP での登録を受け付け、その接続を保って、相談員からの依頼をそこへ渡す。
+#   ★10/30 の改修（同じ住所でもふつうの手順＝same_intranet=false）もこの中に含む。
+#   ⚠ 元は公開されている rustdesk-server（AGPL）1.1.16。改修は .github/hbbs/ のパッチ1枚。
+#   ⚠ 本番と同じく、1つで動く静的な実行ファイル（musl）にする。
+#   使い方: git tag hbbs-tcp-build-N && git push origin hbbs-tcp-build-N（タグは1本ずつ）
+on:
+  push:
+    tags:
+      - 'hbbs-tcp-build-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout this repo (patch)
+        uses: actions/checkout@v4
+        with:
+          path: client
+
+      - name: Checkout rustdesk-server 1.1.16
+        uses: actions/checkout@v4
+        with:
+          repository: rustdesk/rustdesk-server
+          ref: 1.1.16
+          submodules: recursive
+          path: server
+
+      - name: Apply patch
+        working-directory: server
+        run: |
+          git apply --verbose ../client/.github/hbbs/hbbs-1.1.16-remohelppro.patch
+          grep -q "let same_intranet: bool = false; // REMOHELP PRO" src/rendezvous_server.rs
+          grep -q "fn register_pk_common" src/rendezvous_server.rs
+          ! grep -q "Result::NOT_SUPPORT" src/rendezvous_server.rs
+
+      - name: Install Rust (musl)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Build
+        working-directory: server
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+          cargo build --release --target x86_64-unknown-linux-musl --bin hbbs 2>&1 | tail -40
+          test -f target/x86_64-unknown-linux-musl/release/hbbs
+          mkdir -p out
+          cp target/x86_64-unknown-linux-musl/release/hbbs out/hbbs
+          strip out/hbbs || true
+          file out/hbbs
+          ./out/hbbs --version
+          sha256sum out/hbbs | tee out/hbbs.sha256
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: hbbs-1.1.16-tcp-register
+          path: server/out
+          retention-days: 7
