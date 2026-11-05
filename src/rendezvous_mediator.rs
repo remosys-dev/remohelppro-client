@@ -164,7 +164,7 @@ impl RendezvousMediator {
                             let err = format!("rendezvous mediator error: {err}");
                             // When user reboot, there might be below error, waiting too long
                             // (CONNECT_TIMEOUT 18s) will make user think there is bug
-                            if err.contains("10054") || err.contains("11001") {
+                            if err.contains("10054") || err.contains("11001") || err.contains("no UDP response") {
                                 // No such host is known. (os error 11001)
                                 // An existing connection was forcibly closed by the remote host. (os error 10054): also happens for UDP
                                 *timeout.write().unwrap() = 3000;
@@ -343,6 +343,12 @@ impl RendezvousMediator {
                     if timeout || (last_register_sent.is_none() && expired) {
                         if timeout {
                             fails += 1;
+                            // 2026-11-05: UDP を黙って捨てる環境（企業の UTM に多い）では、ここで
+                            //   抜けないと経路の切り替えに届かず、443 へ移らないまま待ち続けていた。
+                            //   一度も応答がないときだけ抜ける（登録後の一時的な途切れでは抜けない）。
+                            if fails >= MAX_FAILS2 && last_register_resp.is_none() {
+                                bail!("no UDP response from rendezvous server: {}", host);
+                            }
                             if fails >= MAX_FAILS2 {
                                 Config::update_latency(&host, -1);
                                 old_latency = 0;

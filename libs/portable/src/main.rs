@@ -181,6 +181,32 @@ fn notify_extract_failed(detail: &str) {
     }
 }
 
+/// 中の本体を起動できなかったことを、お客様に知らせる（2026-11-05）。
+///   AppLocker や EDR に止められると、これまでは何も出ずに終わっていた。
+///   ⚠ 他社のお客様にも出るので、題名に製品名を入れない。
+#[cfg(windows)]
+fn rl_show_start_failed(e: &std::io::Error) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let body = wide(&format!(
+        "アプリを起動できませんでした。\n\n\
+         パソコンの安全設定やウイルス対策ソフトで止められた可能性があります。\n\
+         担当者に、この画面をお伝えください。\n\n{}",
+        e
+    ));
+    let title = wide("接続のお知らせ");
+    unsafe {
+        winapi::um::winuser::MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
+        );
+    }
+}
+
 /// `strict` = インストールとして起動された経路か。
 ///
 /// 🔴 ここでの失敗の扱いは、経路によって**わざと変えている**（2026-08-06）:
@@ -685,7 +711,12 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
         // RL build-16 (C): ワンタイムは子プロセス終了まで待機 → 展開dir削除 + 元EXE自己削除。
         //   ランナーは #![windows_subsystem = "windows"] のため窓なし。待機中も非表示・無害(1MB以下)。
         //   → 「1ダウンロード=1接続=自動消滅」を保証(2回目のダブルクリックを不可能にする)。
-        if let Ok(mut child) = cmd.spawn() {
+        let spawned = cmd.spawn();
+        #[cfg(windows)]
+        if let Err(e) = &spawned {
+            rl_show_start_failed(e);
+        }
+        if let Ok(mut child) = spawned {
             // AllowSetForegroundWindow は wait() より前に呼ぶ
             #[cfg(windows)]
             if _ui {

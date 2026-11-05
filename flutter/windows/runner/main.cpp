@@ -26,6 +26,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!hInstance)
   {
     std::cout << "Failed to load librustdesk.dll." << std::endl;
+    // 2026-11-05: blocked by security software used to exit silently.
+    MessageBoxW(nullptr, L"\u30A2\u30D7\u30EA\u3092\u8D77\u52D5\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\n\n\u30D1\u30BD\u30B3\u30F3\u306E\u5B89\u5168\u8A2D\u5B9A\u3084\u30A6\u30A4\u30EB\u30B9\u5BFE\u7B56\u30BD\u30D5\u30C8\u3067\u6B62\u3081\u3089\u308C\u305F\u53EF\u80FD\u6027\u304C\u3042\u308A\u307E\u3059\u3002\n\u62C5\u5F53\u8005\u306B\u3001\u3053\u306E\u753B\u9762\u3092\u304A\u4F1D\u3048\u304F\u3060\u3055\u3044\u3002", L"\u63A5\u7D9A\u306E\u304A\u77E5\u3089\u305B", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }
   FUNC_RUSTDESK_CORE_MAIN rustdesk_core_main =
