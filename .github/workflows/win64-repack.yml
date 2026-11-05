@@ -1,0 +1,112 @@
+name: Win64 Repack (signed inner)
+
+# 2026-11-05: 64ビットのお客様用の「外側」を、部品まで署名した「中身」で作り直す。
+#   Windows の「スマート アプリ コントロール」は、署名のない DLL を止める（0xc0e90002）。
+#   配布中の 1.4.129 は外側だけ署名で、中の部品21個が未署名だった。
+#   ① 配布中の exe から取り出した中身の一式に、社長が EV 署名（部品まで全部）
+#   ② その一式を ZIP にして、タグと同じ名前の**下書き**リリースに付ける（公開しない）
+#   ③ タグを push すると、署名済みの中身を詰めた外側ができる → 外側を社長が EV 署名
+#   ⚠ 中身を作り直さないので、版も動きも配布中のものと同じ。変わるのは署名だけ。
+#   ⚠ 実行ファイルか DLL に1つでも署名がなければ止める。
+on:
+  push:
+    tags:
+      # タグ名: win64-repack-customer[-dev]-<版>（例 win64-repack-customer-1.4.129）
+      - 'win64-repack-customer-*'
+
+permissions:
+  contents: write   # 下書きのリリースを読むため
+
+env:
+  ONETIME_VALID_DAYS: "365"
+
+jobs:
+  repack:
+    runs-on: windows-2022
+    steps:
+      - name: Read tag
+        shell: bash
+        run: |
+          T="${{ github.ref_name }}"; REST="${T#win64-repack-customer-}"
+          DEV=false; case "$REST" in dev-*) DEV=true; REST="${REST#dev-}";; esac
+          echo "$REST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error title=tag::版が読めません: $REST"; exit 1; }
+          { echo "R_DEV=$DEV"; echo "R_VER=$REST"; } >> "$GITHUB_ENV"
+          echo "試験用=$DEV 版=$REST"
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.75"
+          targets: x86_64-pc-windows-msvc
+
+      - name: Get signed inner files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p signed Release
+          REPO="${{ github.repository }}"; T="${{ github.ref_name }}"
+          RID=""; AID=""
+          for i in $(seq 1 18); do
+            RID=$(gh api "repos/$REPO/releases?per_page=50" -q ".[] | select(.name==\"$T\") | .id" | head -1)
+            if [ -n "$RID" ]; then
+              AID=$(gh api "repos/$REPO/releases/$RID/assets" -q '.[] | select(.name|endswith(".zip")) | .id' | head -1)
+              [ -n "$AID" ] && break
+            fi
+            sleep 10
+          done
+          test -n "$RID" -a -n "$AID" || { echo "::error title=inner::下書きのリリース「$T」か、その ZIP が見つかりません"; exit 1; }
+          gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$AID" > signed/inner.zip
+          python -c "import zipfile;zipfile.ZipFile('signed/inner.zip').extractall('Release')"
+          test -f Release/remohelppro-support.exe || { echo "::error title=inner::Release/remohelppro-support.exe がありません"; exit 1; }
+          test -f Release/remohelppro-onetime.flag || { echo "::error title=inner::お客様用の目印がありません"; exit 1; }
+          echo "ファイル数: $(find Release -type f | wc -l)"
+
+      - name: Check inner signatures
+        shell: pwsh
+        run: |
+          $ng = @(); $n = 0
+          Get-ChildItem Release -Recurse -File -Include *.exe,*.dll | ForEach-Object {
+            $n++
+            $s = Get-AuthenticodeSignature $_.FullName
+            Write-Host ("{0,-44} {1}  {2}" -f $_.Name, $s.Status, ($s.SignerCertificate.Subject -split ',')[0])
+            if ($s.Status -ne 'Valid') { $ng += $_.Name }
+          }
+          Write-Host "確かめた数: $n"
+          if ($n -lt 26) { Write-Host "::error title=sign::部品が足りません: $n"; exit 1 }
+          if ($ng.Count -gt 0) { Write-Host "::error title=sign::署名がありません: $($ng -join ', ')"; exit 1 }
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          sed -i "0,/^version = \"[0-9.]*\"/s//version = \"${{ env.R_VER }}\"/" libs/portable/Cargo.toml
+          sed -i '/dpiAware/d' res/manifest.xml
+          if [ "${{ env.R_DEV }}" = "true" ]; then
+            export RL_APP_PREFIX=remohelppro-support; DEVK="-dev"   # 配布中の試験用も同じ展開先（実物で確認）
+          else
+            export RL_APP_PREFIX=remohelppro-support; DEVK=""
+          fi
+          export RL_ONETIME_EXPIRES_AT=$(( $(date -u +%s) + ${{ env.ONETIME_VALID_DAYS }} * 86400 ))
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/remohelppro-support.exe > ../../gen.log 2>&1 || {
+            echo "::error title=packer::generate.py failed: $(tail -8 ../../gen.log | paste -sd '|' | sed 's/%/%25/g')"; exit 1; }
+          popd
+          PACKER=""
+          for f in ./target/release/rustdesk-portable-packer.exe ./libs/portable/target/release/rustdesk-portable-packer.exe; do
+            if [ -f "$f" ]; then PACKER="$f"; break; fi
+          done
+          test -n "$PACKER" || { echo "::error title=packer::自己展開ファイルが見つかりません"; exit 1; }
+          grep -aq "$RL_APP_PREFIX" "$PACKER" || { echo "::error title=packer::展開先の名前を焼き込めていません"; exit 1; }
+          mkdir -p SignOutput
+          mv "$PACKER" "./SignOutput/remohelppro-customer${DEVK}-${{ env.R_VER }}.exe"
+          ls -la SignOutput; sha256sum SignOutput/*
+
+      - name: Upload (outer unsigned, inner signed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: win64-customer-inner-signed
+          path: SignOutput
