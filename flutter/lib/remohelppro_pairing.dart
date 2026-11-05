@@ -421,9 +421,15 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       //   ここで取らないと、お客様は最後まで相手が誰か分からないままになる。
       _readSupportContact(j);
       await _finishRemotePairing(shortId);
-    } catch (_) {
+    } catch (e) {
       // 通信失敗等 → 手入力にフォールバック。
-      if (mounted) setState(() { _busy = false; });
+      // 2026-11-05: 理由を隠さない。隠すと、プロキシの案内も出ず、お客様が何もできない。
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = _connectErrorText(e);
+        });
+      }
     }
   }
 
@@ -1385,10 +1391,24 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       await _finishRemotePairing(shortId);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = _connectErrorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// 通信の生のエラーを、お客様に読める文にする（2026-11-05）。
+  String _connectErrorText(Object e) {
+    final s = e.toString().replaceFirst('Exception: ', '');
+    if (s.contains('ClientException') ||
+        s.contains('SocketException') ||
+        s.contains('HandshakeException') ||
+        s.contains('TimeoutException')) {
+      return 'サーバーに接続できませんでした。\n'
+          '会社のネットワークやセキュリティ設定で止められている可能性があります。\n'
+          '担当者にお知らせください。';
+    }
+    return s;
   }
 
   /// shortId 確定後の共通処理（手入力・自動接続の両方から呼ぶ）。
@@ -1555,7 +1575,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
         'このまま進めても、担当者は「パスワードが間違っています」で\n'
         '弾かれてしまいます。\n\n'
         '次の順にお試しください。\n'
-        '① このアプリを一度閉じて、開き直す\n'
+        '① このアプリを閉じて、もう一度ダウンロードして開く\n'
         '② それでも駄目なら、パソコンを再起動する');
   }
 
@@ -1675,7 +1695,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
       throw Exception('中継サーバーに接続できませんでした。\n'
           'このパソコンの接続番号が取れていないため、まだ繋げません。\n\n'
           '次の順にお試しください。\n'
-          '① このアプリを一度閉じて、開き直す\n'
+          '① このアプリを閉じて、もう一度ダウンロードして開く\n'
           '② Wi-Fi／有線がつながっているか確認する\n'
           '③ それでも駄目なら、下の「常駐を一時停止して接続する」\n\n'
           '※ 常駐版が入っていても、通常はこのまま接続できます。③ は最後の手段です。');
@@ -1698,7 +1718,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     throw Exception('サーバーに接続できませんでした。\n'
         'このパソコンの接続番号が取れていないため、まだ繋げません。\n\n'
         '次の順にお試しください。\n'
-        '① このアプリを一度閉じて、開き直す\n'
+        '① このアプリを閉じて、もう一度ダウンロードして開く\n'
         '② Wi-Fi／有線がつながっているか確認する$more');
   }
 
@@ -2211,7 +2231,7 @@ class _RemohelpproPairingCardState extends State<RemohelpproPairingCard> {
     //     今出ている「繋がりません」は、閉じて開き直すまで消えない。
     setState(() {
       _error = 'プロキシの設定を保存しました。\n'
-          'このアプリを一度閉じて、開き直してからお試しください。';
+          'もう一度お試しください。つながらないときは、担当者にお知らせください。';
     });
   }
 
