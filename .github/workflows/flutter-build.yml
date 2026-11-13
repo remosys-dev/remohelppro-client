@@ -1740,8 +1740,18 @@ jobs:
           fi
           ls -la *.dmg
 
+      # 🔴 試験版（dev-*）は公開ページに置かない。成果物（Actions の artifact）だけにする（2026-11-13 社長のご指示）。
+      #   ⚠ この repo は公開。公開ページに置くと誰でも取れてしまう。
+      - name: Upload DMG as artifact (試験版)
+        if: env.UPLOAD_ARTIFACT == 'true' && startsWith(env.TAG_NAME, 'dev-')
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ env.TAG_NAME }}-${{ matrix.job.arch }}-dmg
+          path: remohelppro*-${{ matrix.job.arch }}.dmg
+          if-no-files-found: error
+
       - name: Publish DMG package
-        if: env.UPLOAD_ARTIFACT == 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && !startsWith(env.TAG_NAME, 'dev-')
         uses: softprops/action-gh-release@v1
         with:
           prerelease: true
