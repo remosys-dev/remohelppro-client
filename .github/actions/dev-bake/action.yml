@@ -22,6 +22,9 @@ runs:
       shell: bash
       run: |
           set -euo pipefail
+          # 🔴 Mac（BSD の sed）でも動くように（2026-11-13）。BSD の -i は拡張子の引数が必須で、
+          #   `sedi "s|..|..|"` は置換文を拡張子と読んで「extra characters」で止まっていた。
+          sedi() { if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi; }
           CFG=libs/hbb_common/src/config.rs
           DEV_RD=dev-rd.remohelppro.jp
           DEV_KEY=X16EW5WIutsAYbjd9yIrzR3HYEBYeKgMkmXQa2ByG7w=
@@ -30,14 +33,14 @@ runs:
           echo "--- 変える前 ---"
           grep -n 'PROD_RENDEZVOUS_SERVER\|RENDEZVOUS_SERVERS: \|RS_PUB_KEY: \|AGENT_API_BASE\|APP_NAME: RwLock' "$CFG"
 
-          sed -i "s|RwLock::new(\"rd\.remohelppro\.jp\"\.to_owned())|RwLock::new(\"${DEV_RD}\".to_owned())|" "$CFG"
-          sed -i "s|&\[\"rd\.remohelppro\.jp\"\]|\&[\"${DEV_RD}\"]|" "$CFG"
-          sed -i "s|RS_PUB_KEY: &str = \"[^\"]*\"|RS_PUB_KEY: \&str = \"${DEV_KEY}\"|" "$CFG"
-          sed -i "s|AGENT_API_BASE: &str = \"[^\"]*\"|AGENT_API_BASE: \&str = \"${DEV_API}\"|" "$CFG"
+          sedi "s|RwLock::new(\"rd\.remohelppro\.jp\"\.to_owned())|RwLock::new(\"${DEV_RD}\".to_owned())|" "$CFG"
+          sedi "s|&\[\"rd\.remohelppro\.jp\"\]|\&[\"${DEV_RD}\"]|" "$CFG"
+          sedi "s|RS_PUB_KEY: &str = \"[^\"]*\"|RS_PUB_KEY: \&str = \"${DEV_KEY}\"|" "$CFG"
+          sedi "s|AGENT_API_BASE: &str = \"[^\"]*\"|AGENT_API_BASE: \&str = \"${DEV_API}\"|" "$CFG"
           # ★アプリ名に -dev を差し込む。remohelppro-support → remohelppro-dev-support
           #   ⚠ これで通信路（\\.\pipe\<アプリ名>\…）と保存先（%APPDATA%\<アプリ名>）が
           #     本番用と別になり、**同じPCに両方入れられる**。
-          sed -i "s|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro-dev|" "$CFG"
+          sedi "s|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro|APP_NAME: RwLock<String> = RwLock::new(\"remohelppro-dev|" "$CFG"
 
           # 🔴🔴 2026-10-03: 本番のURLは config.rs だけではなかった。
           #   ⚠ Dart 側にも**別に**書かれていた（remohelppro_endpoints.dart）。
@@ -45,13 +48,13 @@ runs:
           #   ⚠ 穴あけ（STUN）も rd.remohelppro.jp を直書きしていた。
           #   ★名前と接続先が出る場所を**全部**書き換える。
           DART_EP=flutter/lib/remohelppro_endpoints.dart
-          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" "$DART_EP"
-          sed -i "s|'svr[.]remohelppro[.]jp'|'dev.remohelppro.jp'|g" "$DART_EP"
-          sed -i "s|rd[.]remohelppro[.]jp|${DEV_RD}|g" libs/hbb_common/src/webrtc.rs src/common.rs
+          sedi "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" "$DART_EP"
+          sedi "s|'svr[.]remohelppro[.]jp'|'dev.remohelppro.jp'|g" "$DART_EP"
+          sedi "s|rd[.]remohelppro[.]jp|${DEV_RD}|g" libs/hbb_common/src/webrtc.rs src/common.rs
           # ⚠ ランチャー（別クレート）も本番を直書きしていた（2026-10-03 検査が鳴って気づいた）。
           #   ★案内文の中のホスト名も含めて全部変える（社長「名前を全て変えて」）。
-          sed -i "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" libs/launcher/src/main.rs
-          sed -i "s|svr[.]remohelppro[.]jp|dev.remohelppro.jp|g" libs/launcher/src/main.rs
+          sedi "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" libs/launcher/src/main.rs
+          sedi "s|svr[.]remohelppro[.]jp|dev.remohelppro.jp|g" libs/launcher/src/main.rs
           echo "--- ランチャー ---"; grep -n 'remohelppro[.]jp' libs/launcher/src/main.rs | head -4
           echo "--- Dart 側の行き先 ---"; grep -n 'kRlApiBase\|kRlApiHost' "$DART_EP"
           echo "--- 穴あけ(STUN) ---"; grep -n 'STUNS_V4\|DEFAULT_ICE_SERVERS' libs/hbb_common/src/webrtc.rs src/common.rs | head -4
@@ -144,6 +147,9 @@ runs:
       shell: bash
       run: |
           set -euo pipefail
+          # 🔴 Mac（BSD の sed）でも動くように（2026-11-13）。BSD の -i は拡張子の引数が必須で、
+          #   `sedi "s|..|..|"` は置換文を拡張子と読んで「extra characters」で止まっていた。
+          sedi() { if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi; }
           # 🔴🔴 2026-10-03: ⚠ **最初に書いた置換は壊れていた。**
           #   `"REMOHELP PRO \(.*\)"` は**最長一致**なので、Runner.rc の
           #     VALUE "FileDescription", "REMOHELP PRO Support" "\0"
@@ -154,13 +160,13 @@ runs:
           #     （表示名は本当に変わっていないため）。黙って見分けの付かない物ができる。
           #   ★引用符の中だけを取る（[^"]*）。.* を使わない。
           for f in build.rs libs/portable/build.rs; do
-            sed -i 's/\.set("FileDescription", "\([^"]*\)")/.set("FileDescription", "\1 [試験用]")/' "$f"
+            sedi 's/\.set("FileDescription", "\([^"]*\)")/.set("FileDescription", "\1 [試験用]")/' "$f"
             grep -n 'FileDescription' "$f"
             grep -q '\.set("FileDescription", "[^"]*\[試験用\]")' "$f" || {
               echo "RL: $f の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
           done
           R=flutter/windows/runner/Runner.rc
-          sed -i 's/VALUE "FileDescription", "\([^"]*\)"/VALUE "FileDescription", "\1 [試験用]"/' "$R"
+          sedi 's/VALUE "FileDescription", "\([^"]*\)"/VALUE "FileDescription", "\1 [試験用]"/' "$R"
           grep -n 'FileDescription' "$R"
           # ⚠ 「試験用 という字がどこかにある」では足りない（前は終端の後ろにあっても通った）。
           #   ★**表示名の引用符の中**に入っていることを確かめる。
@@ -178,7 +184,7 @@ runs:
           #     アプリ同士の入れ替わりは起きない。見分けの問題。
           M=flutter/android/app/src/main/AndroidManifest.xml
           if [ -f "$M" ]; then
-            sed -i 's/android:label="REMOHELP PRO"/android:label="[試験用] REMOHELP PRO"/' "$M"
+            sedi 's/android:label="REMOHELP PRO"/android:label="[試験用] REMOHELP PRO"/' "$M"
             grep -n 'android:label' "$M" | head -3
             grep -q 'android:label="\[試験用\] REMOHELP PRO"' "$M" || {
               echo "RL: Android の表示名に [試験用] を入れられませんでした。中止します"; exit 1; }
