@@ -1,0 +1,83 @@
+# ログ集めプログラム（remohelppro-logs.exe）を作る（2026-11-13）
+#
+#   🔴 なぜ要るか
+#     10/10 に配った版は、埋め込んだ manifest の中の日本語・絵文字の説明のせいで
+#     Windows が「サイド バイ サイド構成が正しくない」として起動を拒んでいた
+#     （イベントログ: line 2. Invalid Xml syntax）。お客様のPCで実際に起動しなかった。
+#     以前は手元のPCで作っていたが、手元の C++ の道具が無くなったので CI で作る。
+#
+#   ⚠ ここで作るのは**未署名**。署名は社長が「署名する」フォルダで行う。
+#   ⚠ GitHub Release には出さない（アーティファクトだけ）。
+#
+#   使い方:  git tag logcollect-2 && git push origin logcollect-2
+#   ⚠ タグは**1本ずつ** push する。
+name: logcollect (build)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'logcollect-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      # ⚠ manifest は英数字だけ。日本語が混ざると起動しなくなる（上の説明）。
+      - name: Check manifest is ASCII only
+        shell: pwsh
+        run: |
+          $b = [IO.File]::ReadAllBytes("libs/logcollect/logcollect.manifest")
+          $bad = $b | Where-Object { $_ -gt 127 }
+          if ($bad) { Write-Error "logcollect.manifest に英数字以外が入っています"; exit 1 }
+
+      - name: Build (production)
+        shell: pwsh
+        run: |
+          $env:CARGO_TARGET_DIR = "target-logcollect"
+          cargo build --release -p remohelppro-logcollect
+          Copy-Item target-logcollect/release/remohelppro-logcollect.exe remohelppro-logs.exe
+
+      - name: Build (dev server)
+        shell: pwsh
+        run: |
+          $env:CARGO_TARGET_DIR = "target-logcollect-dev"
+          $env:RL_LOGCOLLECT_API_BASE = "https://dev.remohelppro.jp"
+          cargo build --release -p remohelppro-logcollect
+          Copy-Item target-logcollect-dev/release/remohelppro-logcollect.exe remohelppro-logs-dev.exe
+
+      # 🔴 起動できるかを CI の上で確かめる（manifest が壊れていると、ここで落ちる）。
+      #   ⚠ 中身は動かさない。`--rl-selftest` が無い版でも、起動の段階
+      #     （サイド バイ サイド）で弾かれないことだけを見る。
+      - name: Verify the exe can start
+        shell: pwsh
+        run: |
+          foreach ($f in @("remohelppro-logs.exe", "remohelppro-logs-dev.exe")) {
+            try {
+              $p = Start-Process -FilePath (Resolve-Path $f) -PassThru -ErrorAction Stop
+              Start-Sleep -Seconds 3
+              if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+              Write-Host "$f started OK"
+            } catch {
+              Write-Error "$f could not start: $($_.Exception.Message)"; exit 1
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remohelppro-logs-unsigned
+          path: |
+            remohelppro-logs.exe
+            remohelppro-logs-dev.exe
+          if-no-files-found: error

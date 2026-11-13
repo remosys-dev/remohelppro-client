@@ -1,9 +1,5 @@
 <?xml version='1.0' encoding='UTF-8' standalone='yes'?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <!-- 🔴 互換性アシスタント(PCA)の「正しく実行されなかった」を出さないための宣言（2026-10-10）。
-       ・supportedOS … このアプリは各OSを分かっている＝PCAの憶測を止める
-       ・requestedExecutionLevel asInvoker … 起動時は昇格を求めない（必要な時だけ自分で昇格する）
-                                             ＝インストーラ扱いの誤検知も止める -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
