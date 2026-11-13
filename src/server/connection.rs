@@ -5870,7 +5870,11 @@ async fn start_ipc(
                     .unwrap()
                     .push(crate::run_me(args)?);
             }
-            for _ in 0..20 {
+            // 🔴 接続の窓の立ち上がりを 6 秒しか待っていなかった（2026-11-13 本番で約70回切断）。
+            //   ⚠ お客様のPCが重い・ウイルス対策が検査中だと、窓の起動に6秒以上かかる。
+            //     間に合わないと「connection manager error」で切り、相談員側が約12秒ごとにやり直していた。
+            //   ★ 30 秒まで待つ（間に合えばすぐ進むので、普段の速さは変わらない）。
+            for _ in 0..100 {
                 sleep(0.3).await;
                 #[cfg(target_os = "linux")]
                 {

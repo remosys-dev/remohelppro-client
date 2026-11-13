@@ -235,7 +235,13 @@ class ServerModel with ChangeNotifier {
             hideCmWindow();
             // RL onetime fix (build-14): ワンタイム版(kRlSupportShowWindow)は Main 終了後すみやかに
             // CM プロセスも閉じる(約2秒)。通常(フリート)は従来どおり約6秒。フリートは const=false で不変。
-            final _cmCloseThreshold = kRlSupportShowWindow ? 4 : 12; // 2s or 6s
+            // 🔴 まだ一度もつながっていない窓は、すぐには閉じない（2026-11-13）。
+            //   ⚠ 起動直後は、つなぎ手の情報が届く前に一覧が空のまま数え始める。
+            //     2 秒で閉じると、遅れて届いた接続の受け手がいなくなり、切断→やり直しを繰り返す。
+            //   ★ 接続実績なしは 30 秒（60 回）待つ。実績ありは従来どおり 2 秒。
+            final _cmCloseThreshold = kRlSupportShowWindow
+                ? (_hasEverConnected ? 4 : 60)
+                : 12; // onetime: 2s (after use) / 30s (never used), fleet: 6s
             if (_zeroClientLengthCounter == 0) {
               // 🔴 数え始めた瞬間を残す（2026-08-27）。
               //   ⚠ 「消えた」ではなく「**いつ空になったか**」が知りたい。
