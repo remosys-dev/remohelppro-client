@@ -174,21 +174,35 @@ mod windows_impl {
         ] {
             v.push((label.to_owned(), Path::new(&appdata).join(sub).join("log")));
         }
+        // 🔴 裏方（SYSTEM / サービス）の記録は、3製品とも集める（2026-11-13）。
+        //   ⚠ 以前は相談員版（remohelppro）の分しか見ていなかった。
+        //     常駐の本体の記録（ServiceProfiles\...
+emohelppro-agent\log）が
+        //     まるごと抜けていた（11/06 に判明）。
         let sys = Path::new(&windir).join("System32").join("config").join("systemprofile");
-        v.push((
-            "5-裏方(SYSTEM)のログ".to_owned(),
-            sys.join("AppData").join("Roaming").join("remohelppro").join("log"),
-        ));
-        v.push((
-            "6-サービスのログ".to_owned(),
-            Path::new(&windir)
-                .join("ServiceProfiles")
-                .join("LocalService")
-                .join("AppData")
-                .join("Roaming")
-                .join("remohelppro")
-                .join("log"),
-        ));
+        let svc = Path::new(&windir)
+            .join("ServiceProfiles")
+            .join("LocalService");
+        for (n, app) in [
+            ("5-裏方(SYSTEM)", "remohelppro"),
+            ("5-裏方(SYSTEM)-常駐", "remohelppro-agent"),
+            ("5-裏方(SYSTEM)-ワンタイム", "remohelppro-support"),
+        ] {
+            v.push((
+                n.to_owned(),
+                sys.join("AppData").join("Roaming").join(app).join("log"),
+            ));
+        }
+        for (n, app) in [
+            ("6-サービス", "remohelppro"),
+            ("6-サービス-常駐", "remohelppro-agent"),
+            ("6-サービス-ワンタイム", "remohelppro-support"),
+        ] {
+            v.push((
+                n.to_owned(),
+                svc.join("AppData").join("Roaming").join(app).join("log"),
+            ));
+        }
         v
     }
 
@@ -320,6 +334,38 @@ mod windows_impl {
         }
     }
 
+    /// ZIP に入れる中身の合計の上限（圧縮前）。サーバーの上限 50MB より小さくする。
+    const MAX_TOTAL_BYTES: u64 = 120 * 1024 * 1024;
+
+    /// フォルダの中の .log / .txt を、下のフォルダ（3段まで）も含めて拾う。
+    /// ⚠ ログだけ。設定や鍵を巻き込まない。⚠ 新しい物から先に入れる（上限で切れても新しい分が残る）。
+    fn collect_files(dir: &Path, rel: &str, depth: u32, out: &mut Vec<(String, PathBuf)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut here: Vec<(std::time::SystemTime, String, PathBuf)> = Vec::new();
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            if p.is_dir() {
+                if depth < 3 {
+                    collect_files(&p, &r, depth + 1, out);
+                }
+                continue;
+            }
+            // ⚠ 古い記録は自動で .zip に固められている（log\cm にもあった）。それも入れる。
+            if !name.ends_with(".log") && !name.ends_with(".txt") && !name.ends_with(".zip") {
+                continue;
+            }
+            let t = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            here.push((t, r, p));
+        }
+        here.sort_by(|a, b| b.0.cmp(&a.0));
+        out.extend(here.into_iter().map(|(_, r, p)| (r, p)));
+    }
+
     /// 集めて1つの ZIP（メモリ上）にまとめる。読めない物は飛ばす。
     fn build_zip(user: &UserDirs) -> (Vec<u8>, String) {
         let elevated = is_elevated();
@@ -332,24 +378,37 @@ mod windows_impl {
         let _ = zip.start_file("0-この端末.txt", opts);
         let _ = zip.write_all(note.as_bytes());
 
+        // 🔴🔴 **下のフォルダまで集める**（2026-11-13）。
+        //   ⚠ 以前は log の**直下**だけを見ていた。接続の記録は
+        //     log\server・log\cm・log\portable-service など**下のフォルダ**にある
+        //     （記録: remohelppro-logs-live-in-subfolders）。＝肝心の記録が入っていなかった。
+        //   ⚠ 全体の大きさに上限を置く（サーバーは 50MB まで）。超えた分は飛ばして、
+        //     飛ばしたことを 0-この端末.txt の後ろに書く。
+        let mut total: u64 = 0;
+        let mut skipped: Vec<String> = Vec::new();
         for (label, dir) in log_sources(user) {
-            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-            for e in rd.flatten() {
-                let p = e.path();
-                if !p.is_file() {
+            let mut files: Vec<(String, PathBuf)> = Vec::new();
+            collect_files(&dir, "", 0, &mut files);
+            for (rel, p) in files {
+                let Ok(data) = std::fs::read(&p) else {
+                    skipped.push(format!("{label}/{rel}（読めない）"));
+                    continue;
+                };
+                if total + data.len() as u64 > MAX_TOTAL_BYTES {
+                    skipped.push(format!("{label}/{rel}（大きさの上限）"));
                     continue;
                 }
-                let name = e.file_name().to_string_lossy().to_string();
-                // ⚠ ログだけ。設定や鍵を巻き込まない。
-                if !name.ends_with(".log") && !name.ends_with(".txt") {
+                if zip.start_file(format!("{label}/{rel}"), opts).is_err() {
                     continue;
                 }
-                let Ok(data) = std::fs::read(&p) else { continue };
-                if zip.start_file(format!("{label}/{name}"), opts).is_err() {
-                    continue;
-                }
+                total += data.len() as u64;
                 let _ = zip.write_all(&data);
             }
+        }
+        if !skipped.is_empty() {
+            let _ = zip.start_file("0-入れられなかった物.txt", opts);
+            let _ = zip.write_all(skipped.join("
+").as_bytes());
         }
         let cursor = zip.finish().unwrap_or_else(|_| std::io::Cursor::new(Vec::new()));
         (cursor.into_inner(), note)
