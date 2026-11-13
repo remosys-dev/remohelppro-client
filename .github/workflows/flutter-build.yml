@@ -1520,7 +1520,19 @@ jobs:
           #   🔴 お客様の Mac に本家 RustDesk が入っていると**識別子が衝突**し、
           #     画面収録などの許可が混ざる・どちらが起動するか定まらない、といった
           #     追いにくい不具合になる。当社の識別子に変える。
-          sed -i -e 's/com\.carriez\.rustdesk/jp.remohelppro.desktop/g' flutter/macos/Runner.xcodeproj/project.pbxproj
+          # 🔴🔴 相談員版は**別の識別子**にする（2026-11-13 社長の Mac で発生）。
+          #   ⚠ お客様版と相談員版が同じ jp.remohelppro.desktop・同じ呼び出し名だった。
+          #     相談員の画面から「接続」を押すと、macOS が**お客様版を呼び出し**、
+          #     「接続コードを入力」の画面が出ていた（入力は求めていないのに出るだけ）。
+          #   ★ 相談員版 = jp.remohelppro.operator（Android と同じ名前）。
+          #     お客様版は今までどおり（画面収録の許可を取り直させないため）。
+          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            RL_MAC_BUNDLE_ID="jp.remohelppro.desktop"
+          else
+            RL_MAC_BUNDLE_ID="jp.remohelppro.operator"
+          fi
+          echo "RL: Mac bundle identifier = ${RL_MAC_BUNDLE_ID}"
+          sed -i -e "s/com\.carriez\.rustdesk/${RL_MAC_BUNDLE_ID}/g" flutter/macos/Runner.xcodeproj/project.pbxproj
           echo "--- bundle identifier after patch ---"
           grep -n 'PRODUCT_BUNDLE_IDENTIFIER' flutter/macos/Runner.xcodeproj/project.pbxproj | head -5
           # 🔴🔴 版の数字を焼き込む（2026-10-01 社長の実機で判明）。
@@ -1629,11 +1641,31 @@ jobs:
           #     他社の RustDesk が入っていれば**そちらが別会社のサーバーへ繋ぎに行く**。
           #     Windows で実際に起きて直した不具合と同じもの。
           #   ★焼き込めていなければ、黙って出さずに**止める**。
+          # 🔴🔴 お客様版は remohelppro:// を**受けない**（2026-11-13）。
+          #   ⚠ 相談員の Mac に両方あると、相談員の「接続」でお客様版が起動し、
+          #     コード入力の画面が出ていた。お客様版は Mac で呼び出し名を使わない
+          #     （お客様はアプリを開いてコードを入れる。呼び出し名を使うのは Android だけ）。
+          if [ "${{ inputs.support_show_window }}" = "true" ]; then
+            /usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$PLIST" || true
+            if /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$PLIST" >/dev/null 2>&1; then
+              echo "::error::お客様版から呼び出し名を外せませんでした。中止します"; exit 1
+            fi
+            echo "RL: customer build: URL scheme removed"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST"
+          else
+            # 相談員版：表示名で見分けられるようにする。
+            OPLABEL="${RL_APP_LABEL_PREFIX:-}REMOHELP PRO 相談員"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $OPLABEL" "$PLIST"
+            ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST")
+            if [ "$ID" != "jp.remohelppro.operator" ]; then
+              echo "::error::相談員版の識別子が jp.remohelppro.operator ではありません（${ID}）。中止します"; exit 1
+            fi
           SCHEME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" "$PLIST" 2>/dev/null || echo "")
           echo "CFBundleURLSchemes:0 = ${SCHEME}"
           if [ "$SCHEME" != "remohelppro" ]; then
             echo "::error::URLスキームが remohelppro ではありません（${SCHEME}）。中止します"
             exit 1
+          fi
           fi
           ls -la "$REL"
 
