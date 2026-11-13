@@ -60,6 +60,14 @@ final List<Map<String, Object?>> _queue = <Map<String, Object?>>[];
 bool _sending = false;
 DateTime? _startedAt;
 
+/// 🔴 接続の窓（cm）の行を、main がサーバーへ転送するための読み位置（2026-11-13）。
+///   ⚠ cm は短ID とトークンを知らないので、自分ではサーバーへ送れない
+///     （2026-09-04 実測で cm の行はサーバーに 0 行）。
+///   ★ 同じ記録ファイルに cm も書いているので、main が後から読んで送る。
+///     ⚠ トークンをファイルへ書かない（お客様のPCに秘密を残さない）ための形。
+int? _peerOffset;
+Timer? _peerTimer;
+
 /// このプロセスが何者かを名乗る（`main` / `cm` / `resident` など）。
 ///
 /// ⚠ 1本のアプリは**プロセスを2つ以上持つ**（画面の窓＋接続の窓）。
@@ -76,6 +84,7 @@ void rlTraceSetRole(String role) {
 void rlTraceBind({required String shortId, String? custToken}) {
   _shortId = shortId.trim().toUpperCase();
   _custToken = custToken;
+  _startPeerForward();
   _kick();
 }
 
@@ -182,10 +191,75 @@ File? _ensureFile() {
       }
     } catch (_) {}
     _file = f;
+    // 🔴 転送はこのプロセスが動き出した後の行だけ（前回までの行を送り直さない）。
+    try {
+      _peerOffset ??= f.existsSync() ? f.lengthSync() : 0;
+    } catch (_) {
+      _peerOffset ??= 0;
+    }
   } catch (_) {
     _file = null;
   }
   return _file;
+}
+
+/// main だけが、cm の行を拾ってサーバーへ送る（[_peerOffset] の説明）。
+void _startPeerForward() {
+  try {
+    if (_role != 'main' || _peerTimer != null) return;
+    _ensureFile();
+    _peerTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _forwardPeerLines();
+    });
+  } catch (_) {}
+}
+
+void _forwardPeerLines() {
+  try {
+    final f = _file;
+    if (f == null || !f.existsSync()) return;
+    final len = f.lengthSync();
+    var off = _peerOffset ?? 0;
+    // 大きくなって1世代退避された＝新しいファイル。頭から読む。
+    if (len < off) off = 0;
+    if (len == off) return;
+    final want = (len - off) > 256 * 1024 ? 256 * 1024 : (len - off);
+    final raf = f.openSync(mode: FileMode.read);
+    List<int> bytes;
+    try {
+      raf.setPositionSync(off);
+      bytes = raf.readSync(want);
+    } finally {
+      raf.closeSync();
+    }
+    // ⚠ 書きかけの最後の行は次回に回す（改行までだけ読む）。
+    final lastNl = bytes.lastIndexOf(10);
+    if (lastNl < 0) {
+      // 改行が無いまま上限まで来た＝壊れた長い行。読み飛ばす。
+      if (want >= 256 * 1024) _peerOffset = off + want;
+      return;
+    }
+    _peerOffset = off + lastNl + 1;
+    final text = utf8.decode(bytes.sublist(0, lastNl), allowMalformed: true);
+    for (final line in const LineSplitter().convert(text)) {
+      if (line.isEmpty) continue;
+      Object? rec;
+      try {
+        rec = jsonDecode(line);
+      } catch (_) {
+        continue; // 長すぎて切った行など。送らない。
+      }
+      if (rec is! Map) continue;
+      final role = rec['role'];
+      // ⚠ 送るのは cm の行だけ。⚠ app_start は起動の引数を含むので送らない。
+      if (role is! String || !role.startsWith('cm')) continue;
+      if (rec['pid'] == pid) continue;
+      if (rec['ev'] == 'app_start') continue;
+      _enqueue(Map<String, Object?>.from(rec));
+    }
+  } catch (_) {
+    // ⚠ 転送の失敗でアプリを止めない。
+  }
 }
 
 void _writeLine(Map<String, Object?> rec) {
