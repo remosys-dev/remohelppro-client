@@ -489,6 +489,16 @@ pub enum Data {
     /// 上の結果。⚠ 成否を捨てない（捨てると相談員に嘘の成功が出る）。
     #[cfg(windows)]
     BlockInputResult((bool, String)),
+    /// 🔴 接続が**なぜ**切れたかを、接続の窓（cm）へ伝える（2026-11-13）。
+    ///
+    ///   ⚠ 2026-11-13 hanuri：お客様の側がつながって約6秒で自分から切る、を
+    ///     約70回繰り返した。⚠ 理由は本体の記録にしか無く、その記録は
+    ///     ワンタイム版が終わるときに消える（「何も残さない」のご指示）。
+    ///     ＝ **原因が永久に分からなかった。**
+    ///   ★ `Close` の直前にこれを送る。cm は記録（rl-trace）へ書き、
+    ///     main がサーバーへ転送する（remohelppro_trace.dart）。
+    ///   ⚠ 中身は `on_close` の reason（英語の短い文）だけ。秘密は入らない。
+    RlCloseReason(String),
 }
 
 #[tokio::main(flavor = "current_thread")]

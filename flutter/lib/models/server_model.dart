@@ -1013,6 +1013,16 @@ class ServerModel with ChangeNotifier {
         rlKirokuDisconnected(DateTime.now().difference(at));
       }
       final close = (evt['close'] as String) == 'true';
+      // 🔴 切れた理由を記録へ（2026-11-13・hanuri で約6秒ごとに切れた件）。
+      //   ⚠ 理由は本体の記録にしか無く、ワンタイム版は終わると記録ごと消える。
+      //   ★ ここで rl-trace に書けば、main がサーバーへ転送する
+      //     （remohelppro_trace.dart の「cm の行を main が送る」）。
+      rlTrace('cm_conn_closed', {
+        'id': id,
+        'close': close,
+        'reason': (evt['reason'] as String?) ?? '',
+        'secs': at == null ? null : DateTime.now().difference(at).inSeconds,
+      });
       if (_clients.any((c) => c.id == id)) {
         final index = _clients.indexWhere((client) => client.id == id);
         if (index >= 0) {

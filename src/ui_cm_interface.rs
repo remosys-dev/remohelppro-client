@@ -173,6 +173,18 @@ struct IpcTaskRunner<T: InvokeUiCM> {
 
 lazy_static::lazy_static! {
     static ref CLIENTS: RwLock<HashMap<i32, Client>> = Default::default();
+    /// 🔴 接続ごとの「切れた理由」（2026-11-13・ipc.rs の RlCloseReason）。
+    ///   画面へ「切れた」と知らせるときに取り出して一緒に渡す（flutter.rs）。
+    static ref RL_CLOSE_REASONS: std::sync::Mutex<HashMap<i32, String>> = Default::default();
+}
+
+/// 切れた理由を取り出す（一度だけ）。無ければ空。
+pub fn rl_take_close_reason(id: i32) -> String {
+    RL_CLOSE_REASONS
+        .lock()
+        .ok()
+        .and_then(|mut m| m.remove(&id))
+        .unwrap_or_default()
 }
 
 static CLICK_TIME: AtomicI64 = AtomicI64::new(0);
@@ -603,6 +615,16 @@ impl<T: InvokeUiCM> IpcTaskRunner<T> {
                                 }
                                 Data::ChatMessage { text } => {
                                     self.cm.new_message(self.conn_id, text);
+                                }
+                                Data::RlCloseReason(r) => {
+                                    log::info!("RL cm: connection {} close reason: {}", self.conn_id, r);
+                                    if let Ok(mut m) = RL_CLOSE_REASONS.lock() {
+                                        // ⚠ 増え続けないように。古い分は理由が残らないだけ。
+                                        if m.len() > 64 {
+                                            m.clear();
+                                        }
+                                        m.insert(self.conn_id, r);
+                                    }
                                 }
                                 Data::RemoteDrawing { on } => {
                                     // 相談員が画面に印をつけ始めた／やめた。

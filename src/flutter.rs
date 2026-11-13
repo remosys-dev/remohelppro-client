@@ -1521,9 +1521,18 @@ pub mod connection_manager {
         }
 
         fn remove_connection(&self, id: i32, close: bool) {
+            // 🔴 切れた理由も渡す（2026-11-13）。画面側は記録に残すだけ。
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            let reason = crate::ui_cm_interface::rl_take_close_reason(id);
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let reason = String::new();
             self.push_event(
                 "on_client_remove",
-                &[("id", &id.to_string()), ("close", &close.to_string())],
+                &[
+                    ("id", &id.to_string()),
+                    ("close", &close.to_string()),
+                    ("reason", &reason),
+                ],
             );
         }
 

@@ -4993,6 +4993,11 @@ impl Connection {
         };
         #[cfg(any(target_os = "android", target_os = "ios"))]
         let data = ipc::Data::Close;
+        // 🔴 切れた理由を cm へ先に渡す（2026-11-13・ipc.rs の RlCloseReason）。
+        //   ⚠ 失敗しても止めない。理由が届かないだけで、閉じ方は今までどおり。
+        self.tx_to_cm
+            .send(ipc::Data::RlCloseReason(reason.chars().take(200).collect()))
+            .ok();
         self.tx_to_cm.send(data).ok();
         self.port_forward_socket.take();
 
