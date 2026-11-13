@@ -176,8 +176,7 @@ mod windows_impl {
         }
         // 🔴 裏方（SYSTEM / サービス）の記録は、3製品とも集める（2026-11-13）。
         //   ⚠ 以前は相談員版（remohelppro）の分しか見ていなかった。
-        //     常駐の本体の記録（ServiceProfiles\...
-emohelppro-agent\log）が
+        //     常駐の本体の記録（ServiceProfiles の remohelppro-agent の log）が
         //     まるごと抜けていた（11/06 に判明）。
         let sys = Path::new(&windir).join("System32").join("config").join("systemprofile");
         let svc = Path::new(&windir)
@@ -383,7 +382,7 @@ emohelppro-agent\log）が
         //     log\server・log\cm・log\portable-service など**下のフォルダ**にある
         //     （記録: remohelppro-logs-live-in-subfolders）。＝肝心の記録が入っていなかった。
         //   ⚠ 全体の大きさに上限を置く（サーバーは 50MB まで）。超えた分は飛ばして、
-        //     飛ばしたことを 0-この端末.txt の後ろに書く。
+        //     飛ばした物は 0-入れられなかった物.txt に書く。
         let mut total: u64 = 0;
         let mut skipped: Vec<String> = Vec::new();
         for (label, dir) in log_sources(user) {
@@ -407,8 +406,7 @@ emohelppro-agent\log）が
         }
         if !skipped.is_empty() {
             let _ = zip.start_file("0-入れられなかった物.txt", opts);
-            let _ = zip.write_all(skipped.join("
-").as_bytes());
+            let _ = zip.write_all(skipped.join("\r\n").as_bytes());
         }
         let cursor = zip.finish().unwrap_or_else(|_| std::io::Cursor::new(Vec::new()));
         (cursor.into_inner(), note)
