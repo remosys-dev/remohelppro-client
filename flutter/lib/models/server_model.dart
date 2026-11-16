@@ -31,10 +31,6 @@ const kUseTemporaryPassword = "use-temporary-password";
 const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
 
-/// 一回限りのお客様アプリ：相談員がいなくなってから本体を終えるまでの目盛り
-/// （0.5秒ごと）。600 = 5分。途切れからの復帰を待つ安全網（2026-11-17）。
-const int _kRlMainIdleExitTicks = 600;
-
 class ServerModel with ChangeNotifier {
   bool _isStart = false; // Android MainService status
   bool _mediaOk = false;
@@ -316,13 +312,7 @@ class ServerModel with ChangeNotifier {
           //
           //   30秒あれば繋ぎ直せる。認証コードは変わらないので、
           //   その間に戻れるのは**同じ相談員だけ**。緩めても危険は増えない。
-          // 🔴 30秒 → 5分 に延ばした（2026-11-17、穴の一覧 #1）。
-          //   ⚠ 30秒では Wi-Fi の切り替え・ルーターの再起動・相談員PCの再起動から
-          //     戻れず、お客様は最初からやり直しになっていた。
-          //   ★ 普通の終わり方（相談員が窓を閉じる・管理画面から終了）は、
-          //     サーバーの終了をここより先に見て（4秒ごと）終わるので遅くならない。
-          //     ここは「サーバーに終了が届かなかった」ときの安全網だけ。
-          if (_zeroClientLengthCounter++ >= _kRlMainIdleExitTicks) {
+          if (_zeroClientLengthCounter++ >= 60) {
             // 🔴 終わったことをサーバーへ伝えてから落ちる。
             //   伝えないと、当社の画面はいつまでも「接続中」と出る。
             //   お客様のアプリは既に消えているのに相談員には繋がって見える
@@ -355,11 +345,6 @@ class ServerModel with ChangeNotifier {
             exit(0); // メインプロセス全終了 → ランナーが後始末(C)
           }
         } else {
-          if (_zeroClientLengthCounter > 0) {
-            // 途切れから戻れた。何秒で戻ったかを残す（延ばした効果を測る）。
-            rlTrace('main_zero_clients_recovered',
-                {'secs': _zeroClientLengthCounter ~/ 2});
-          }
           _zeroClientLengthCounter = 0;
         }
       }
