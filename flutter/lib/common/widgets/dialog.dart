@@ -2207,13 +2207,15 @@ Future<bool> confirmCloseRemoteSession(OverlayDialogManager dialogManager,
 ///   （2026-08-01 ユーザー指示で追加）。待てばいいのか諦めるのかが分からず、
 ///   毎回コンソールに戻って確かめることになっていた。
 ///
-/// 返す値: ('waiting' | 'expired' | 'ended', 残り秒)
+/// 返す値: ('alive' | 'waiting' | 'expired' | 'ended' | 'unknown', 残り秒)
+///   unknown … 当社サーバーに尋ねられなかった（2026-11-17 追加）
 ///   waiting … 戻ってくる見込みがある（繋ぎ直しを続ける）
 ///   expired … 待つ時間が尽きた（相談員側から終わらせる）
 ///   ended   … 既に終わっている
 ///
-/// ⚠ 通信できないときは **waiting** を返す。相談員側の回線が一瞬切れただけで
-///   サポートを終わらせてしまわないため。迷ったら終わらせない。
+/// ⚠ 通信できないときは **unknown** を返す（2026-11-17 までは waiting）。
+///   相談員側の回線が一瞬切れただけでサポートを終わらせないため、
+///   呼び出し側は unknown でも終わらせない。ただし「再起動中」とは言わない。
 Future<(String, int)> rlWatchReconnect(FFI ffi) async {
   try {
     final id = ffi.id;
@@ -2226,7 +2228,12 @@ Future<(String, int)> rlWatchReconnect(FFI ffi) async {
           body: jsonEncode({'rustdeskId': id, 'token': token}),
         )
         .timeout(const Duration(seconds: 5));
-    if (res.statusCode != 200) return ('waiting', 60);
+    // 🔴 答えが得られないときは 'unknown'（2026-11-17、穴の一覧 #3）。
+    //   ⚠ 以前は 'waiting' を返していた。当社サーバーに届かないだけで
+    //     「再起動後の再接続を実行中です」と誤って出し、5秒ごとの再接続が永久に続いた。
+    //   ★ 終わらせはしない（相談員側の回線の一瞬の切れで終わらせない）。
+    //     呼び出し側が正直に出し、上限を設ける。
+    if (res.statusCode != 200) return ('unknown', 0);
     final j = jsonDecode(res.body) as Map;
     final state = (j['state'] as String?) ?? 'ended';
     final remain = (j['remainingSec'] as num?)?.toInt() ?? 0;
@@ -2234,7 +2241,7 @@ Future<(String, int)> rlWatchReconnect(FFI ffi) async {
     return (state, remain);
   } catch (e) {
     debugPrint('RL reconnect-watch: 尋ねられなかった $e');
-    return ('waiting', 60);
+    return ('unknown', 0);
   }
 }
 

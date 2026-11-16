@@ -119,6 +119,9 @@ class FfiModel with ChangeNotifier {
   ///   ★本当に不安定なときだけ出す。数回黙って試して、それでも駄目なら出す。
   ///   ⚠ 繋がったら 0 に戻す（`connection_ready`）。
   int _rlQuietTries = 0;
+
+  /// 当社サーバーに状態を尋ねられなかった回数（続けて）。上限で自動の繋ぎ直しをやめる。
+  int _rlUnknownTries = 0;
   CachedPeerData cachedPeerData = CachedPeerData();
   PeerInfo _pi = PeerInfo();
   Rect? _rect;
@@ -351,6 +354,7 @@ class FfiModel with ChangeNotifier {
         handlePlatformAdditions(evt, sessionId, peerId);
       } else if (name == 'connection_ready') {
         _rlQuietTries = 0; // 繋がったので数え直す（黙って試した回数）
+        _rlUnknownTries = 0;
         setConnectionType(peerId, evt['secure'] == 'true',
             evt['direct'] == 'true', evt['stream_type'] ?? '');
       } else if (name == 'switch_display') {
@@ -976,6 +980,7 @@ class FfiModel with ChangeNotifier {
           // ended/expired … もう終わっている。どちらもこちらの案内に任せる
           if (st == 'waiting' ||
               st == 'alive' ||
+              st == 'unknown' ||
               st == 'ended' ||
               st == 'expired') {
             showMsgBox(sessionId, type, title, text, link, true, dialogManager);
@@ -1156,6 +1161,34 @@ class FfiModel with ChangeNotifier {
         parent.target != null) {
       final ffi = parent.target!;
       final (state, remainSec) = await rlWatchReconnect(ffi);
+      // 🔴 当社サーバーに尋ねられないとき（2026-11-17、穴の一覧 #3）。
+      //   ⚠ 以前は「再起動後の再接続を実行中です」と出して、5秒ごとに永久に続けていた。
+      //   ★ 正直に出して繋ぎ直しは続ける。ただし約10分（120回）で自動の繋ぎ直しをやめ、
+      //     通常のエラー表示（再試行ボタンあり）に任せる。
+      if (state == 'unknown') {
+        _rlUnknownTries++;
+        if (_rlUnknownTries <= 120) {
+          if (_rlUnknownTries > 3) {
+            msgBox(
+                sessionId,
+                'custom-nook-nocancel',
+                'つなぎ直しています',
+                'お客様のパソコンとの接続が切れました。\n'
+                    '当社サーバーに状態を確認できないため、つなぎ直しを続けています。\n'
+                    'こちらのインターネット接続もご確認ください。',
+                '',
+                dialogManager);
+          }
+          _timer?.cancel();
+          _timer = Timer(const Duration(seconds: 5), () {
+            reconnect(dialogManager, sessionId, false);
+          });
+          return;
+        }
+        // 上限に達した：下の通常のエラー表示へ落とす。
+      } else {
+        _rlUnknownTries = 0;
+      }
       if (state == 'waiting') {
         // 🔴 数字を出さない（2026-09-03 ご指示）。
         //

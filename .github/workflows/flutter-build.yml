@@ -1046,7 +1046,8 @@ jobs:
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
-        if: env.UPLOAD_ARTIFACT == 'true'
+        # 試験版（dev-*）は公開ページに置かず、成果物だけにする（2026-11-17、Mac と同じ扱い）
+        if: env.UPLOAD_ARTIFACT == 'true' && !startsWith(env.TAG_NAME, 'dev-')
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
@@ -1199,7 +1200,8 @@ jobs:
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
-        if: env.UPLOAD_ARTIFACT == 'true'
+        # 試験版（dev-*）は公開ページに置かず、成果物だけにする（2026-11-17、Mac と同じ扱い）
+        if: env.UPLOAD_ARTIFACT == 'true' && !startsWith(env.TAG_NAME, 'dev-')
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
