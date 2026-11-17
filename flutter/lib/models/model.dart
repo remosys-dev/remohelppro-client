@@ -1163,29 +1163,27 @@ class FfiModel with ChangeNotifier {
       final (state, remainSec) = await rlWatchReconnect(ffi);
       // 🔴 当社サーバーに尋ねられないとき（2026-11-17、穴の一覧 #3）。
       //   ⚠ 以前は「再起動後の再接続を実行中です」と出して、5秒ごとに永久に続けていた。
-      //   ★ 正直に出して繋ぎ直しは続ける。ただし約10分（120回）で自動の繋ぎ直しをやめ、
-      //     通常のエラー表示（再試行ボタンあり）に任せる。
+      //   ★ 正直に出して、繋ぎ直しは**やめない**（社長方針：接続できなくなることが一番困る）。
+      //     当社サーバーだけ落ちていてもお客様と中継は生きていることがある（11/18 試験で、
+      //     サーバー不通のまま7秒で繋がり直した）。約10分（120回）を過ぎたら30秒おきに緩める。
       if (state == 'unknown') {
         _rlUnknownTries++;
-        if (_rlUnknownTries <= 120) {
-          if (_rlUnknownTries > 3) {
-            msgBox(
-                sessionId,
-                'custom-nook-nocancel',
-                'つなぎ直しています',
-                'お客様のパソコンとの接続が切れました。\n'
-                    '当社サーバーに状態を確認できないため、つなぎ直しを続けています。\n'
-                    'こちらのインターネット接続もご確認ください。',
-                '',
-                dialogManager);
-          }
-          _timer?.cancel();
-          _timer = Timer(const Duration(seconds: 5), () {
-            reconnect(dialogManager, sessionId, false);
-          });
-          return;
+        if (_rlUnknownTries > 3) {
+          msgBox(
+              sessionId,
+              'custom-nook-nocancel',
+              'つなぎ直しています',
+              'お客様のパソコンとの接続が切れました。\n'
+                  '当社サーバーに状態を確認できないため、つなぎ直しを続けています。\n'
+                  'こちらのインターネット接続もご確認ください。',
+              '',
+              dialogManager);
         }
-        // 上限に達した：下の通常のエラー表示へ落とす。
+        _timer?.cancel();
+        _timer = Timer(Duration(seconds: _rlUnknownTries > 120 ? 30 : 5), () {
+          reconnect(dialogManager, sessionId, false);
+        });
+        return;
       } else {
         _rlUnknownTries = 0;
       }
