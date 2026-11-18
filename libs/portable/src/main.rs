@@ -147,6 +147,7 @@ fn write_meta(dir: &Path, ts: u64) {
 ///    原因に辿り着くまで3日かかった。**入らないなら、入らないと言う。**
 #[cfg(windows)]
 fn notify_extract_failed(detail: &str) {
+    let _rl_ping = rl_launch_ping("extract_failed", detail); // 止まった場所をサーバーへ（2026-11-18）
     use std::os::windows::ffi::OsStrExt;
     fn wide(s: &str) -> Vec<u16> {
         std::ffi::OsStr::new(s)
@@ -179,6 +180,7 @@ fn notify_extract_failed(detail: &str) {
             winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
         );
     }
+    rl_launch_ping_wait(_rl_ping);
 }
 
 /// 中の本体を起動できなかったことを、お客様に知らせる（2026-11-05）。
@@ -186,6 +188,7 @@ fn notify_extract_failed(detail: &str) {
 ///   ⚠ 他社のお客様にも出るので、題名に製品名を入れない。
 #[cfg(windows)]
 fn rl_show_start_failed(e: &std::io::Error) {
+    let _rl_ping = rl_launch_ping("spawn_failed", &e.to_string()); // 止まった場所をサーバーへ（2026-11-18）
     use std::os::windows::ffi::OsStrExt;
     let wide = |s: &str| -> Vec<u16> {
         std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
@@ -205,6 +208,7 @@ fn rl_show_start_failed(e: &std::io::Error) {
             winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONERROR,
         );
     }
+    rl_launch_ping_wait(_rl_ping);
 }
 
 /// `strict` = インストールとして起動された経路か。
@@ -798,7 +802,21 @@ fn execute(path: PathBuf, args: Vec<String>, _ui: bool) {
                 }
             }
 
-            let _ = child.wait(); // 子(REMOHELP PRO.exe)が終了するまでブロック
+            let rl_t0 = std::time::Instant::now();
+            let rl_status = child.wait(); // 子(REMOHELP PRO.exe)が終了するまでブロック
+            // 🔴 起動してすぐ終わった（2分以内）なら、終わり方をサーバーへ（2026-11-18）。
+            //   ⚠ 起動直後に落ちる・対策ソフトに止められる、が見えていなかった。
+            #[cfg(windows)]
+            {
+                let secs = rl_t0.elapsed().as_secs();
+                if secs < 120 {
+                    let code = match &rl_status {
+                        Ok(st) => format!("code={:?} secs={}", st.code(), secs),
+                        Err(e) => format!("wait_err={} secs={}", e, secs),
+                    };
+                    rl_launch_ping_wait(rl_launch_ping("child_exit_early", &code));
+                }
+            }
             // ① 展開ディレクトリ削除(子終了後はハンドル解放済み)。
             //    穴C対策: DLLのアンロード遅延でロックされることがあるので数回リトライ。
             //    それでも残れば ② の切離しcmdが後追いで確実に消す。
@@ -1168,6 +1186,7 @@ fn kill_leftover_onetime() -> (usize, usize) {
 /// ⚠ 黙って壊れた起動をするより、待っていただく方がよい。
 #[cfg(windows)]
 fn notify_leftover_busy() {
+    let _rl_ping = rl_launch_ping("leftover_busy", ""); // 止まった場所をサーバーへ（2026-11-18）
     use std::os::windows::ffi::OsStrExt;
     fn wide(s: &str) -> Vec<u16> {
         std::ffi::OsStr::new(s)
@@ -1189,10 +1208,12 @@ fn notify_leftover_busy() {
             winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONINFORMATION,
         );
     }
+    rl_launch_ping_wait(_rl_ping);
 }
 
 #[cfg(windows)]
 fn notify_already_running() {
+    let _rl_ping = rl_launch_ping("already_running", ""); // 止まった場所をサーバーへ（2026-11-18）
     use std::os::windows::ffi::OsStrExt;
     fn wide(s: &str) -> Vec<u16> {
         std::ffi::OsStr::new(s)
@@ -1231,6 +1252,7 @@ fn notify_already_running() {
             winapi::um::winuser::MB_OK | winapi::um::winuser::MB_ICONINFORMATION,
         );
     }
+    rl_launch_ping_wait(_rl_ping);
 }
 
 /// ■ UAC を「署名済みのこのファイル」から1回だけ緩める（2026-09-02）
@@ -1496,6 +1518,110 @@ fn rl_uac_relax(args: &[String]) {
     println!("RL uac: 戻す予定 {}", if ok2 { "置きました" } else { "置けません" });
 }
 
+/// 🔴 「起動した／ここで止まった」をサーバーへ一言だけ知らせる（2026-11-18、接続できない原因①）。
+///
+///   ⚠ 本番の記録で、**ダウンロードはされたのにアプリが一度もサーバーへ来ない**お客様が
+///     14日で4件あった（1件はそのまま諦めた）。開いていないのか、開いて止まったのかが
+///     まったく分からなかった。
+///   ★ 受付の短い番号（shortId）だけを送る。合言葉（ファイル名の後半）は送らない。
+///   ⚠ 失敗しても何もしない。5秒で諦める。お客様の操作は一切止めない。
+///   ⚠ 合言葉の入ったファイル名で起動したときだけ送る（手入力の起動では送らない）。
+#[cfg(windows)]
+const RL_LAUNCH_PING_HOST: &str = "svr.remohelppro.jp";
+
+#[cfg(windows)]
+fn rl_json_esc(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars().take(300) {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            c if (c as u32) < 0x20 => o.push(' '),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+#[cfg(windows)]
+fn rl_launch_ping(stage: &str, detail: &str) -> Option<std::thread::JoinHandle<()>> {
+    let exe = std::env::current_exe().ok()?;
+    let tok = dl_token_from_exe_name(&exe)?;
+    let short_id = tok.split('.').next()?.to_string();
+    let body = format!(
+        "{{\"shortId\":\"{}\",\"stage\":\"{}\",\"d\":\"{}\"}}",
+        short_id,
+        rl_json_esc(stage),
+        rl_json_esc(detail)
+    );
+    Some(std::thread::spawn(move || unsafe {
+        rl_winhttp_post(RL_LAUNCH_PING_HOST, "/api/customer/launch-ping", &body);
+    }))
+}
+
+/// 知らせを送り終えるのを待つ（終わる直前に呼ぶ。最長でも約15秒）。
+#[cfg(windows)]
+fn rl_launch_ping_wait(h: Option<std::thread::JoinHandle<()>>) {
+    if let Some(h) = h {
+        let _ = h.join();
+    }
+}
+
+#[cfg(windows)]
+unsafe fn rl_winhttp_post(host: &str, path: &str, body: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    use winapi::um::winhttp::*;
+    fn w(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect()
+    }
+    let agent = w("remohelppro-launcher");
+    let s = WinHttpOpen(
+        agent.as_ptr(),
+        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        std::ptr::null(),
+        std::ptr::null(),
+        0,
+    );
+    if s.is_null() {
+        return;
+    }
+    WinHttpSetTimeouts(s, 5000, 5000, 5000, 5000);
+    let h = w(host);
+    let c = WinHttpConnect(s, h.as_ptr(), INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if !c.is_null() {
+        let verb = w("POST");
+        let p = w(path);
+        let r = WinHttpOpenRequest(
+            c,
+            verb.as_ptr(),
+            p.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            WINHTTP_FLAG_SECURE,
+        );
+        if !r.is_null() {
+            let hdr = w("Content-Type: application/json\r\n");
+            let b = body.as_bytes();
+            if WinHttpSendRequest(
+                r,
+                hdr.as_ptr(),
+                u32::MAX, // ヘッダーは 0 終端（-1L）
+                b.as_ptr() as *mut _,
+                b.len() as u32,
+                b.len() as u32,
+                0,
+            ) != 0
+            {
+                WinHttpReceiveResponse(r, std::ptr::null_mut());
+            }
+            WinHttpCloseHandle(r);
+        }
+        WinHttpCloseHandle(c);
+    }
+    WinHttpCloseHandle(s);
+}
+
 fn main() {
     // 🔴 これだけは、展開も二重起動の確認もせずに、真っ先に片づける。
     //   ⚠ 本体が昇格して呼ぶ。⚠ 展開すると2つ目が動いてしまうので、
@@ -1527,9 +1653,16 @@ fn main() {
             return;
         }
     }
+    // 🔴 開かれたことを真っ先に知らせる（2026-11-18）。これが来ない＝開かれていない。
+    #[cfg(windows)]
+    let _rl_ping_start = rl_launch_ping("start", "");
     // 🔴 展開より前に見る。期限切れなら一時フォルダにも何も置かず、そのまま終わる。
     if is_onetime_expired() {
+        #[cfg(windows)]
+        let p = rl_launch_ping("expired", "");
         notify_onetime_expired();
+        #[cfg(windows)]
+        rl_launch_ping_wait(p);
         return;
     }
     // 🔴🔴 **二重に起動させない**（2026-08-28 ご指摘）。

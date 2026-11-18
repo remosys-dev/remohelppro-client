@@ -56,6 +56,9 @@ runs:
           sedi "s|https://svr[.]remohelppro[.]jp|${DEV_API}|g" libs/launcher/src/main.rs
           sedi "s|svr[.]remohelppro[.]jp|dev.remohelppro.jp|g" libs/launcher/src/main.rs
           echo "--- ランチャー ---"; grep -n 'remohelppro[.]jp' libs/launcher/src/main.rs | head -4
+          # ⚠ お客様用の起動部品（portable）も「起動した」の知らせ先を持つ（2026-11-18）。
+          sedi "s|\"svr[.]remohelppro[.]jp\"|\"dev.remohelppro.jp\"|g" libs/portable/src/main.rs
+          echo "--- 起動部品 ---"; grep -n 'RL_LAUNCH_PING_HOST: &str' libs/portable/src/main.rs | head -2
           echo "--- Dart 側の行き先 ---"; grep -n 'kRlApiBase\|kRlApiHost' "$DART_EP"
           echo "--- 穴あけ(STUN) ---"; grep -n 'STUNS_V4\|DEFAULT_ICE_SERVERS' libs/hbb_common/src/webrtc.rs src/common.rs | head -4
 
@@ -123,7 +126,7 @@ runs:
           # ⚠ 2026-10-03: 書き換える場所を増やしたとき、この一覧に足すのを忘れていた。
           #   ★書き換える sed とこの一覧は**必ず両方**に足す。
           #   ⚠ 検査が鳴ったのは正しい。止めてくれたから気づけた。
-          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc flutter/lib/remohelppro_endpoints.dart libs/hbb_common/src/webrtc.rs src/common.rs libs/launcher/src/main.rs'
+          ALLOWED='libs/hbb_common/src/config.rs build.rs libs/portable/build.rs flutter/windows/runner/Runner.rc flutter/lib/remohelppro_endpoints.dart libs/hbb_common/src/webrtc.rs src/common.rs libs/launcher/src/main.rs libs/portable/src/main.rs'
           for a in $ALLOWED; do echo "    $a"; done
           STRAY=$(grep -rl -e 'dev-rd\.remohelppro\.jp' -e 'X16EW5WI' -e 'remohelppro-dev' \
                     --include='*.rs' --include='*.rc' --include='*.dart' --include='*.toml' \
